@@ -45,7 +45,7 @@ namespace VpnGuard
         static TcpListener CzRelay;
         const int CzRelayPort = 34010;
         static uint CzWgIp, CzEthIp; static int CzWgIdx, CzEthIdx; static string CzSig = "", CzError = "";
-        static long CzPkts, CzPass, CzTcpConns, CzUdpPkts, CzBytes, CzErrors, CzTcpUp, CzTcpDown, CzUdpDown, CzUdpSendFail, CzQuicDrop, CzNetRw, CzNetMiss, CzNetBig, CzNetSendFail, CzRelayNoFlow, CzConnFail, CzFwdBig, CzFwdMax, CzNetMax, CzMssClamped; static readonly System.Diagnostics.Stopwatch CzSw = System.Diagnostics.Stopwatch.StartNew(); static int CzActive, CzConnLogged, CzSynLogged, CzTraceLeft = 400; static readonly HashSet<ulong> CzTraced = new HashSet<ulong>();
+        static long CzPkts, CzPass, CzTcpConns, CzUdpPkts, CzBytes, CzErrors, CzTcpUp, CzTcpDown, CzUdpDown, CzUdpSendFail, CzQuicDrop, CzNetRw, CzNetMiss, CzNetBig, CzNetSendFail, CzRelayNoFlow, CzConnFail, CzFwdBig, CzFwdMax, CzNetMax, CzMssClamped; static readonly System.Diagnostics.Stopwatch CzSw = System.Diagnostics.Stopwatch.StartNew(); static int CzActive, CzConnLogged, CzSynLogged, CzTraceLeft = 400, CzAb; static readonly HashSet<ulong> CzTraced = new HashSet<ulong>();
         static HashSet<uint> CzHosts = new HashSet<uint>(); static List<uint[]> CzNets = new List<uint[]>(); static string CzSetKey = "";
         static DateTime CzFwAt = DateTime.MinValue, CzCleanAt = DateTime.MinValue; static string CzFwSig = "";
 
@@ -308,6 +308,9 @@ namespace VpnGuard
             if (f == null) { Interlocked.Increment(ref CzRelayNoFlow); return; }
             c.NoDelay = true;
             var srv = new TcpClient(AddressFamily.InterNetwork) { NoDelay = true };
+            // опыт A/B (первые 60 соединений): каждое второе — через туннель VPN (с адреса туннеля), остальные — как обычно, через zapret
+            int ab = Interlocked.Increment(ref CzAb); string via = "zapret";
+            if (ab <= 60 && ab % 2 == 0) { var tip = Ipv4(UplinkName()); if (tip != null) { try { srv.Client.Bind(new IPEndPoint(IPAddress.Parse(tip), 0)); via = "VPN"; } catch { } } }
             try {
                 var ar = srv.BeginConnect(IPAddress.Parse(IpS(f.Dst)), f.DPort, null, null);
                 if (!ar.AsyncWaitHandle.WaitOne(15000)) { Interlocked.Increment(ref CzConnFail); return; }
@@ -318,8 +321,8 @@ namespace VpnGuard
                 var up = new Thread(() => { cnt[0] = CzPump(cs, ss, f, true); lock (cnt) if (first == null) first = "клиент"; try { srv.Client.Shutdown(SocketShutdown.Send); } catch { } }) { IsBackground = true }; up.Start();
                 cnt[1] = CzPump(ss, cs, f, false); lock (cnt) if (first == null) first = "сайт"; try { c.Client.Shutdown(SocketShutdown.Send); } catch { }
                 up.Join(60000);
-                if (Interlocked.Increment(ref CzConnLogged) <= 40)
-                    Log("zapret для клиентов: " + ep.Address + ":" + ep.Port + " → " + IpS(f.Dst) + ":" + f.DPort + " · к сайту " + cnt[0] + " Б, к клиенту " + cnt[1] + " Б, " + Math.Round((DateTime.Now - t0).TotalSeconds, 1) + " с, первым закрыл " + first + ", сайт подключён в " + (connMs % 100000).ToString("00000") + "мс", "INFO");
+                if (Interlocked.Increment(ref CzConnLogged) <= 80)
+                    Log("zapret для клиентов: " + ep.Address + ":" + ep.Port + " → " + IpS(f.Dst) + ":" + f.DPort + " · к сайту " + cnt[0] + " Б, к клиенту " + cnt[1] + " Б, " + Math.Round((DateTime.Now - t0).TotalSeconds, 1) + " с, первым закрыл " + first + ", путь " + via + ", сайт подключён в " + (connMs % 100000).ToString("00000") + "мс", "INFO");
             } catch { }
             finally { if (Interlocked.Decrement(ref CzActive) < 0) Interlocked.Exchange(ref CzActive, 0); try { srv.Close(); } catch { } }
         }
