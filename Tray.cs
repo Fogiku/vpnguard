@@ -28,7 +28,7 @@ namespace VpnGuard
         readonly Dictionary<int, Icon> icons = new Dictionary<int, Icon>();
         ToolStripMenuItem miState, miZapret;
         int lastWorst = -2; DateTime stamp = DateTime.MinValue; bool zapretOn;
-        static readonly string[][] Comps = { new[] { "ultra", "Туннель" }, new[] { "meduza", "MeduzaVPN" }, new[] { "amnezia", "AmneziaWG" }, new[] { "wg", "WireGuard" }, new[] { "ics", "Раздача" }, new[] { "zapret", "zapret" } };
+        static readonly string[][] Comps = { new[] { "ultra", "Туннель" }, new[] { "meduza", "MeduzaVPN" }, new[] { "amnezia", "AmneziaVPN" }, new[] { "wg", "WG-Server" }, new[] { "ics", "Раздача" }, new[] { "zapret", "zapret" } };
 
         [STAThread]
         public static void Main(string[] args)

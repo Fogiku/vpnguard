@@ -2,7 +2,7 @@
 <#
   VpnGuard — окно мониторинга и управления.
   Главная: общий статус, статистика, основные действия.
-  Вкладки Туннель / MeduzaVPN / AmneziaWG / wg_server / ICS / zapret: подробности, история, графики, управление, события.
+  Вкладки Туннель / MeduzaVPN / AmneziaVPN / WG-Server / ICS / zapret: подробности, история, графики, управление, события.
   Трафик: скорость сейчас (по счётчикам адаптеров, раз в секунду), за 2 часа и по дням.
   -Preview <png> — отрисовать окно в картинки и выйти (для проверки, без прав администратора).
   -StatusFile <json> — только с -Preview: взять состояние из этого файла.
@@ -309,8 +309,8 @@ Update-WsCfg
 $WgModulePath = Join-Path $Root 'Wg.ps1'
 if (Test-Path $WgModulePath) { . $WgModulePath }
 
-# AmneziaWG: импорт и список конфигов — прямо из окна (это только файлы в data\amnezia)
-$A = @{ splitDefaultRoute = $true; servicePrefix = 'AmneziaWGTunnel$'; active = '' }
+# AmneziaVPN: настройки модуля (путь к приложению, имя службы, адаптер)
+$A = @{ exe = ''; serviceName = 'AmneziaVPN-service'; adapterPattern = 'amnezia|tun2socks|TAP-Windows Adapter V9' }
 function Update-ACfg {
     try {
         if (Test-Path $ConfigPath) {
@@ -322,20 +322,19 @@ function Update-ACfg {
 Update-ACfg
 $AmneziaModulePath = Join-Path $Root 'Amnezia.ps1'
 if (Test-Path $AmneziaModulePath) { . $AmneziaModulePath }
-if ($Demo -and $StatusFile) { $AwgDir = Join-Path (Split-Path $StatusFile) 'amnezia' }
 
 function Get-Mode { $v = Get-Snap 'vpn'; if ($v -and $v.mode) { return "$($v.mode)" }; try { $o = Read-ConfigObject; $m = Get-CfgVal $o 'vpn.mode'; if ($m) { return "$m" } } catch { }; return 'meduza' }
-$ModeItems = @(@('meduza', 'MeduzaVPN'), @('amnezia', 'AmneziaWG'), @('dual', 'Два туннеля (с переключением)'), @('zapret', 'Без VPN — только zapret'))
+$ModeItems = @(@('meduza', 'MeduzaVPN'), @('amnezia', 'AmneziaVPN'), @('dual', 'Два туннеля (с переключением)'), @('zapret', 'Без VPN — только zapret'))
 
 function Set-ModeUi([string]$Mode) {
     $cur = Get-Mode
     if ($Mode -eq $cur) { return }
     $nm = ($ModeItems | Where-Object { $_[0] -eq $Mode })[1]
     $msg = switch ($Mode) {
-        'meduza'  { "Переключиться на MeduzaVPN?`n`nТуннель AmneziaWG будет отключён, агент запустит MeduzaVPN и подключит его." }
-        'dual'    { "Включить режим «два туннеля»?`n`nАгент держит поднятыми оба туннеля — MeduzaVPN и AmneziaWG. Трафик и раздача идут через основной (настройка «Основной туннель»), а если он перестаёт пропускать трафик — сразу переключаются на второй. Когда основной снова заработает, трафик вернётся на него.`n`nНужны: MeduzaVPN с управлением из командной строки и хотя бы один конфиг AmneziaWG." }
-        'amnezia' { "Переключиться на AmneziaWG?`n`nMeduzaVPN будет отключён и закрыт, агент подключит выбранный конфиг AmneziaWG.`nКонфиги импортируются на вкладке «AmneziaWG», сам AmneziaWG ставится на вкладке «Компоненты»." }
-        'zapret'  { "Отключить VPN?`n`nЭтот ПК будет выходить в интернет напрямую, YouTube и Discord — через zapret (он включится сам).`n`nКлиенты wg_server тоже получат интернет напрямую — без VPN и без zapret (zapret работает только для самого ПК)." }
+        'meduza'  { "Переключиться на MeduzaVPN?`n`nAmneziaVPN будет отключён, агент запустит MeduzaVPN и подключит его." }
+        'dual'    { "Включить режим «два туннеля»?`n`nАгент держит поднятыми оба туннеля — MeduzaVPN и AmneziaVPN. Трафик и раздача идут через основной (настройка «Основной туннель»), а если он перестаёт пропускать трафик — сразу переключаются на второй. Когда основной снова заработает, трафик вернётся на него.`n`nНужны: MeduzaVPN с управлением из командной строки и AmneziaVPN с включённым автоподключением." }
+        'amnezia' { "Переключиться на AmneziaVPN?`n`nMeduzaVPN будет отключён и закрыт, агент запустит AmneziaVPN (сервер выбирается в самом приложении).`nAmneziaVPN ставится на вкладке «Компоненты»." }
+        'zapret'  { "Отключить VPN?`n`nЭтот ПК будет выходить в интернет напрямую, YouTube и Discord — через zapret (он включится сам).`n`nКлиенты WG-Server тоже получат интернет напрямую — без VPN и без zapret (zapret работает только для самого ПК)." }
     }
     $ans = [Windows.Forms.MessageBox]::Show($msg, "VpnGuard — режим: $nm", 'YesNo', 'Question')
     if ($ans -ne 'Yes') { $script:ModeSig = ''; return }
@@ -1082,9 +1081,9 @@ $pages = @{}
 $navButtons = @{}
 $script:CurPage = ''
 $PageTitles = @{
-    home = 'Главная'; meduza = 'MeduzaVPN — приложение'; ultra = 'Туннель'; wg = 'WireGuard'
-    ics = 'Раздача интернета (ICS): туннель → wg_server'; zapret = 'zapret-discord-youtube'; traffic = 'Трафик'
-    log = 'Журнал'; settings = 'Настройки'; diag = 'Диагностика'; amnezia = 'AmneziaWG — альтернатива MeduzaVPN'; software = 'Компоненты — установка и обновление'
+    home = 'Главная'; meduza = 'MeduzaVPN — приложение'; ultra = 'Туннель'; wg = 'WG-Server'
+    ics = 'Раздача интернета (ICS): туннель → WG-Server'; zapret = 'zapret-discord-youtube'; traffic = 'Трафик'
+    log = 'Журнал'; settings = 'Настройки'; diag = 'Диагностика'; amnezia = 'AmneziaVPN — альтернатива MeduzaVPN'; software = 'Компоненты — установка и обновление'
 }
 
 function Show-Page([string]$Name) {
@@ -1115,8 +1114,8 @@ function Show-Page([string]$Name) {
 }
 
 $NavItems = @(
-    @('home', 'Главная', ''), @('ultra', 'Туннель', 'ultra'), @('meduza', 'MeduzaVPN', 'meduza'), @('amnezia', 'AmneziaWG', 'amnezia'),
-    @('wg', 'WireGuard', 'wg'), @('ics', 'Раздача ICS', 'ics'), @('zapret', 'zapret', 'zapret'), @('traffic', 'Трафик', ''), @('-'),
+    @('home', 'Главная', ''), @('ultra', 'Туннель', 'ultra'), @('meduza', 'MeduzaVPN', 'meduza'), @('amnezia', 'AmneziaVPN', 'amnezia'),
+    @('wg', 'WG-Server', 'wg'), @('ics', 'Раздача ICS', 'ics'), @('zapret', 'zapret', 'zapret'), @('traffic', 'Трафик', ''), @('-'),
     @('software', 'Компоненты', ''), @('log', 'Журнал', ''), @('settings', 'Настройки', ''), @('diag', 'Диагностика', '')
 )
 foreach ($it in $NavItems) {
@@ -1227,11 +1226,11 @@ $hzBtn = New-Btn 'Включить zapret' { Switch-Zapret }
 $heroBtns.Controls.AddRange(@(
     (New-Btn 'Переподключить туннель' { Send-Cmd 'reconnect' 'переподключение туннеля' }),
     (New-Btn 'Восстановить раздачу' { Send-Cmd 'reapply-ics' 'восстановление раздачи' }),
-    (New-Btn 'Перезапустить wg_server' { Send-Cmd 'restart-wg' 'перезапуск wg_server' }),
+    (New-Btn 'Перезапустить WG-Server' { Send-Cmd 'restart-wg' 'перезапуск WG-Server' }),
     $hzBtn,
     (New-Btn 'Веб-интерфейс' { Start-Process "http://localhost:$((Get-WebCfgUi).port)/" })
 ))
-# режим работы: MeduzaVPN / AmneziaWG / без VPN
+# режим работы: MeduzaVPN / AmneziaVPN / без VPN
 $modeLbl = New-Label 'Режим работы' $F.Small $Clr.Dim; $modeLbl.Anchor = 'Top,Right'
 $cbMode = New-Object Windows.Forms.ComboBox
 $cbMode.DropDownStyle = 'DropDownList'; $cbMode.Width = 250; $cbMode.BackColor = $Clr.Input; $cbMode.ForeColor = $Clr.Text; $cbMode.FlatStyle = 'Flat'; $cbMode.Anchor = 'Top,Right'
@@ -1266,7 +1265,7 @@ function Update-ModeUi {
 # плитки компонентов (клик — вкладка компонента)
 $Tiles = @{}
 $script:TileTitles = @{}
-$TileDefs = @(@('ultra', 'Туннель'), @('meduza', 'MeduzaVPN'), @('amnezia', 'AmneziaWG'), @('wg', 'WireGuard'), @('ics', 'Раздача ICS'), @('zapret', 'zapret'))
+$TileDefs = @(@('ultra', 'Туннель'), @('meduza', 'MeduzaVPN'), @('amnezia', 'AmneziaVPN'), @('wg', 'WG-Server'), @('ics', 'Раздача ICS'), @('zapret', 'zapret'))
 $tileRow = New-Row 116 $TileDefs.Count
 for ($i = 0; $i -lt $TileDefs.Count; $i++) {
     $key = $TileDefs[$i][0]
@@ -1294,7 +1293,7 @@ $Kpi = @{
     avail   = New-Kpi 'Доступность VPN · 2 ч' { Show-Page 'ultra' }
     speed   = New-Kpi 'Скорость туннеля сейчас' { Show-Page 'traffic' }
     today   = New-Kpi 'Трафик туннеля сегодня' { Show-Page 'traffic' }
-    clients = New-Kpi 'Клиенты WireGuard' { Show-Page 'wg' }
+    clients = New-Kpi 'Клиенты WG-Server' { Show-Page 'wg' }
     fixes   = New-Kpi 'Автовосстановлений' { Show-Page 'log' }
     events  = New-Kpi 'События сегодня' { Show-Page 'log' }
 }
@@ -1508,7 +1507,7 @@ New-CompPage 'wg' @(
         (New-Btn 'Удалить клиента' { Remove-WgClientUi })
     ) 'Щелчок по строке — выбрать, двойной щелчок — настройки и QR.'),
     (New-Canvas 90 @{ Kind = 'peers'; Rows = { 28 + [Math]::Max(1, @(Get-PeerRows).Count) * 28 + 8 } }),
-    (New-SectionTitle 'Скорость wg_server — последние 5 минут'), (New-Canvas 200 (New-LiveSpec { 'w' }))
+    (New-SectionTitle 'Скорость WG-Server — последние 5 минут'), (New-Canvas 200 (New-LiveSpec { 'w' }))
 )
 
 New-CompPage 'ics' @(
@@ -1697,119 +1696,24 @@ New-CompPage 'zapret' @(
     (New-SectionTitle 'Трафик мимо VPN — последние 5 минут (оценка)'), (New-Canvas 200 (New-LiveSpec { 'z' })),
     (New-SectionTitle 'Трафик мимо VPN — последние 2 часа (оценка)'), (New-Canvas 180 (New-HistSpec { 'z' })),
     (New-SectionTitle 'Свои списки'), $zlBox
-) -ExtraFirst 'YouTube и Discord этого ПК идут мимо VPN. Только для самого компьютера: у клиентов wg_server они, пока zapret включён, могут не открываться.'
+) -ExtraFirst 'YouTube и Discord этого ПК идут мимо VPN. Только для самого компьютера: у клиентов WG-Server они, пока zapret включён, не открываются (zapret не умеет обрабатывать чужой трафик).'
 
-# ================================================================ AmneziaWG
-$script:SelAwg = ''
-function Get-AwgRows {
-    $list = @(); try { $list = @(Get-AmneziaConfigs) } catch { }
-    $as = Get-Snap 'amnezia'
-    $act = $(if ($as -and $as.active) { "$($as.active)" } else { try { Get-AmneziaActive } catch { '' } })
-    @(foreach ($c in $list) {
-        $run = $false
-        if ($as -and $as.configs) { $s = @($as.configs) | Where-Object { $_.name -eq $c.name } | Select-Object -First 1; if ($s) { $run = [bool]$s.running } }
-        [pscustomobject]@{ name = $c.name; title = $c.title; endpoint = $c.endpoint; address = $c.address; active = ($c.name -eq $act); running = $run }
-    })
-}
-function Draw-Awg($g, [int]$W, [int]$H, $sp) {
-    $rows = @(Get-AwgRows)
-    if (-not $rows.Count) { DT $g 'Конфигов пока нет. В AmneziaVPN: настройки сервера → «Поделиться» → формат AmneziaWG — сохраните .conf и нажмите «Импорт файла», или вставьте ключ vpn:// («Вставить ключ или текст»).' $F.Base $Clr.Dim 16 0 ($W - 32) $H 'Left, VerticalCenter, WordBreak'; return }
-    $cols = @(@(0.0, 'Конфиг (страна / сервер)'), @(0.34, 'Имя туннеля'), @(0.56, 'Сервер'), @(0.78, 'Адрес'))
-    $x0 = 30; $cw = $W - $x0 - 12
-    foreach ($c in $cols) { DT $g $c[1] $F.Small $Clr.Dim ([int]($x0 + $cw * $c[0])) 4 220 22 }
-    for ($i = 0; $i -lt $rows.Count; $i++) {
-        $r = $rows[$i]; $y = 28 + $i * 28
-        if ($r.name -eq $script:SelAwg) { $g.FillRectangle($Br.Tip, 8, $y, $W - 16, 28); $g.FillRectangle($Br.Accent, 8, $y, 3, 28) } elseif ($i % 2 -eq 0) { $g.FillRectangle($Br.Row, 8, $y, $W - 16, 28) }
-        $g.FillEllipse($Brushes[$(if ($r.running) { 0 } else { -1 })], 14, $y + 9, 10, 10)
-        $vals = @(("$($r.title)" + $(if ($r.active) { '   ← активный' } else { '' })), "$($r.name)", "$($r.endpoint)", "$($r.address)")
-        for ($j = 0; $j -lt $cols.Count; $j++) {
-            $cx = [int]($x0 + $cw * $cols[$j][0]); $nx = $(if ($j -lt $cols.Count - 1) { [int]($x0 + $cw * $cols[$j + 1][0]) } else { $W - 10 })
-            DT $g $vals[$j] $(if ($j -eq 0) { $F.Bold } else { $F.Base }) $Clr.Text $cx $y ($nx - $cx - 8) 28
-        }
-    }
-}
-
-function Import-AwgFileUi {
-    $od = New-Object Windows.Forms.OpenFileDialog
-    $od.Filter = 'Конфиг AmneziaWG/WireGuard (*.conf)|*.conf|Все файлы (*.*)|*.*'; $od.Multiselect = $true
-    if ($od.ShowDialog($form) -ne 'OK') { return }
-    $ok = @(); $bad = @()
-    foreach ($fn in $od.FileNames) {
-        try { $ok += Import-AmneziaConfig ([IO.File]::ReadAllText($fn)) ([IO.Path]::GetFileNameWithoutExtension($fn)) } catch { $bad += "$([IO.Path]::GetFileName($fn)): $($_.Exception.Message)" }
-    }
-    if ($bad.Count) { [Windows.Forms.MessageBox]::Show(($bad -join "`n"), 'VpnGuard — импорт', 'OK', 'Warning') | Out-Null }
-    if ($ok.Count) { Set-Footer "Импортировано: $($ok -join ', ')"; $script:SelAwg = $ok[0] }
-    Invalidate-Visible
-}
-function Import-AwgTextUi {
-    $dlg = New-Object Windows.Forms.Form
-    $dlg.Text = 'Импорт AmneziaWG'; $dlg.StartPosition = 'CenterParent'; $dlg.Size = New-Object Drawing.Size(720, 460)
-    $dlg.BackColor = $Clr.Bg; $dlg.ForeColor = $Clr.Text; $dlg.Font = $F.Base
-    $l1 = New-Label 'Ключ vpn://… из AmneziaVPN или текст конфига ([Interface] … [Peer] …):' $F.Base $Clr.Text; $l1.Location = New-Object Drawing.Point(16, 12)
-    $tb = New-Object Windows.Forms.TextBox
-    $tb.Multiline = $true; $tb.ScrollBars = 'Vertical'; $tb.Font = $F.Mono; $tb.BackColor = $Clr.Input; $tb.ForeColor = $Clr.Text; $tb.BorderStyle = 'FixedSingle'
-    $tb.Location = New-Object Drawing.Point(16, 38); $tb.Size = New-Object Drawing.Size(672, 270)
-    $l2 = New-Label 'Название (страна / сервер):' $F.Base $Clr.Text; $l2.Location = New-Object Drawing.Point(16, 320)
-    $tn = New-Object Windows.Forms.TextBox
-    $tn.Location = New-Object Drawing.Point(220, 317); $tn.Width = 300; $tn.BackColor = $Clr.Input; $tn.ForeColor = $Clr.Text; $tn.BorderStyle = 'FixedSingle'
-    $ok = New-Object Windows.Forms.Button; $ok.Text = 'Импорт'; $ok.DialogResult = 'OK'; $ok.Location = New-Object Drawing.Point(500, 370); $ok.Size = New-Object Drawing.Size(90, 30)
-    $cn = New-Object Windows.Forms.Button; $cn.Text = 'Отмена'; $cn.DialogResult = 'Cancel'; $cn.Location = New-Object Drawing.Point(598, 370); $cn.Size = New-Object Drawing.Size(90, 30)
-    foreach ($b in $ok, $cn) { $b.FlatStyle = 'Flat'; $b.BackColor = $Clr.Btn; $b.ForeColor = $Clr.Text; $b.FlatAppearance.BorderColor = $Clr.Border }
-    $ok.BackColor = $Clr.Accent; $dlg.CancelButton = $cn
-    try { $clip = [Windows.Forms.Clipboard]::GetText(); if ($clip -match '^\s*(vpn://|\[Interface\])') { $tb.Text = $clip.Trim() } } catch { }
-    $dlg.Controls.AddRange(@($l1, $tb, $l2, $tn, $ok, $cn))
-    if ($dlg.ShowDialog($form) -ne 'OK' -or -not $tb.Text.Trim()) { return }
-    try {
-        $n = Import-AmneziaConfig $tb.Text $tn.Text.Trim()
-        Set-Footer "Импортирован конфиг $n"; $script:SelAwg = $n; Invalidate-Visible
-    } catch { [Windows.Forms.MessageBox]::Show("Не удалось импортировать:`n$($_.Exception.Message)", 'VpnGuard', 'OK', 'Error') | Out-Null }
-}
-function Set-AwgActiveUi {
-    $r = @(Get-AwgRows) | Where-Object { $_.name -eq $script:SelAwg } | Select-Object -First 1
-    if (-not $r) { [Windows.Forms.MessageBox]::Show('Выберите конфиг в таблице.', 'VpnGuard') | Out-Null; return }
-    if ($Demo) { Set-Footer "ДЕМО: «$($r.title)» не сделан активным"; return }
-    try {
-        $o = Read-ConfigObject; Set-CfgVal $o 'amnezia.active' $r.name
-        $tmp = "$ConfigPath.tmp"; $o | ConvertTo-Json -Depth 6 | Set-Content $tmp -Encoding UTF8; Move-Item $tmp $ConfigPath -Force
-        Update-ACfg
-        Set-Footer "Активный конфиг AmneziaWG: $($r.title)$(if ((Get-Mode) -eq 'amnezia') { ' — агент переподключит туннель' } else { ' (используется в режиме AmneziaWG)' })"
-        Send-Cmd 'check-now' 'переключение конфига AmneziaWG'; Invalidate-Visible
-    } catch { [Windows.Forms.MessageBox]::Show("Не удалось сохранить: $($_.Exception.Message)", 'VpnGuard', 'OK', 'Error') | Out-Null }
-}
-function Remove-AwgUi {
-    $r = @(Get-AwgRows) | Where-Object { $_.name -eq $script:SelAwg } | Select-Object -First 1
-    if (-not $r) { [Windows.Forms.MessageBox]::Show('Выберите конфиг в таблице.', 'VpnGuard') | Out-Null; return }
-    if ($r.running) { [Windows.Forms.MessageBox]::Show('Этот конфиг сейчас подключён — сначала сделайте активным другой или смените режим.', 'VpnGuard') | Out-Null; return }
-    if ([Windows.Forms.MessageBox]::Show("Удалить конфиг «$($r.title)»? Копия сохранится в data\backup.", 'VpnGuard', 'YesNo', 'Warning') -ne 'Yes') { return }
-    Remove-AmneziaConfig $r.name; $script:SelAwg = ''; Set-Footer "Конфиг «$($r.title)» удалён"; Invalidate-Visible
-}
-
-$awgInfo = New-Label '' $F.Base $Clr.Dim; $awgInfo.AutoSize = $false; $awgInfo.Height = 44
-$awgTools = New-ToolRow @(
-    (New-Btn 'Импорт файла .conf…' { Import-AwgFileUi } $true),
-    (New-Btn 'Вставить ключ или текст…' { Import-AwgTextUi }),
-    (New-Btn 'Сделать активным' { Set-AwgActiveUi }),
-    (New-Btn 'Удалить' { Remove-AwgUi })
-) ''
-$awgList = New-Canvas 90 @{ Kind = 'awg'; Rows = { 28 + [Math]::Max(1, @(Get-AwgRows).Count) * 28 + 8 } }
-$awgList.Cursor = 'Hand'
-$awgList.Add_MouseClick({ param($s, $e) $rows = @(Get-AwgRows); $i = [int][Math]::Floor(($e.Y - 28) / 28); if ($i -ge 0 -and $i -lt $rows.Count) { $script:SelAwg = $rows[$i].name; Set-Footer "Выбран конфиг «$($rows[$i].title)»" }; $s.Invalidate() })
-$awgList.Add_MouseDoubleClick({ Set-AwgActiveUi })
-$awgTest = New-Canvas 80 @{ Kind = 'ptest'; Src = { $a = Get-Snap 'amnezia'; if ($a) { $a.test } else { $null } }; Cur = { $a = Get-Snap 'amnezia'; if ($a) { "$($a.active)" } else { '' } }
-    Rows = { $a = Get-Snap 'amnezia'; $pt = $(if ($a) { $a.test } else { $null }); $n = @($(if ($pt) { $pt.results }) | Where-Object { $_ }).Count
-             $(if ($pt -and $pt.running) { 28 } else { 0 }) + $(if ($n) { 22 + 22 + $n * 26 + 8 } else { 34 }) } }
+# ================================================================ AmneziaVPN
+# приложение AmneziaVPN: сервер и протокол выбираются в нём; VpnGuard следит за ним и перезапускает при сбое
+function Draw-Awg($g, [int]$W, [int]$H, $sp) { }
+$awgInfo = New-Label '' $F.Base $Clr.Dim; $awgInfo.AutoSize = $false; $awgInfo.Height = 120
 New-CompPage 'amnezia' @(
-    (New-Btn 'Переподключить' { Send-Cmd 'reconnect-awg' 'переподключение AmneziaWG' }),
-    (New-Btn 'Тест конфигов' { if ([Windows.Forms.MessageBox]::Show("Проверить все конфиги?`n`nАгент по очереди поднимет каждый туннель AmneziaWG и проверит трафик (до 30 с на конфиг). В режиме AmneziaWG клиенты wg_server на это время теряют интернет (в режиме «два туннеля» трафик на время теста уйдёт в MeduzaVPN).", 'VpnGuard', 'YesNo', 'Question') -eq 'Yes') { Send-Cmd 'awg-test' 'тест конфигов AmneziaWG' } }),
-    (New-Btn 'Режим AmneziaWG' { Set-ModeUi 'amnezia' })
-) @($awgInfo, $awgTools, (New-SectionTitle 'Конфиги (каждый — страна или сервер; двойной щелчок — сделать активным)'), $awgList,
-    (New-SectionTitle 'Тест конфигов (зелёный — трафик через туннель проходит)'), $awgTest) -ExtraFirst
+    (New-Btn 'Перезапустить AmneziaVPN' { if ([Windows.Forms.MessageBox]::Show("Закрыть и снова открыть AmneziaVPN?`n`nТуннель переподключится сам, если в AmneziaVPN включено «Автоподключение».", 'VpnGuard', 'YesNo', 'Question') -eq 'Yes') { Send-Cmd 'reconnect-awg' 'перезапуск AmneziaVPN' } }),
+    (New-Btn 'Открыть AmneziaVPN' { try { $e = Get-AwgExe; if (Test-Path $e) { Start-Process $e } else { Show-Page 'software' } } catch { } }),
+    (New-Btn 'Режим AmneziaVPN' { Set-ModeUi 'amnezia' })
+) @($awgInfo) -ExtraFirst
 function Update-AwgInfo {
     $as = Get-Snap 'amnezia'; $m = Get-Mode
     $inst = $(if ($as) { [bool]$as.installed } else { $null })
     Set-Prop $awgInfo Text ("Режим сейчас: $(($ModeItems | Where-Object { $_[0] -eq $m })[1])" +
-        $(if ($m -notin 'amnezia', 'dual') { ' — AmneziaWG не используется (кнопка «Режим AmneziaWG» переключит)' } elseif ($m -eq 'dual') { ' — AmneziaWG работает вместе с MeduzaVPN' } else { '' }) + "`n" +
-        $(if ($inst -eq $false) { 'Клиент AmneziaWG не установлен — поставьте его на вкладке «Компоненты».' } elseif ($inst) { 'Клиент AmneziaWG установлен. Конфиг из AmneziaVPN (формат AmneziaWG) или ключ vpn:// — кнопками ниже.' } else { 'Состояние AmneziaWG появится с агентом 1.9.' }))
+        $(if ($m -notin 'amnezia', 'dual') { ' — AmneziaVPN не используется (кнопка «Режим AmneziaVPN» переключит)' } elseif ($m -eq 'dual') { ' — AmneziaVPN работает вместе с MeduzaVPN' } else { '' }) + "`n" +
+        $(if ($inst -eq $false) { 'AmneziaVPN не установлен — поставьте его на вкладке «Компоненты», затем добавьте сервер в самом приложении.' } else { 'Сервер и протокол выбираются в приложении AmneziaVPN. VpnGuard держит его запущенным, проверяет трафик туннеля и при сбое перезапускает приложение.' }) + "`n" +
+        'Один раз включите в AmneziaVPN «Автоподключение» (Настройки → Подключение) и «Автозапуск» (Настройки → Приложение). «Kill Switch» лучше не включать — он мешает zapret и ответам клиентам WG-Server.')
 }
 
 # ================================================================ Компоненты
@@ -1825,8 +1729,8 @@ $softTable.ColumnCount = 5; $softTable.AutoSize = $true; $softTable.BackColor = 
 foreach ($colW in 34, 16, 16, 18, 16) { [void]$softTable.ColumnStyles.Add((New-Object Windows.Forms.ColumnStyle('Percent', $colW))) }
 foreach ($h in 'Компонент', 'Установлено', 'Последняя версия', 'Состояние', '') { $l = New-Label $h $F.Small $Clr.Dim; $l.Margin = '4,4,4,8'; $softTable.Controls.Add($l) }
 $SoftRows = @{}
-$SoftIds = @(@('meduza', 'MeduzaVPN', 'VPN (режим MeduzaVPN)'), @('meduzacli', 'MeduzaVPN CLI', 'управление MeduzaVPN из агента'), @('wireguard', 'WireGuard', 'туннель wg_server для клиентов'),
-    @('amneziawg', 'AmneziaWG', 'VPN (режим AmneziaWG)'), @('ws4w', 'WS4W', 'окно настройки сервера — не обязательно'), @('zapret', 'zapret-discord-youtube', 'YouTube и Discord мимо блокировок'))
+$SoftIds = @(@('meduza', 'MeduzaVPN', 'VPN (режим MeduzaVPN)'), @('meduzacli', 'MeduzaVPN CLI', 'управление MeduzaVPN из агента'), @('wireguard', 'WireGuard', 'туннель WG-Server для клиентов'),
+    @('amneziavpn', 'AmneziaVPN', 'VPN (режим AmneziaVPN)'), @('ws4w', 'WS4W', 'окно настройки сервера — не обязательно'), @('zapret', 'zapret-discord-youtube', 'YouTube и Discord мимо блокировок'))
 foreach ($si in $SoftIds) {
     $id = $si[0]
     $nm = New-Object Windows.Forms.Label; $nm.AutoSize = $true; $nm.Text = "$($si[1])`n$($si[2])"; $nm.Font = $F.Base; $nm.ForeColor = $Clr.Text; $nm.Margin = '4,6,4,6'
@@ -1900,7 +1804,7 @@ $script:TrafSel = 'u'
 $trafKpiRow = New-Row 84 3
 $TrafKpi = @{
     u = New-Kpi 'Туннель' { Select-Traffic 'u' }
-    w = New-Kpi 'wg_server (клиенты)' { Select-Traffic 'w' }
+    w = New-Kpi 'WG-Server (клиенты)' { Select-Traffic 'w' }
     p = New-Kpi 'Физический адаптер' { Select-Traffic 'p' }
 }
 $TrafKpi.p.Panel.Margin = '0,0,0,0'
@@ -1909,7 +1813,7 @@ $trafKpiRow.Controls.Add($TrafKpi.u.Panel, 0, 0); $trafKpiRow.Controls.Add($Traf
 $trafBar = New-Object Windows.Forms.FlowLayoutPanel
 $trafBar.Height = 34; $trafBar.WrapContents = $false; $trafBar.BackColor = $Clr.Bg
 $TrafBtns = @{}
-foreach ($q in @(@('u', 'Туннель'), @('w', 'wg_server'), @('p', 'Физический адаптер'))) {
+foreach ($q in @(@('u', 'Туннель'), @('w', 'WG-Server'), @('p', 'Физический адаптер'))) {
     $b = New-Btn $q[1] ([scriptblock]::Create("Select-Traffic '$($q[0])'"))
     $TrafBtns[$q[0]] = $b; $trafBar.Controls.Add($b)
 }
@@ -1949,7 +1853,7 @@ $cbLevel.DropDownStyle = 'DropDownList'; $cbLevel.Width = 220; $cbLevel.BackColo
 $cbLevel.SelectedIndex = 0
 $cbComp = New-Object Windows.Forms.ComboBox
 $cbComp.DropDownStyle = 'DropDownList'; $cbComp.Width = 170; $cbComp.BackColor = $Clr.Input; $cbComp.ForeColor = $Clr.Text; $cbComp.FlatStyle = 'Flat'; $cbComp.Margin = '0,4,10,0'
-[void]$cbComp.Items.AddRange(@('Все компоненты', 'MeduzaVPN', 'Туннель', 'WireGuard', 'Раздача ICS', 'zapret', 'AmneziaWG'))
+[void]$cbComp.Items.AddRange(@('Все компоненты', 'MeduzaVPN', 'Туннель', 'WG-Server', 'Раздача ICS', 'zapret', 'AmneziaVPN'))
 $cbComp.SelectedIndex = 0
 $tbFind = New-Object Windows.Forms.TextBox
 $tbFind.Width = 180; $tbFind.BackColor = $Clr.Input; $tbFind.ForeColor = $Clr.Text; $tbFind.BorderStyle = 'FixedSingle'; $tbFind.Margin = '0,5,10,0'
@@ -2097,7 +2001,7 @@ Add-Setting 'meduza.probeHosts'                   'Проверка трафик
 Add-Setting 'meduza.probeFailuresBeforeReconnect' 'Неудачных проверок до переподключения' 'num' '' 1 50
 Add-Setting 'meduza.startupGraceSec'              'Ждать автоподключения после старта, сек' 'num' '' 0 600
 Add-Setting 'meduza.maxRestartsPer30Min'          'Максимум перезапусков за 30 мин'   'num'  'защита от бесконечных перезапусков' 1 100
-Add-Section 'WS4W / wg_server'
+Add-Section 'WG-Server (wg_server, WS4W)'
 Add-Setting 'ws4w.interfaceName'                  'Интерфейс'                         'text' 'wg_server'
 Add-Setting 'ws4w.serviceName'                    'Служба туннеля'                    'text' 'WireGuardTunnel$wg_server'
 Add-Setting 'ws4w.configPath'                     'Путь к конфигу wg_server'          'text' 'пусто — найти автоматически'
@@ -2105,7 +2009,7 @@ Add-Setting 'ws4w.serverAddress'                  'Адрес сервера'   
 Add-Setting 'ws4w.endpoint'                       'Адрес для клиентов (IP или имя[:порт])' 'text' 'пусто — как у клиентов WS4W или внешний IP'
 Add-Setting 'ws4w.clientDns'                      'DNS для новых клиентов'            'text' 'пусто — как у клиентов WS4W или адрес сервера'
 Add-Setting 'ws4w.autoCreateServer'               'Создавать сервер, если настроек нет' 'bool' 'нет ни конфига, ни службы wg_server'
-Add-Section 'Режим и AmneziaWG'
+Add-Section 'Режим и AmneziaVPN'
 Add-Setting 'vpn.mode'                            'Режим работы'                      'combo' 'meduza · amnezia · dual (два туннеля) · zapret (без VPN)'
 $SetCtl['vpn.mode'].Items.AddRange(@('meduza', 'amnezia', 'dual', 'zapret'))
 Add-Setting 'vpn.primary'                         'Два туннеля: основной'             'combo' 'через какой идёт трафик, пока он работает'
@@ -2114,7 +2018,6 @@ Add-Setting 'vpn.dualHot'                         'Два туннеля: рез
 Add-Setting 'vpn.failoverChecks'                  'Два туннеля: проверок до переключения' 'num' 'подряд без трафика (отключение — сразу)' 1 10
 Add-Setting 'vpn.failbackMin'                     'Два туннеля: вернуться на основной через, мин' 'num' 'после того как он снова заработал (0 — не возвращать)' 0 1440
 Add-Setting 'vpn.stopInactive'                    'Закрывать неиспользуемый VPN'      'bool' 'чтобы не работали два туннеля сразу'
-Add-Setting 'amnezia.splitDefaultRoute'           'AmneziaWG: делить маршрут 0.0.0.0/0' 'bool' 'нужно для zapret и ответов wg_server'
 Add-Setting 'software.checkHours'                 'Проверять версии компонентов, ч'  'num'  '' 1 168
 Add-Section 'Раздача интернета'
 Add-Setting 'sharing.enabled'                     'Управлять раздачей ICS'            'bool' 'туннель → wg_server'
@@ -2598,7 +2501,7 @@ function Update-Data([bool]$Fresh) {
     Set-Prop $heroDot BackColor $LevelColor[$worst]
     $probs = @(foreach ($k in $CompKeys) { if ($script:Level[$k] -ge 1) { ($TileDefs | Where-Object { $_[0] -eq $k })[1] + ': ' + (Get-Snap $k).state } })
     Set-Prop $heroSub Text $(if (-not $s) { 'Ждём состояние от агента…' } elseif (-not $Fresh) { 'Данные устарели — агент давно не обновлял состояние.' }
-        elseif ($probs.Count) { $probs -join '   ·   ' } else { 'Туннель, wg_server и раздача в порядке' })
+        elseif ($probs.Count) { $probs -join '   ·   ' } else { 'Туннель, WG-Server и раздача в порядке' })
     Set-Prop $form Text ('VpnGuard — ' + $(switch ($worst) { 0 { 'всё работает' } 1 { 'есть предупреждения' } 2 { 'ЕСТЬ СБОИ' } default { 'нет данных' } }))
     foreach ($b in $navButtons.Values) { if ($b.Tag.Comp) { $b.Invalidate() } }
 

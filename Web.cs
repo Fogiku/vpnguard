@@ -39,12 +39,12 @@ namespace VpnGuard
 
         static readonly string[] WebCmds = { "check-now", "reconnect", "reconnect-meduza", "reconnect-awg", "restart-meduza", "restart-wg", "reapply-ics", "check-update",
             "zapret-on", "zapret-off", "zapret-test", "zapret-update", "zapret-reload", "zapret-check", "zapret-releases", "meduza-test", "meduza-catalog", "meduza-proto-reset",
-            "awg-test", "software-check", "install-missing", "app-check", "app-update", "dual-switch" };
+            "software-check", "install-missing", "app-check", "app-update", "dual-switch" };
         // удалённая диагностика: true — прерывает интернет клиентам (нужно remote.allowActions)
         static readonly Dictionary<string, bool> RemoteCmds = new Dictionary<string, bool> {
             {"check-now",false},{"zapret-check",false},{"meduza-catalog",false},{"software-check",false},{"app-check",false},{"app-update",false},
             {"reconnect",true},{"reconnect-meduza",true},{"reconnect-awg",true},{"restart-wg",true},{"reapply-ics",true},{"zapret-test",true},{"zapret-reload",true},
-            {"meduza-test",true},{"awg-test",true},{"dual-switch",true},{"meduza-proto-reset",true},{"restart-meduza",true} };
+            {"meduza-test",true},{"dual-switch",true},{"meduza-proto-reset",true},{"restart-meduza",true} };
         static readonly Dictionary<string, string> WebCfgKeys = new Dictionary<string, string> {
             {"vpn.mode", @"^(meduza|amnezia|dual|zapret)$"}, {"vpn.primary", @"^(meduza|amnezia)$"}, {"zapret.strategy", @"^[\w \(\)\-\.]{0,60}$"},
             {"meduza.serviceId", @"^[\w \-\.\(\)]{0,100}$"}, {"meduza.protocol", @"^[a-z0-9\-]{1,40}$"}, {"amnezia.active", @"^[a-z0-9_=+.\-]{1,32}$"},
@@ -56,7 +56,9 @@ namespace VpnGuard
             new[]{"checkIntervalSec","Общее","Интервал проверки, сек","int:10:600","как часто агент проверяет всё","30"},
             new[]{"logRetentionDays","Общее","Хранить журналы, дней","int:1:365","","14"},
             new[]{"agent.engine","Общее","Движок агента","enum:powershell|csharp","csharp — основной цикл на C# (быстрее, меньше памяти; zapret и обновления — по-прежнему PowerShell; «два туннеля» — только powershell). Упадёт трижды — сам вернётся на powershell","powershell"},
-            new[]{"vpn.mode","Режим","Режим работы","enum:meduza|amnezia|dual|zapret","meduza · amnezia · dual (два туннеля) · zapret (без VPN)","meduza"},
+            new[]{"agent.psPartMin","Общее","Агент C#: обновления и компоненты, мин","int:5:240","как часто запускать часть PowerShell (по командам — сразу)","30"},
+            new[]{"amnezia.adapterPattern","Режим","AmneziaVPN: адаптер туннеля (шаблон)","text:^[\\w \\-\\.\\|\\(\\)]{1,120}$","часть имени или описания адаптера; разные протоколы — разные адаптеры","amnezia|tun2socks|TAP-Windows Adapter V9"},
+            new[]{"vpn.mode","Режим","Режим работы","enum:meduza|amnezia|dual|zapret","meduza · amnezia (AmneziaVPN) · dual (два туннеля) · zapret (без VPN)","meduza"},
             new[]{"vpn.primary","Режим","Два туннеля: основной","enum:meduza|amnezia","через какой идёт трафик, пока он работает","meduza"},
             new[]{"vpn.dualHot","Режим","Два туннеля: резерв всегда поднят","bool","выключено — резерв поднимается только при сбое","true"},
             new[]{"vpn.failoverChecks","Режим","Два туннеля: проверок до переключения","int:1:10","подряд без трафика (отключение — сразу)","2"},
@@ -73,11 +75,10 @@ namespace VpnGuard
             new[]{"meduza.probeFailuresBeforeReconnect","MeduzaVPN","Неудачных проверок до переподключения","int:1:50","","3"},
             new[]{"meduza.startupGraceSec","MeduzaVPN","Ждать автоподключения после старта, сек","int:0:600","","60"},
             new[]{"meduza.maxRestartsPer30Min","MeduzaVPN","Максимум перезапусков за 30 мин","int:1:100","защита от бесконечных перезапусков","5"},
-            new[]{"amnezia.splitDefaultRoute","AmneziaWG","Делить маршрут 0.0.0.0/0","bool","нужно для zapret и ответов wg_server","true"},
-            new[]{"ws4w.endpoint","WireGuard","Адрес для клиентов (IP или имя[:порт])","text:^[\\w\\.\\-:\\[\\]]{0,100}$","пусто — как у клиентов WS4W или внешний IP",""},
-            new[]{"ws4w.clientDns","WireGuard","DNS для новых клиентов","text:^[\\d\\., a-fA-F:]{0,100}$","пусто — как у клиентов WS4W или адрес сервера",""},
-            new[]{"ws4w.autoCreateServer","WireGuard","Создавать сервер, если настроек нет","bool","нет ни конфига, ни службы wg_server","true"},
-            new[]{"sharing.enabled","Раздача","Управлять раздачей ICS","bool","туннель → wg_server","true"},
+            new[]{"ws4w.endpoint","WG-Server","Адрес для клиентов (IP или имя[:порт])","text:^[\\w\\.\\-:\\[\\]]{0,100}$","пусто — как у клиентов WS4W или внешний IP",""},
+            new[]{"ws4w.clientDns","WG-Server","DNS для новых клиентов","text:^[\\d\\., a-fA-F:]{0,100}$","пусто — как у клиентов WS4W или адрес сервера",""},
+            new[]{"ws4w.autoCreateServer","WG-Server","Создавать сервер, если настроек нет","bool","нет ни конфига, ни службы wg_server","true"},
+            new[]{"sharing.enabled","Раздача","Управлять раздачей ICS","bool","туннель → WG-Server","true"},
             new[]{"zapret.autoUpdate","zapret","Автообновление zapret","bool","если версия не выбрана","true"},
             new[]{"zapret.updateCheckHours","zapret","Проверять обновления каждые, ч","int:1:168","","12"},
             new[]{"zapret.retestHours","zapret","Переподбирать стратегию каждые, ч","int:1:720","и сразу — если сайты перестали открываться","24"},
@@ -557,20 +558,6 @@ namespace VpnGuard
                         return (object)new Dictionary<string, object> { { "name", z[0] }, { "title", z[1] }, { "kind", z[2] }, { "exists", File.Exists(f) }, { "text", txt } };
                     }).ToList();
                     JsonOut(ctx, new Dictionary<string, object> { { "ok", true }, { "dir", dir }, { "installed", Directory.Exists(dir) }, { "lists", lists } }); return;
-                }
-                case "/api/awg/import": {
-                    if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; }
-                    var b = Body(req); string txt = BStr(b, "text");
-                    if (txt.Trim().Length == 0 || txt.Length > 60000) { JsonOut(ctx, Err("пустой или слишком большой конфиг"), 400); return; }
-                    var r = PsJson("awg-import", Json.Serialize(new Dictionary<string, object> { { "text", txt }, { "name", BStr(b, "name").Trim() } }));
-                    if (r.ContainsKey("ok") && r["ok"] is bool && (bool)r["ok"]) Log("Веб-интерфейс: импортирован конфиг AmneziaWG " + r["name"] + " (" + ip + ")", "INFO");
-                    JsonOut(ctx, r); return;
-                }
-                case "/api/awg/remove": {
-                    if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; }
-                    string n = BStr(Body(req), "name");
-                    if (!Regex.IsMatch(n, @"^[a-z0-9_=+.\-]{1,32}$")) { JsonOut(ctx, Err("неверное имя"), 400); return; }
-                    var r = PsJson("awg-remove", n); JsonOut(ctx, r); return;
                 }
                 case "/api/diag-run": if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; } Text(ctx, 200, HideSecrets(PsTask("diag", "", 240))); return;
                 case "/api/wg/clients": if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; } JsonOut(ctx, PsJson("wg-clients", "")); return;

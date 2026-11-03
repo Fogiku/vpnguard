@@ -94,8 +94,8 @@ canvas { width: 100%; height: 190px; display: block; }
     <a href="#home" data-p="home">Главная</a>
     <a href="#ultra" data-p="ultra">Туннель <span class="dot" data-d="ultra"></span></a>
     <a href="#meduza" data-p="meduza">MeduzaVPN <span class="dot" data-d="meduza"></span></a>
-    <a href="#amnezia" data-p="amnezia">AmneziaWG <span class="dot" data-d="amnezia"></span></a>
-    <a href="#wg" data-p="wg">WireGuard <span class="dot" data-d="wg"></span></a>
+    <a href="#amnezia" data-p="amnezia">AmneziaVPN <span class="dot" data-d="amnezia"></span></a>
+    <a href="#wg" data-p="wg">WG-Server <span class="dot" data-d="wg"></span></a>
     <a href="#ics" data-p="ics">Раздача ICS <span class="dot" data-d="ics"></span></a>
     <a href="#zapret" data-p="zapret">zapret <span class="dot" data-d="zapret"></span></a>
     <a href="#traffic" data-p="traffic">Трафик</a>
@@ -122,9 +122,9 @@ canvas { width: 100%; height: 190px; display: block; }
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 let S = null, page = 'home', wgList = null, logCache = '', timer = null;
-const NAMES = { home: 'Главная', ultra: 'Туннель', meduza: 'MeduzaVPN', amnezia: 'AmneziaWG', wg: 'WireGuard', ics: 'Раздача интернета (ICS)', zapret: 'zapret-discord-youtube', traffic: 'Трафик', system: 'Компоненты и обновление', logs: 'Журнал', settings: 'Настройки', diag: 'Диагностика и доступ' };
+const NAMES = { home: 'Главная', ultra: 'Туннель', meduza: 'MeduzaVPN', amnezia: 'AmneziaVPN', wg: 'WG-Server', ics: 'Раздача интернета (ICS)', zapret: 'zapret-discord-youtube', traffic: 'Трафик', system: 'Компоненты и обновление', logs: 'Журнал', settings: 'Настройки', diag: 'Диагностика и доступ' };
 const HKEY = { meduza: 'm', ultra: 'u', wg: 'w', ics: 'i', zapret: 'z', amnezia: 'a' };
-const MODES = [['meduza', 'MeduzaVPN'], ['amnezia', 'AmneziaWG'], ['dual', 'Два туннеля (с переключением)'], ['zapret', 'Без VPN — только zapret']];
+const MODES = [['meduza', 'MeduzaVPN'], ['amnezia', 'AmneziaVPN'], ['dual', 'Два туннеля (с переключением)'], ['zapret', 'Без VPN — только zapret']];
 const LV = { 0: 'работает', 1: 'предупреждение', 2: 'сбой', '-1': 'нет данных / выключено' };
 
 // ---------------------------------------------------------------- сеть
@@ -225,7 +225,7 @@ function head() {
 // ---------------------------------------------------------------- страницы
 const P = {};
 P.home = () => {
-  const keys = [['ultra', 'Туннель'], ['meduza', 'MeduzaVPN'], ['amnezia', 'AmneziaWG'], ['wg', 'WireGuard'], ['ics', 'Раздача ICS'], ['zapret', 'zapret']];
+  const keys = [['ultra', 'Туннель'], ['meduza', 'MeduzaVPN'], ['amnezia', 'AmneziaVPN'], ['wg', 'WG-Server'], ['ics', 'Раздача ICS'], ['zapret', 'zapret']];
   let worst = -1; const probs = [];
   for (const [k, n] of keys) { const l = lvl(comp(k)); if (l > worst) worst = l; if (l >= 1) probs.push(n + ': ' + comp(k).state); }
   const ht = { 0: 'Всё работает', 1: 'Есть предупреждения', 2: 'Есть сбои' }[worst] || 'Нет данных';
@@ -235,7 +235,7 @@ P.home = () => {
   const tr = S.traffic, today = tr && tr.days && tr.days.find(d => d.d === new Date().toISOString().slice(0, 10));
   const h = S.history || []; let ok = 0, all = 0; for (const p of h) if (p.u >= 0) { all++; if (p.u == 0) ok++; }
   return `<div class="card hero"><div><div class="big"><span class="dot l${worst}" style="width:18px;height:18px"></span><span class="c${worst}">${ht}</span></div>
-      <div class="muted" style="margin:6px 0 12px">${esc(probs.join('  ·  ') || 'Туннель, wg_server и раздача в порядке')}</div>
+      <div class="muted" style="margin:6px 0 12px">${esc(probs.join('  ·  ') || 'Туннель, WG-Server и раздача в порядке')}</div>
       <div class="row">${btn('Переподключить туннель', "cmd('reconnect','переподключение туннеля')")}${btn('Восстановить раздачу', "cmd('reapply-ics','восстановление раздачи')")}${btn('Перезапустить wg_server', "cmd('restart-wg','перезапуск wg_server')")}${mode !== 'zapret' ? btn(z && z.enabled ? 'Выключить zapret' : 'Включить zapret', z && z.enabled ? "cmd('zapret-off','выключение zapret')" : "cmd('zapret-on','включение zapret','Включить zapret? YouTube и Discord этого ПК пойдут мимо VPN.')") : ''}</div></div>
     <div><div class="sub">Режим работы</div><select onchange="setMode(this.value)">${MODES.map(([v, t]) => `<option value="${v}"${v === mode ? ' selected' : ''}>${t}</option>`).join('')}</select></div></div>
   <div class="grid">${keys.map(([k, n]) => { const o = comp(k), l = lvl(o); return `<div class="tile" onclick="location.hash='${k}'"><div class="t"><span class="dot l${l}"></span>${n}</div><div class="s c${l}" title="${esc(o && o.state)}">${esc(o ? String(o.state).split(' · ')[0] : 'нет данных')}</div><div class="d">${esc(o && o.details && o.details[0])}</div></div>`; }).join('')}</div>
@@ -243,7 +243,7 @@ P.home = () => {
     <div class="tile kpi"><div class="t">Доступность туннеля · 2 ч</div><div class="v ${all ? (ok / all > .99 ? 'c0' : ok / all > .9 ? 'c1' : 'c2') : ''}">${all ? (100 * ok / all).toFixed(1) + ' %' : '—'}</div></div>
     <div class="tile kpi"><div class="t">Скорость туннеля</div><div class="v">${tr && tr.rate && tr.rate.u ? '↓ ' + fmtR(tr.rate.u[0]) : '—'}</div><div class="d">${tr && tr.rate && tr.rate.u ? '↑ ' + fmtR(tr.rate.u[1]) : ''}</div></div>
     <div class="tile kpi"><div class="t">Трафик туннеля сегодня</div><div class="v">${today ? '↓ ' + fmtB(today.u[0]) : '—'}</div><div class="d">${today ? '↑ ' + fmtB(today.u[1]) : ''}</div></div>
-    <div class="tile kpi" onclick="location.hash='wg'"><div class="t">Клиенты WireGuard</div><div class="v">${peers.filter(p => p.active).length} из ${peers.length}</div><div class="d">на связи за 3 мин</div></div>
+    <div class="tile kpi" onclick="location.hash='wg'"><div class="t">Клиенты WG-Server</div><div class="v">${peers.filter(p => p.active).length} из ${peers.length}</div><div class="d">на связи за 3 мин</div></div>
   </div>
   ${chartBlock('u', 'Трафик туннеля — последние 2 часа')}
   <div class="sec">Последние предупреждения и ошибки</div><pre id="events" class="muted">загрузка…</pre>`;
@@ -254,26 +254,14 @@ async function setZVer() {
   if (!confirm(v ? `Установить zapret ${v} и закрепить эту версию?` : 'Вернуться к последней версии zapret (обновляется сама)?')) return;
   try { await api('/api/config', { key: 'zapret.version', value: v }); await api('/api/cmd', { c: 'zapret-update' }); toast('Агент установит ' + (v ? 'zapret ' + v : 'последнюю версию') + ' — 10–30 секунд'); setTimeout(load, 4000); } catch (e) { toast(e.message, true); }
 }
-function awgFile(inp) {
-  const f = inp.files && inp.files[0]; if (!f) return;
-  const r = new FileReader(); r.onload = () => { $('#awgtext').value = r.result; if (!$('#awgname').value) $('#awgname').value = f.name.replace(/\.(conf|txt)$/i, ''); }; r.readAsText(f);
-}
-async function awgImport() {
-  const text = $('#awgtext').value.trim(); if (!text) { toast('Вставьте ключ vpn:// или текст конфига', true); return; }
-  try { const r = await api('/api/awg/import', { text, name: $('#awgname').value.trim() }); toast('Импортирован конфиг ' + r.name); $('#awgtext').value = ''; $('#awgname').value = ''; setTimeout(load, 1500); } catch (e) { toast('Не удалось: ' + e.message, true); }
-}
-async function awgRemove(name, title) {
-  if (!confirm(`Удалить конфиг «${title}»? Копия сохранится в data\\backup.`)) return;
-  try { await api('/api/awg/remove', { name }); toast('Конфиг удалён'); setTimeout(load, 1500); } catch (e) { toast(e.message, true); }
-}
 function setMode(m) {
-  const msg = { meduza: 'Переключиться на MeduzaVPN?', amnezia: 'Переключиться на AmneziaWG? MeduzaVPN будет отключён.', dual: 'Включить режим «два туннеля»? Оба VPN будут подняты, при сбое трафик переключится на второй.', zapret: 'Отключить VPN? ПК и клиенты wg_server пойдут в интернет напрямую, YouTube/Discord — через zapret.' }[m];
+  const msg = { meduza: 'Переключиться на MeduzaVPN?', amnezia: 'Переключиться на AmneziaVPN? MeduzaVPN будет отключён.', dual: 'Включить режим «два туннеля»? Оба VPN будут подняты, при сбое трафик переключится на второй.', zapret: 'Отключить VPN? ПК и клиенты WG-Server пойдут в интернет напрямую, YouTube/Discord — через zapret.' }[m];
   if (confirm(msg)) setCfg('vpn.mode', m, 'режим'); else render();
 }
 P.ultra = () => {
   const u = comp('ultra'), dual = S.vpn && S.vpn.mode === 'dual';
   return compHead('ultra', btn('Переподключить', "cmd('reconnect','переподключение туннеля')") + (dual ? btn('Переключить на другой', "cmd('dual-switch','переключение туннеля')") : '')) +
-    (dual ? `<div class="card row"><span class="muted">Основной туннель:</span><select onchange="setCfg('vpn.primary',this.value,'основной туннель')">${[['meduza', 'MeduzaVPN'], ['amnezia', 'AmneziaWG']].map(([v, t]) => `<option value="${v}"${S.vpn.primary === v ? ' selected' : ''}>${t}</option>`).join('')}</select></div>` : '') +
+    (dual ? `<div class="card row"><span class="muted">Основной туннель:</span><select onchange="setCfg('vpn.primary',this.value,'основной туннель')">${[['meduza', 'MeduzaVPN'], ['amnezia', 'AmneziaVPN']].map(([v, t]) => `<option value="${v}"${S.vpn.primary === v ? ' selected' : ''}>${t}</option>`).join('')}</select></div>` : '') +
     timeline('ultra') + '<div class="sec">Подробности</div><div class="card">' + kvTable(u) + '</div>' + chartBlock('u', 'Скорость — последние 2 часа');
 };
 P.meduza = () => {
@@ -288,14 +276,13 @@ P.meduza = () => {
     timeline('meduza') + '<div class="sec">Подробности</div><div class="card">' + kvTable(m) + '</div>';
 };
 P.amnezia = () => {
-  const a = comp('amnezia') || {}, cfgs = a.configs || [], t = a.test, res = (t && t.results) || [];
-  return compHead('amnezia', btn('Переподключить', "cmd('reconnect-awg','переподключение AmneziaWG')") + btn('Тест конфигов', "cmd('awg-test','тест конфигов','Поднять по очереди каждый конфиг и проверить трафик?')") + btn('Режим AmneziaWG', "setMode('amnezia')")) +
-    `<div class="sec">Конфиги</div><div class="card">${cfgs.length ? `<table><tr><th>Конфиг</th><th class="hide-m">Сервер</th><th></th></tr>${cfgs.map(c => `<tr class="${c.name === a.active ? 'cur' : ''}"><td><span class="dot l${c.running ? 0 : -1}"></span> ${esc(c.title)}${c.name === a.active ? ' ← активный' : ''}</td><td class="hide-m">${esc(c.endpoint)}</td><td class="row" style="flex-wrap:nowrap">${c.name === a.active ? '' : btn('Сделать активным', `setCfg('amnezia.active','${esc(c.name)}','активный конфиг')`)}${btn('Удалить', `awgRemove('${esc(c.name)}','${esc(c.title)}')`)}</td></tr>`).join('')}</table>` : '<p class="muted">Конфигов нет — импортируйте ниже.</p>'}</div>
-    <div class="sec">Импорт конфига</div><div class="card"><p class="muted">Из AmneziaVPN: настройки сервера → «Поделиться» → формат AmneziaWG. Можно выбрать файл .conf или вставить ключ <code>vpn://…</code> / текст конфига.</p>
-      <div class="row"><input type="file" id="awgfile" accept=".conf,.txt" onchange="awgFile(this)"><input type="text" id="awgname" placeholder="название (страна / сервер)" style="flex:1;min-width:180px"></div>
-      <textarea class="log" id="awgtext" style="height:140px;margin-top:8px" placeholder="vpn://…  или  [Interface] … [Peer] …"></textarea>
-      <div class="row" style="margin-top:8px">${btn('Импортировать', 'awgImport()', true)}</div></div>
-    ${res.length ? `<div class="sec">Тест конфигов</div><div class="card"><table><tr><th>Конфиг</th><th>Результат</th><th>Отклик</th><th class="hide-m">Ошибка</th></tr>${res.map(r => `<tr><td>${esc(r.protocol)}</td><td class="c${r.ok ? 0 : 2}">${r.ok ? 'работает' : 'не работает'}</td><td>${r.pingMs >= 0 ? r.pingMs + ' мс' : '—'}</td><td class="hide-m">${esc(r.error)}</td></tr>`).join('')}</table></div>` : ''}` +
+  const a = comp('amnezia') || {}, sw = (S.software || []).find(x => x.id === 'amneziavpn');
+  return compHead('amnezia', btn('Перезапустить AmneziaVPN', "cmd('reconnect-awg','перезапуск AmneziaVPN','Закрыть и снова открыть AmneziaVPN? Туннель переподключится (нужно включённое «Автоподключение»).')") + btn('Режим AmneziaVPN', "setMode('amnezia')") +
+      (a.installed ? '' : btn('Установить AmneziaVPN', "cmd('install amneziavpn','установка AmneziaVPN','Скачать AmneziaVPN с GitHub и установить?')", true))) +
+    `<div class="sec">Как это работает</div><div class="card"><p>Сервер и протокол выбираются в самом приложении AmneziaVPN — добавьте сервер (ключ <code>vpn://</code> или файл) прямо в нём.</p>
+      <p>VpnGuard держит AmneziaVPN запущенным, находит его туннель${a.adapter ? ` (сейчас — «${esc(a.adapter)}»)` : ''}, проверяет трафик и при сбое перезапускает приложение.</p>
+      <p class="c1">Один раз включите в AmneziaVPN: «Настройки → Подключение → Автоподключение» и «Настройки → Приложение → Автозапуск» — иначе после перезапуска туннель не поднимется сам. «Kill Switch» лучше не включать: он мешает zapret и ответам клиентам WG-Server.</p>
+      ${sw ? `<p class="sub">Установлено: ${esc(sw.installed || 'нет')} · последняя версия: ${esc(sw.latest || '—')}</p>` : ''}</div>` +
     timeline('amnezia') + '<div class="sec">Подробности</div><div class="card">' + kvTable(a) + '</div>';
 };
 P.wg = () => {
@@ -303,9 +290,9 @@ P.wg = () => {
   const list = (wgList && wgList.clients) || peers.map(p => ({ name: p.name, ip: p.ip, source: '', hasConf: false }));
   const rows = list.map(c => { const p = peers.find(x => x.ip === c.ip) || {}; return `<tr><td><span class="dot l${p.active ? 0 : -1}"></span> ${esc(c.name)}${c.source === 'WS4W' ? ' <span class="sub">WS4W</span>' : ''}</td><td>${esc(c.ip)}</td><td class="hide-m">${esc(p.endpoint || '—')}</td><td>${p.hsAgo !== undefined ? ago(p.hsAgo) : '—'}</td><td class="hide-m">↓ ${fmtB(p.tx)} ↑ ${fmtB(p.rx)}</td>
     <td class="row" style="flex-wrap:nowrap">${c.hasConf ? btn('QR и настройки', `showConf('${esc(c.ip)}')`) : ''}${btn('Удалить', `delClient('${esc(c.ip)}','${esc(c.name)}')`)}</td></tr>`; }).join('');
-  return compHead('wg', btn('＋ Новый клиент', 'addClient()', true) + btn('Перезапустить туннель', "cmd('restart-wg','перезапуск wg_server')")) +
+  return compHead('wg', btn('＋ Новый клиент', 'addClient()', true) + btn('Перезапустить туннель', "cmd('restart-wg','перезапуск WG-Server')")) +
     `<div class="sec">Клиенты (зелёный — на связи за 3 минуты)</div><div class="card">${list.length ? `<table><tr><th>Клиент</th><th>IP</th><th class="hide-m">Откуда</th><th>Рукопожатие</th><th class="hide-m">Всего</th><th></th></tr>${rows}</table>` : '<p class="muted">Клиентов нет.</p>'}</div>` +
-    timeline('wg') + '<div class="sec">Подробности</div><div class="card">' + kvTable(comp('wg')) + '</div>' + chartBlock('w', 'Скорость wg_server — последние 2 часа');
+    timeline('wg') + '<div class="sec">Подробности</div><div class="card">' + kvTable(comp('wg')) + '</div>' + chartBlock('w', 'Скорость WG-Server — последние 2 часа');
 };
 P.wg.after = async () => { try { const r = await api('/api/wg/clients'); if (r.ok) { const changed = JSON.stringify(r) !== JSON.stringify(wgList); wgList = r; if (changed && page === 'wg') render(true); } } catch (e) { } };
 async function addClient() {
@@ -386,8 +373,8 @@ async function saveSettings() {
 }
 P.traffic = () => {
   const days = ((S.traffic && S.traffic.days) || []).slice().reverse();
-  return chartBlock('u', 'Туннель — последние 2 часа') + chartBlock('w', 'wg_server (клиенты) — последние 2 часа') + chartBlock('p', 'Физический адаптер — последние 2 часа') +
-    `<div class="sec">По дням</div><div class="card"><table><tr><th>День</th><th>Туннель ↓ / ↑</th><th class="hide-m">wg_server ↓ / ↑</th><th class="hide-m">Физический ↓ / ↑</th></tr>${days.map(d => `<tr><td>${esc(d.d)}</td><td>${fmtB(d.u[0])} / ${fmtB(d.u[1])}</td><td class="hide-m">${fmtB(d.w[0])} / ${fmtB(d.w[1])}</td><td class="hide-m">${fmtB(d.p[0])} / ${fmtB(d.p[1])}</td></tr>`).join('')}</table></div>`;
+  return chartBlock('u', 'Туннель — последние 2 часа') + chartBlock('w', 'WG-Server (клиенты) — последние 2 часа') + chartBlock('p', 'Физический адаптер — последние 2 часа') +
+    `<div class="sec">По дням</div><div class="card"><table><tr><th>День</th><th>Туннель ↓ / ↑</th><th class="hide-m">WG-Server ↓ / ↑</th><th class="hide-m">Физический ↓ / ↑</th></tr>${days.map(d => `<tr><td>${esc(d.d)}</td><td>${fmtB(d.u[0])} / ${fmtB(d.u[1])}</td><td class="hide-m">${fmtB(d.w[0])} / ${fmtB(d.w[1])}</td><td class="hide-m">${fmtB(d.p[0])} / ${fmtB(d.p[1])}</td></tr>`).join('')}</table></div>`;
 };
 P.system = () => {
   const sw = S.software || [], app = S.app || {}, rm = S.remote || {};
@@ -406,14 +393,14 @@ P.diag = () => `<div class="sec">Вход в веб-интерфейс</div><div
 P.diag.after = async () => { await loadWebSet(); await loadRemote(); };
 async function loadWebSet() {
   let w; try { w = await api('/api/websettings'); } catch (e) { $('#webset').innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
-  $('#webset').innerHTML = `<p>Адрес: <b>http://localhost:${w.port}/</b> на этом ПК; с других устройств — по адресу ПК в домашней сети или через wg_server.</p>
+  $('#webset').innerHTML = `<p>Адрес: <b>http://localhost:${w.port}/</b> на этом ПК; с других устройств — по адресу ПК в домашней сети или через WG-Server.</p>
     <label class="row" style="gap:8px"><input type="checkbox" id="reqpw" ${w.requirePassword ? 'checked' : ''} onchange="setReqPw(this.checked)"> Требовать пароль с других устройств</label>
-    <p class="muted">${w.requirePassword ? 'С этого ПК пароль не нужен никогда.' : 'Пароль не нужен из домашней сети и от клиентов wg_server. Из интернета (если открыта удалённая диагностика «откуда угодно») пароль нужен всегда.'}</p>
+    <p class="muted">${w.requirePassword ? 'С этого ПК пароль не нужен никогда.' : 'Пароль не нужен из домашней сети и от клиентов WG-Server. Из интернета (если открыта удалённая диагностика «откуда угодно») пароль нужен всегда.'}</p>
     ${w.local && w.password ? `<p>Текущий пароль: <code>${esc(w.password)}</code></p>` : ''}
     <div class="row"><input type="password" id="newpw" placeholder="новый пароль (6–64 символа)" autocomplete="new-password">${btn('Сохранить пароль', 'setPw()')}</div>`;
 }
 async function setReqPw(on) {
-  if (!on && !confirm('Отключить пароль? Веб-интерфейсом смогут управлять все устройства домашней сети и клиенты wg_server.')) { loadWebSet(); return; }
+  if (!on && !confirm('Отключить пароль? Веб-интерфейсом смогут управлять все устройства домашней сети и клиенты WG-Server.')) { loadWebSet(); return; }
   try { await api('/api/websettings', { requirePassword: on }); toast(on ? 'Пароль снова нужен' : 'Пароль в домашней сети не нужен'); } catch (e) { toast(e.message, true); }
   loadWebSet();
 }
@@ -427,11 +414,11 @@ async function loadRemote() {
   const addrs = [].concat(r.publicIp ? [`http://${r.publicIp}:${r.port}/  (через интернет — нужен проброс TCP ${r.port} на роутере)`] : [], (r.ips || []).map(a => `http://${a.ip}:${r.port}/  (сеть «${a.alias}»)`));
   const conn = r.enabled ? ['VpnGuard — удалённая диагностика (до ' + new Date(r.until).toLocaleString() + ')'].concat(addrs, ['Токен: ' + r.token, `Пример: curl -H "X-Token: ${r.token}" http://АДРЕС:${r.port}/bundle`]).join('\n') : '';
   $('#remote').innerHTML = r.enabled
-    ? `<p><span class="dot l0"></span> <b>Включена</b> до ${esc(new Date(r.until).toLocaleString())} · ${r.allowFrom === 'local' ? 'только домашняя сеть и wg_server' : 'откуда угодно'} · тесты и переподключения ${r.allowActions ? 'разрешены' : 'запрещены'} · запросов: ${r.requests}</p>
+    ? `<p><span class="dot l0"></span> <b>Включена</b> до ${esc(new Date(r.until).toLocaleString())} · ${r.allowFrom === 'local' ? 'только домашняя сеть и WG-Server' : 'откуда угодно'} · тесты и переподключения ${r.allowActions ? 'разрешены' : 'запрещены'} · запросов: ${r.requests}</p>
        <pre id="conn">${esc(conn)}</pre><div class="row">${btn('Скопировать данные для подключения', "navigator.clipboard.writeText($('#conn').textContent).then(()=>toast('Скопировано — отправьте вместе с сообщением'))", true)}${btn('Выключить', 'setRemote(false)')}</div>`
     : `<p class="muted">Выключена. По адресу ПК и токену можно будет читать состояние, журналы, сеть и запускать проверки. Ключи скрыты, выключается сама по таймеру.</p>
        <div class="row"><select id="rhours"><option value="2">на 2 ч</option><option value="8">на 8 ч</option><option value="24" selected>на 24 ч</option><option value="72">на 72 ч</option></select>
-       <select id="rfrom"><option value="local">только домашняя сеть и wg_server</option><option value="any">откуда угодно (через интернет)</option></select>
+       <select id="rfrom"><option value="local">только домашняя сеть и WG-Server</option><option value="any">откуда угодно (через интернет)</option></select>
        <label class="row" style="gap:6px"><input type="checkbox" id="ract"> разрешить тесты и переподключения</label>${btn('Включить', 'setRemote(true)', true)}</div>`;
 }
 async function setRemote(on) {
@@ -458,10 +445,9 @@ function render(force) {
   // во время ввода (выбор в списке, поиск) не перерисовывать
   const ae = document.activeElement; if (!force && ae && ['SELECT', 'INPUT', 'TEXTAREA'].includes(ae.tagName) && page !== 'home') return;
   if ((page === 'logs' && $('#log') || page === 'diag' && $('#remote') || page === 'settings' && $('#setbox')) && !force) return;
-  const keep = page === 'zapret' && $('#zltext') ? { text: $('#zltext').value, sel: $('#zlsel') && $('#zlsel').value } : page === 'amnezia' && $('#awgtext') ? { awg: $('#awgtext').value, awgname: $('#awgname').value } : null;
+  const keep = page === 'zapret' && $('#zltext') ? { text: $('#zltext').value, sel: $('#zlsel') && $('#zlsel').value } : null;
   $('#page').innerHTML = (P[page] || P.home)();
   for (const cv of document.querySelectorAll('canvas[data-chart]')) drawChart(cv, cv.dataset.chart);
-  if (keep && keep.awg !== undefined && $('#awgtext')) { $('#awgtext').value = keep.awg; $('#awgname').value = keep.awgname; }
   if (keep && keep.text !== undefined && zl) { loadZListsKeep(keep); } else if (P[page] && P[page].after) P[page].after();
 }
 function go() {

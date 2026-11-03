@@ -10,7 +10,7 @@ $RemoteRule      = 'VpnGuard remote diagnostics'
 $RemoteCmds = [ordered]@{
     'check-now' = $false; 'zapret-check' = $false; 'meduza-catalog' = $false; 'software-check' = $false; 'app-check' = $false; 'app-update' = $false
     'reconnect' = $true; 'reconnect-meduza' = $true; 'reconnect-awg' = $true; 'restart-wg' = $true; 'reapply-ics' = $true
-    'zapret-test' = $true; 'zapret-reload' = $true; 'meduza-test' = $true; 'awg-test' = $true; 'dual-switch' = $true
+    'zapret-test' = $true; 'zapret-reload' = $true; 'meduza-test' = $true; 'dual-switch' = $true
     'meduza-proto-reset' = $true; 'restart-meduza' = $true
 }
 
@@ -176,17 +176,6 @@ function Invoke-WebTask([string]$Task, [string]$Arg) {
                 $c = Get-RWgClient $argText
                 if (-not $c) { & $out @{ ok = $false; error = 'клиент не найден' } } else { $n = Remove-WgClient $c.PublicKey; & $out ([ordered]@{ ok = $true; name = "$n" }) }
             }
-            'awg-import' {
-                $j = $argText | ConvertFrom-Json
-                $n = Import-AmneziaConfig "$($j.text)" "$($j.name)"
-                & $out ([ordered]@{ ok = $true; name = "$n" })
-            }
-            'awg-remove' {
-                $c = @(Get-AmneziaConfigs) | Where-Object { $_.name -eq $argText } | Select-Object -First 1
-                if (-not $c) { & $out @{ ok = $false; error = 'конфиг не найден' } }
-                elseif ($argText -eq (Get-AmneziaActive) -and (Get-VpnMode) -in 'amnezia', 'dual') { & $out @{ ok = $false; error = 'этот конфиг сейчас используется — сначала сделайте активным другой или смените режим' } }
-                else { Remove-AmneziaConfig $argText; Write-Log "Веб-интерфейс: удалён конфиг AmneziaWG $argText (копия в data\backup)"; & $out ([ordered]@{ ok = $true; name = "$argText" }) }
-            }
             default { & $out @{ ok = $false; error = "неизвестная задача '$Task'" } }
         }
     } catch { & $out @{ ok = $false; error = $_.Exception.Message } }
@@ -310,7 +299,7 @@ function Get-RSystem {
         Get-Process | Where-Object { $_.ProcessName -match 'medusa|meduza|winws|wireguard|amnezia|awg|ws4w|WgServer|powershell|VpnGuardWeb|VpnGuardTray|VpnGuardAgent' } |
             Format-Table Id, ProcessName, @{ n = 'CPU,с'; e = { [int]$_.CPU } }, @{ n = 'МБ'; e = { [int]($_.WorkingSet64 / 1MB) } }, StartTime, Responding -AutoSize
         '===== службы'
-        Get-Service | Where-Object { $_.Name -match 'WireGuard|AmneziaWG|SharedAccess|zapret|WinDivert|iphlpsvc|Dnscache|BFE|mpssvc|MeduzaVPN' } | Format-Table Name, Status, StartType, DisplayName -AutoSize
+        Get-Service | Where-Object { $_.Name -match 'WireGuard|Amnezia|SharedAccess|zapret|WinDivert|iphlpsvc|Dnscache|BFE|mpssvc|MeduzaVPN' } | Format-Table Name, Status, StartType, DisplayName -AutoSize
         '===== задачи планировщика'
         Get-ScheduledTask | Where-Object { $_.TaskName -like 'VpnGuard*' } | ForEach-Object { $i = $_ | Get-ScheduledTaskInfo; "$($_.TaskName): $($_.State) · последний запуск $($i.LastRunTime) код $($i.LastTaskResult)" }
         '===== журнал System: ошибки и предупреждения за 48 ч (до 150)'
@@ -442,7 +431,7 @@ function Send-RJson($Ctx, $Obj, [int]$Code = 200) { Send-RResponse $Ctx $Code ($
 # команды веб-интерфейса — то же, что кнопки окна
 $WebCmds = @('check-now', 'reconnect', 'reconnect-meduza', 'reconnect-awg', 'restart-meduza', 'restart-wg', 'reapply-ics', 'check-update',
     'zapret-on', 'zapret-off', 'zapret-test', 'zapret-update', 'zapret-reload', 'zapret-check', 'meduza-test', 'meduza-catalog', 'meduza-proto-reset',
-    'awg-test', 'software-check', 'install-missing', 'app-check', 'app-update', 'dual-switch', 'zapret-releases')
+    'software-check', 'install-missing', 'app-check', 'app-update', 'dual-switch', 'zapret-releases')
 # настройки, которые можно менять из веб-интерфейса, с проверкой значения
 $WebCfgKeys = [ordered]@{
     'vpn.mode'         = '^(meduza|amnezia|dual|zapret)$'

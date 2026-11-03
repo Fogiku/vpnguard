@@ -37,7 +37,7 @@ param(
     [string]$ConfigPath = ''
 )
 
-$AgentVersion = '3.3.1'
+$AgentVersion = '3.4'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -104,11 +104,10 @@ function Get-DefaultConfig { @{
         failoverChecks = 2           # режим dual: сколько проверок подряд без трафика до переключения
         failbackMin  = 5             # режим dual: основной снова работает N мин — вернуть трафик на него (0 = не возвращать)
     }
-    amnezia = @{
-        exe               = 'C:\Program Files\AmneziaWG\amneziawg.exe'
-        servicePrefix     = 'AmneziaWGTunnel$'
-        active            = ''       # имя конфига из data\amnezia; пусто = первый
-        splitDefaultRoute = $true    # 0.0.0.0/0 → 0.0.0.0/1 + 128.0.0.0/1 (без «блокировки вне туннеля»)
+    amnezia = @{                   # приложение AmneziaVPN (сервер и протокол выбираются в нём самом)
+        exe            = ''          # пусто = из записи установщика или C:\Program Files\AmneziaVPN\AmneziaVPN.exe
+        serviceName    = 'AmneziaVPN-service'
+        adapterPattern = 'amnezia|tun2socks|TAP-Windows Adapter V9'   # имя или описание адаптера туннеля (зависит от протокола)
     }
     software = @{
         checkHours = 12
@@ -272,7 +271,7 @@ $State = @{
     mzProtoSince      = [datetime]::MinValue
     mzFallbackAt      = [datetime]::MinValue
     mzReturnAt        = [datetime]::MinValue
-    # AmneziaWG — свои счётчики (в режиме «два туннеля» работает вместе с MeduzaVPN)
+    # AmneziaVPN — свои счётчики (в режиме «два туннеля» работает вместе с MeduzaVPN)
     awgTraffic        = $null
     awgTrafficAt      = [datetime]::MinValue
     awgProbeFailures  = 0
@@ -623,7 +622,7 @@ function Update-MeduzaCatalog([switch]$Force) {
 function Invoke-MeduzaProtoTest {
     if (-not (Test-MeduzaPipe)) { Write-Log 'MeduzaVPN: тест протоколов невозможен — канал CLI недоступен' 'WARN'; return }
     Update-MeduzaCatalog -Force
-    # два туннеля: на время теста трафик — через AmneziaWG
+    # два туннеля: на время теста трафик — через AmneziaVPN
     if ((Get-VpnMode) -eq 'dual' -and (Get-DualActive) -eq 'meduza' -and (Test-KindOk 'amnezia')) { Switch-DualActive 'amnezia' 'тест протоколов MeduzaVPN' }
     $protos = @($State.catalog.protocols | ForEach-Object { $_.id } | Where-Object { $_ })
     if (-not $protos.Count) { $protos = @($M.protocol) }
@@ -1222,7 +1221,7 @@ function Invoke-Diag([switch]$TryFix) {
         Write-Host "Итог ICS: OK=$($st.Ok) (тип 0 = раздаёт интернет, 1 = получает)"
     }
 
-    Section 'Режим, AmneziaWG, компоненты'
+    Section 'Режим, AmneziaVPN, компоненты'
     Try-Run {
         Write-Host "Режим: $(Get-VpnMode) ($($ModeNames[(Get-VpnMode)])) · выход в интернет: $(Get-UplinkName) · физический: $(Get-PhysAlias)"
         if ((Get-VpnMode) -eq 'dual') {
@@ -1237,10 +1236,9 @@ function Invoke-Diag([switch]$TryFix) {
         Get-NetRoute -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.DestinationPrefix -in '0.0.0.0/0', '0.0.0.0/1', '128.0.0.0/1' } |
             ForEach-Object { Write-Host ("  {0,-14} {1,-28} шлюз {2,-15} метрика {3}+{4}" -f $_.DestinationPrefix, $_.InterfaceAlias, $_.NextHop, $_.RouteMetric, $_.InterfaceMetric) }
         Write-Host "MeduzaVPN: протокол выбран $($M.protocol), сейчас $(Get-MzProtocol), автоподбор $($M.autoProtocol -ne $false)"
-        Write-Host "AmneziaWG: $(Get-AwgExe) (есть: $(Test-Path (Get-AwgExe))) · активный конфиг: '$(Get-AmneziaActive)'"
-        try { $ti = Get-AwgTunnelInfo (Get-AmneziaActive); if ($ti) { Write-Host "  awg: сервер $($ti.Endpoint) рукопожатие $($ti.HsAgo) с назад, принято $($ti.Rx) отправлено $($ti.Tx)" } } catch { }
-        foreach ($c in @(Get-AmneziaConfigs)) { Write-Host ("  конфиг {0} «{1}» сервер {2} адрес {3}" -f $c.name, $c.title, $c.endpoint, $c.address) }
-        Get-Service | Where-Object { $_.Name -like 'AmneziaWG*' -or $_.Name -like 'WireGuardTunnel*' -or $_.Name -like 'WireGuardManager*' } |
+        $avp = Get-AvpnProc; $ava = Get-AvpnAdapter
+        Write-Host "AmneziaVPN: $(Get-AwgExe) (есть: $(Test-Path (Get-AwgExe))) · процесс: $(if ($avp) { "PID $($avp.Id)" } else { 'не запущен' }) · адаптер: $(if ($ava) { "$($ava.Name) ($($ava.Description)) $($ava.OperationalStatus)" } else { 'не найден' })"
+        Get-Service | Where-Object { $_.Name -like 'Amnezia*' -or $_.Name -like 'WireGuardTunnel*' -or $_.Name -like 'WireGuardManager*' } |
             ForEach-Object { Write-Host "  служба $($_.Name): $($_.Status) / $($_.StartType)" }
         foreach ($s in @(Get-SoftwareSnapshot)) { Write-Host ("Компонент {0,-24} установлен: {1,-12} последний: {2,-10} нужен: {3} {4}" -f $s.name, $(if ($s.installed) { $s.installed } else { '—' }), $s.latest, $s.needed, $s.error) }
     }
@@ -1514,13 +1512,11 @@ function Write-StatusSnapshot {
     $tFail = $(if ($kind -eq 'amnezia') { $State.awgProbeFailures } else { $State.probeFailures })
     $tWhy  = $(if ($kind -eq 'amnezia') { $State.awgLastReason } else { $State.lastRestartReason })
     if ($mode -eq 'zapret')              { $uL = 0; $uS = 'VPN выключен — напрямую' }
-    elseif ($kind -eq 'amnezia' -and -not $tun) { $uL = 2; $uS = 'Нет конфига AmneziaWG' }
+    elseif ($kind -eq 'amnezia' -and -not $tun) { $uL = 2; $uS = 'AmneziaVPN не подключён' }
     elseif (-not $uUp)                   { $uL = 2; $uS = 'Отключён' }
     elseif ($tTr -eq $false)             { $uL = 1; $uS = 'Нет трафика' }
     else                                 { $uL = 0; $uS = 'Подключён' }
-    $awgC = $null
-    if ($kind -eq 'amnezia' -and $tun) { $awgC = @(Get-AmneziaConfigs) | Where-Object { $_.name -eq $tun } | Select-Object -First 1 }
-    $kindTitle = $(if ($kind -eq 'amnezia') { 'AmneziaWG' + $(if ($awgC) { " — $($awgC.title)" } else { '' }) } else { "MeduzaVPN · $(Get-MzProtocol)" })
+    $kindTitle = $(if ($kind -eq 'amnezia') { 'AmneziaVPN' } else { "MeduzaVPN · $(Get-MzProtocol)" })
     $uTitle = $(if ($mode -eq 'zapret') { 'Без VPN (только zapret)' } else { "Туннель: $kindTitle" })
     $sb = $null
     if ($mode -eq 'dual') {
@@ -1533,7 +1529,7 @@ function Write-StatusSnapshot {
         elseif ($uL -eq 0) { $uS = 'Подключён · резерв готов' }
     }
     $uD = @(
-        $(if ($mode -eq 'zapret') { "Выход: $(Get-PhysAlias) · YouTube/Discord — через zapret" } elseif ($awgC) { "Сервер: $($awgC.endpoint)" } else { '' }),
+        $(if ($mode -eq 'zapret') { "Выход: $(Get-PhysAlias) · YouTube/Discord — через zapret" } else { '' }),
         $(if ($sb) { "Резерв: $($sb.name) — $($sb.state) · переключений: $($State.dualSwitches)" } else { '' }),
         ('Адаптер: ' + $(if ($ma) { "$tun · $($ma.Status), IP $uIp" } elseif ($mode -eq 'zapret') { 'не нужен' } else { 'отсутствует' })),
         ('Трафик: ' + $(if ($tTr -eq $true) { 'OK' } elseif ($tTr -eq $false) { 'НЕТ' } else { '—' }) + ", проверка $(Format-When $tTrAt)"),
@@ -1567,7 +1563,7 @@ function Write-StatusSnapshot {
         "Восстановлена: $(Format-When $State.lastIcsFix)"
     )
 
-    # AmneziaWG
+    # AmneziaVPN
     $awgS = $null
     try { $awgS = Get-AmneziaSnapshot } catch { $awgS = [ordered]@{ level = 2; state = 'Ошибка модуля'; details = @("$($_.Exception.Message)"); kv = @(); installed = $false; active = ''; configs = @(); test = $null } }
 
@@ -1612,13 +1608,12 @@ function Write-StatusSnapshot {
         $(if ($sb) { , @('Резервный туннель', "$($sb.name) — $($sb.state)") }),
         $(if ($mode -eq 'dual') { , @('Переключений', ("$($State.dualSwitches)" + $(if ($State.dualSwitches) { " · последнее $(Format-When $State.dualSwitchAt): $($State.dualReason)" } else { '' }))) }),
         $(if ($mode -eq 'dual') { , @('Резерв', ($(if ($Cfg.vpn.dualHot -ne $false) { 'горячий — оба туннеля подняты' } else { 'холодный — поднимается при сбое' }) + $(if ([int]$Cfg.vpn.failbackMin -gt 0) { ", возврат на основной через $($Cfg.vpn.failbackMin) мин" } else { '' }))) }),
-        $(if ($awgC) { , @('Конфиг AmneziaWG', "$($awgC.title) ($($awgC.name)) · сервер $($awgC.endpoint)") }),
         $(if ($mode -eq 'zapret') { , @('Выход в интернет', "$(Get-PhysAlias) напрямую, YouTube/Discord — через zapret") }),
         @('Адаптер', $(if ($ma) { "$($tun) · $($ma.Status) · $($ma.InterfaceDescription)" } else { 'отсутствует' })),
         @('IP', $(if ($uIp) { $uIp } else { '—' })),
         @('Скорость канала', $(if ($ma) { "$($ma.LinkSpeed)" } else { '—' })),
         @('Подключён с', (& $fmtSince $State.ultraUpSince)),
-        @('Протокол', $(if ($kind -eq 'meduza') { "$(Get-MzProtocol)" } elseif ($kind -eq 'amnezia') { 'AmneziaWG' } else { '—' })),
+        @('Протокол', $(if ($kind -eq 'meduza') { "$(Get-MzProtocol)" } elseif ($kind -eq 'amnezia') { 'выбран в AmneziaVPN' } else { '—' })),
         @('Проверка трафика', ($(if ($tTr -eq $true) { 'OK' } elseif ($tTr -eq $false) { 'НЕТ' } else { '—' }) + " · $(Format-When $tTrAt)")),
         @('Узлы проверки', (@($M.probeHosts) -join ', ')),
         @('Сбоев проверки подряд', "$tFail (переподключение после $($M.probeFailuresBeforeReconnect))"),
@@ -1743,7 +1738,6 @@ function Invoke-Commands {
             'zapret-reload'  { Invoke-ZapretReload }
             'meduza-test'    { Invoke-MeduzaProtoTest }
             'meduza-catalog' { Update-MeduzaCatalog -Force }
-            'awg-test'       { Invoke-AmneziaConfigTest }
             'software-check' { Invoke-SoftwareCheck -Force }
             'install-missing' { Install-MissingSoftware; Invoke-SoftwareCheck -Force }
             default {
@@ -1859,17 +1853,22 @@ else {
     function Invoke-ZapretReload { }
 }
 
-# ---------------------------------------------------------------- модули AmneziaWG и «Компоненты»
+# ---------------------------------------------------------------- модули AmneziaVPN и «Компоненты»
 
 $AmneziaModule = Join-Path $Root 'Amnezia.ps1'
 if (Test-Path $AmneziaModule) { . $AmneziaModule }
 else {
-    function Invoke-AmneziaWatch { Write-Log 'AmneziaWG: нет модуля Amnezia.ps1 рядом с VpnGuard.ps1' 'ERROR' }
+    function Invoke-AmneziaWatch { Write-Log 'AmneziaVPN: нет модуля Amnezia.ps1 рядом с VpnGuard.ps1' 'ERROR' }
     function Get-AmneziaActive { '' }
-    function Stop-AmneziaTunnels([string]$Except = '') { }
+    function Stop-AmneziaTunnels([string]$Except = '', [switch]$Close) { }
     function Invoke-AmneziaConfigTest { }
     function Get-AmneziaSnapshot { [ordered]@{ installed = $false; active = ''; configs = @(); test = $null } }
     function Get-AwgExe { '' }
+    function Get-AvpnProc { $null }
+    function Get-AvpnAdapter { $null }
+    function Test-AmneziaAlias([string]$Alias) { $false }
+    function Restart-AmneziaTunnel([string]$Name, [string]$Reason) { }
+    function Get-AmneziaConfigs { @() }
 }
 $UpdateModule = Join-Path $Root 'Update.ps1'
 if (Test-Path $UpdateModule) { . $UpdateModule }
@@ -1895,14 +1894,14 @@ else {
     function Get-SoftwareSnapshot { @() }
 }
 
-# ---------------------------------------------------------------- режим: MeduzaVPN / AmneziaWG / без VPN (только zapret)
+# ---------------------------------------------------------------- режим: MeduzaVPN / AmneziaVPN / без VPN (только zapret)
 
 function Get-VpnMode {
     $mt = $(if ($Cfg.vpn) { "$($Cfg.vpn.mode)" } else { '' })
     if ($mt -in 'meduza', 'amnezia', 'dual', 'zapret') { return $mt }
     return 'meduza'
 }
-$ModeNames = @{ meduza = 'MeduzaVPN'; amnezia = 'AmneziaWG'; dual = 'два туннеля (MeduzaVPN + AmneziaWG)'; zapret = 'без VPN (только zapret)' }
+$ModeNames = @{ meduza = 'MeduzaVPN'; amnezia = 'AmneziaVPN'; dual = 'два туннеля (MeduzaVPN + AmneziaVPN)'; zapret = 'без VPN (только zapret)' }
 
 # режим «два туннеля»: какой основной и через какой сейчас идёт трафик
 function Get-DualPrimary { $p = $(if ($Cfg.vpn) { "$($Cfg.vpn.primary)" } else { '' }); if ($p -in 'meduza', 'amnezia') { return $p }; return 'meduza' }
@@ -1926,7 +1925,7 @@ function Get-UplinkName {
 function Test-TunnelAlias([string]$Alias) {
     if (-not $Alias) { return $false }
     if ($Alias -like 'MeduzaVPN*' -or $Alias -eq $M.adapterName -or $Alias -eq $W.interfaceName) { return $true }
-    try { if (@(Get-AmneziaConfigs | Where-Object { $_.name -eq $Alias }).Count) { return $true } } catch { }
+    try { if (Test-AmneziaAlias $Alias) { return $true } } catch { }
     return $false
 }
 
@@ -2052,7 +2051,7 @@ function Invoke-VpnWatch {
             Write-Log 'MeduzaVPN: отключаю и закрываю (выбран другой режим)'
             Stop-Meduza
         }
-        if ($mode -notin 'amnezia', 'dual') { Stop-AmneziaTunnels '' }
+        if ($mode -notin 'amnezia', 'dual') { Stop-AmneziaTunnels '' -Close:($Cfg.vpn.stopInactive -ne $false) }
         if ($mode -in 'meduza', 'dual') { $State.meduzaStartedAt = Get-Date }
         if ($mode -eq 'dual') { $State.dualActive = Get-DualPrimary; $script:DualFails = 0; $script:DualOkSince = [datetime]::MinValue }
         $State.probeFailures = 0; $State.downTicks = 0; $State.lastTraffic = $null
@@ -2064,7 +2063,7 @@ function Invoke-VpnWatch {
         'meduza'  { Invoke-MeduzaWatch }
         'amnezia' {
             # MeduzaVPN запустили вручную и он подключился — отключить туннель (приложение не трогаем)
-            if (Get-UpAdapter $M.adapterName) { Write-Log 'MeduzaVPN: подключён, но выбран режим AmneziaWG — отключаю' 'WARN'; Disconnect-Meduza }
+            if (Get-UpAdapter $M.adapterName) { Write-Log 'MeduzaVPN: подключён, но выбран режим AmneziaVPN — отключаю' 'WARN'; Disconnect-Meduza }
             Invoke-AmneziaWatch
         }
         'dual'    { Invoke-DualWatch }
@@ -2077,7 +2076,7 @@ function Invoke-VpnWatch {
 }
 
 # ---------------------------------------------------------------- агент на C# (agent.engine = 'csharp')
-# Основной цикл (MeduzaVPN, AmneziaWG, wg_server, раздача, zapret, трафик, состояние) ведёт bin\VpnGuardAgent.exe из Agent.cs + Zapret.cs.
+# Основной цикл (MeduzaVPN, AmneziaVPN, wg_server, раздача, zapret, трафик, состояние) ведёт bin\VpnGuardAgent.exe из Agent.cs + Zapret.cs.
 # Он раз в 2 мин (или сразу по команде) запускает этот файл с -PsPart: обновления, компоненты, веб-сервер, значок.
 # Подбор стратегии zapret — как и раньше отдельным процессом -ZapretTest.
 

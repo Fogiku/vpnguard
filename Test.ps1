@@ -259,7 +259,8 @@ else {
         $zw = $(if ($mode -eq 'zapret') { 'Не установлен' } else { 'Выключен' })
         if ($j.zapret.state -ne $zw -or $null -eq $j.zapret.strategies -or $j.zapret.enabled -ne ($mode -eq 'zapret')) { $bad += "${mode}: zapret — '$($j.zapret.state)', ждали '$zw'" }
         if (@($j.software).Count -ne 1) { $bad += "${mode}: компоненты не взяты из status-ps.json" }
-        if ($mode -eq 'amnezia' -and (@($j.amnezia.configs).Count -ne 1 -or $j.amnezia.configs[0].title -ne 'Тест')) { $bad += 'amnezia: конфиг не прочитан' }
+        # AmneziaVPN не установлен в пустой папке; адаптер старого туннеля AmneziaWG (data\amnezia) — не туннель AmneziaVPN
+        if ($mode -eq 'amnezia' -and ($j.amnezia.state -notin 'Не установлен', 'Не запущен', 'Туннель не подключён', 'Подключён', 'Нет трафика' -or $j.amnezia.installed -eq $null -or $j.ultra.title -ne 'Туннель: AmneziaVPN')) { $bad += "amnezia: состояние '$($j.amnezia.state)', заголовок '$($j.ultra.title)'" }
         if (@($j.history).Count -lt 1) { $bad += "${mode}: нет истории" }
     }
     if ($bad) { $bad | Select-Object -Unique | ForEach-Object { Fail "агент C#: $_" } } else { Ok "собран ($([int]((Get-Item $agx).Length / 1KB)) КБ); снимок состояния в трёх режимах совпадает по форме с агентом PowerShell" }

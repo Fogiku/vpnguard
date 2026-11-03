@@ -1,18 +1,18 @@
 {
-    "version":  "3.3.1",
-    "build":  "20261103-1942",
+    "version":  "3.4",
+    "build":  "20261103-2014",
     "notes":  "",
-    "date":  "2026-11-03T19:42:26.2917653+03:00",
+    "date":  "2026-11-03T20:14:47.0911108+03:00",
     "files":  [
                   {
                       "path":  "Agent.cs",
-                      "sha256":  "42f67bfbb9078999dd973ac40b71e1358364aa4a17ce25bc5b24d6a053092c75",
-                      "size":  94553
+                      "sha256":  "2e5b2fff0a981f974c06267422126a2c84e002f65d1de46730a0f9b886f2cbdc",
+                      "size":  100765
                   },
                   {
                       "path":  "Amnezia.ps1",
-                      "sha256":  "228edb39e56c04687449466db2bcf3b183c07847c8d8604c63cb3d622847f1a1",
-                      "size":  22476
+                      "sha256":  "44402196973364bbeae5fbdeeab7892f855ce7065d8b942b1891b0857bb0ffa0",
+                      "size":  15088
                   },
                   {
                       "path":  "Install.cmd",
@@ -36,13 +36,13 @@
                   },
                   {
                       "path":  "README.md",
-                      "sha256":  "ac29a46894d6128e9626c9a8936b18d01410ef5c2e6454072d0acf5644750e0e",
-                      "size":  26702
+                      "sha256":  "59353a645ad497bed769175b9e854ad906f82226d8fd3d1f30d8f556981b989c",
+                      "size":  29064
                   },
                   {
                       "path":  "Remote.ps1",
-                      "sha256":  "fb1553448621dc10515209bc3dbfc2906816a9124f4326590de23c5d4be1db93",
-                      "size":  59789
+                      "sha256":  "036ecc20e4f1e5cb6345b7a5b65eaf381eca6b935c6086ffb614cc36ca760f1c",
+                      "size":  58767
                   },
                   {
                       "path":  "RemoteDiag.ps1",
@@ -51,18 +51,18 @@
                   },
                   {
                       "path":  "Software.ps1",
-                      "sha256":  "8624f202e6990bce673e58f5b7bb3d66d84d532715406dd160f6f74b850271f2",
-                      "size":  11221
+                      "sha256":  "2b298b34f1fa41b1a9045121d1d257c033e38b6846c2db8c63bcb43d902e0168",
+                      "size":  11591
                   },
                   {
                       "path":  "Test.ps1",
-                      "sha256":  "0790599c6908c6c377caea92464d2d137b6c161843edd78b48448e74ec5b059d",
-                      "size":  27039
+                      "sha256":  "0b25cd518aab84f759680935b3df6955b2cd9a18ea8ced11de0543a7a4cc58ba",
+                      "size":  27436
                   },
                   {
                       "path":  "Tray.cs",
-                      "sha256":  "cf291206b79149b14a557d7bbb9a97f3186c63ef3f39352e46038cedf6217f82",
-                      "size":  11966
+                      "sha256":  "363243c964018c45a728a84f77011ef9723a67e7cf3476515f97d4003b8ae0b9",
+                      "size":  11967
                   },
                   {
                       "path":  "Uninstall.cmd",
@@ -81,8 +81,8 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "6eebdfa6f4b11011b1c1d3cc998193a97cb54357c8007546c3861b26b6dc2853",
-                      "size":  142213
+                      "sha256":  "11ceda18815ee8495485d26618e056c57d0a83d24d85fa99059bb236abe545a8",
+                      "size":  141994
                   },
                   {
                       "path":  "VpnGuardMonitor.cmd",
@@ -91,18 +91,18 @@
                   },
                   {
                       "path":  "VpnGuardMonitor.ps1",
-                      "sha256":  "020af8071efdbe1df64a8d301e7ab3777fe4bc6d6e5048ebbefcde495d0a7106",
-                      "size":  187704
+                      "sha256":  "9a9777ab5fa8e175e0f4a3846fc320ea5476e3dd1d4b19f25b5cf7a1390c33de",
+                      "size":  179236
                   },
                   {
                       "path":  "Web.cs",
-                      "sha256":  "36531fb23b6f8ccce4c24fb6e7166d7e287c4da4770c89c6baca9c17bd52f25d",
-                      "size":  54745
+                      "sha256":  "f10598afc71ce07a2d929af18e68cbd9aee96bd156c622f7a3c30af8f2e2d1f8",
+                      "size":  53879
                   },
                   {
                       "path":  "web/index.html",
-                      "sha256":  "6e153ae65ec609f8c973cc336dd47d5428374e574f2e26b3216f9656883346f5",
-                      "size":  59192
+                      "sha256":  "a2b75f5a8b16bc952ab19b20b275c682f2573e8bbeae9ab0e5a8f6b2418f7e37",
+                      "size":  57207
                   },
                   {
                       "path":  "Wg.ps1",

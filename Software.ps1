@@ -1,5 +1,5 @@
 ﻿# VpnGuard — модуль «Компоненты»: установка и обновление всего нужного софта.
-# MeduzaVPN и его CLI, WireGuard (для wg_server), AmneziaWG, WS4W (окно настройки сервера), zapret.
+# MeduzaVPN и его CLI, WireGuard (для WG-Server), AmneziaVPN, WS4W (окно настройки сервера), zapret.
 # Источники — официальные: сервер сборок MeduzaVPN, download.wireguard.com, релизы GitHub.
 # Проверка: подпись Authenticode (где издатель известен) и sha256 из GitHub (если GitHub его отдаёт).
 
@@ -8,8 +8,8 @@ $SwDlDir = Join-Path $DataDir 'downloads'
 $SwDefs = [ordered]@{
     meduza    = @{ name = 'MeduzaVPN';            purpose = 'VPN (режим MeduzaVPN)' }
     meduzacli = @{ name = 'MeduzaVPN CLI';        purpose = 'управление MeduzaVPN из агента' }
-    wireguard = @{ name = 'WireGuard';            purpose = 'туннель wg_server для клиентов' }
-    amneziawg = @{ name = 'AmneziaWG';            purpose = 'VPN (режим AmneziaWG)'; repo = 'amnezia-vpn/amneziawg-windows-client'; asset = 'amd64.*\.msi$'; reg = '^AmneziaWG'; signer = 'Privacy Technologies OU' }
+    wireguard = @{ name = 'WireGuard';            purpose = 'туннель WG-Server для клиентов' }
+    amneziavpn = @{ name = 'AmneziaVPN';          purpose = 'VPN (режим AmneziaVPN)'; repo = 'amnezia-vpn/amnezia-client'; asset = '_windows_x64\.exe$'; reg = '^AmneziaVPN' }
     ws4w      = @{ name = 'WS4W';                 purpose = 'окно настройки сервера (не обязательно)'; repo = 'micahmo/WgServerforWindows'; asset = '\.(msi|exe)$'; reg = '^(WS4W|WireGuard Server For Windows)' }
     zapret    = @{ name = 'zapret-discord-youtube'; purpose = 'YouTube и Discord мимо блокировок' }
 }
@@ -61,13 +61,13 @@ function Save-VerifiedFile($Rel, [string]$Signer = '') {
     return $dst
 }
 
-function Install-Package([string]$Path, [string]$ExtraMsi = '') {
+function Install-Package([string]$Path, [string]$ExtraMsi = '', [string]$ExeArgs = '') {
     if ($Path -like '*.msi') {
         $p = Start-Process msiexec.exe -ArgumentList "/i `"$Path`" /qn /norestart $ExtraMsi" -Wait -PassThru
         if ($p.ExitCode -notin 0, 3010) { throw "msiexec завершился с кодом $($p.ExitCode)" }
     } else {
-        # у установщика нет известного тихого режима — откроется окно установки
-        $p = Start-Process $Path -Wait -PassThru
+        # без известного тихого режима откроется окно установки
+        $p = $(if ($ExeArgs) { Start-Process $Path -ArgumentList $ExeArgs -Wait -PassThru } else { Start-Process $Path -Wait -PassThru })
         if ($p.ExitCode -ne 0) { throw "установщик завершился с кодом $($p.ExitCode)" }
     }
 }
@@ -77,7 +77,7 @@ function Get-SwInstalled([string]$Id) {
         'meduza'    { $v = Get-MeduzaVersion; if ($v -gt [version]'0.0') { return "$v" }; return '' }
         'meduzacli' { if (Test-Path (Get-CliPath)) { $vi = (Get-Item (Get-CliPath)).VersionInfo.ProductVersion; return $(if ($vi) { "$vi" } else { 'есть' }) }; return '' }
         'wireguard' { $e = Get-InstalledApp '^WireGuard$'; if ($e) { return "$($e.DisplayVersion)" }; if (Test-Path $W.wireguardExe) { return 'есть' }; return '' }
-        'amneziawg' { $e = Get-InstalledApp $SwDefs.amneziawg.reg; if ($e) { return "$($e.DisplayVersion)" }; if (Test-Path (Get-AwgExe)) { return 'есть' }; return '' }
+        'amneziavpn' { $e = Get-InstalledApp $SwDefs.amneziavpn.reg; if ($e) { return "$($e.DisplayVersion)" }; if (Test-Path (Get-AwgExe)) { $vi = (Get-Item (Get-AwgExe)).VersionInfo.ProductVersion; return $(if ($vi) { "$vi" } else { 'есть' }) }; return '' }
         'ws4w'      { $e = Get-InstalledApp $SwDefs.ws4w.reg; if ($e) { return "$($e.DisplayVersion)" }; return '' }
         'zapret'    { $v = Get-ZapretLocalVersion; return $(if ($v) { "$v" } else { '' }) }
     }
@@ -90,7 +90,7 @@ function Test-SwNeeded([string]$Id) {
         'meduza'    { return $mode -eq 'meduza' }
         'meduzacli' { return $mode -eq 'meduza' }
         'wireguard' { return $true }
-        'amneziawg' { return $mode -eq 'amnezia' }
+        'amneziavpn' { return $mode -in 'amnezia', 'dual' }
         'ws4w'      { return $false }
         'zapret'    { return [bool]((Get-ZCfg).enabled) }
     }
@@ -145,7 +145,9 @@ function Install-Software([string]$Id) {
                 $rel = Get-GitHubLatest $d.repo $d.asset
                 $f = Save-VerifiedFile $rel "$($d.signer)"
                 Write-Log "Компоненты: устанавливаю $nm $($rel.Version)"
-                Install-Package $f $(if ($Id -eq 'amneziawg') { 'DO_NOT_LAUNCH=1' } else { '' })
+                # AmneziaVPN — установщик Qt Installer Framework: тихая установка из командной строки
+                if ($Id -eq 'amneziavpn') { Install-Package $f '' 'install --accept-licenses --default-answer --confirm-command' }
+                else { Install-Package $f '' }
                 Remove-Item $f -Force -ErrorAction SilentlyContinue
             }
         }

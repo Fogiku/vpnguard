@@ -1,6 +1,6 @@
-// VpnGuard — агент на C# (шаг 1): основной цикл вместо PowerShell.
-// Делает сам: MeduzaVPN (процесс, подключение, трафик, перезапуски, запасной протокол, тест протоколов), AmneziaWG (туннель,
-// трафик, перезапуски, тест конфигов), режим «без VPN», wg_server, раздача ICS, трафик, история, состояние для окна/веб/значка.
+﻿// VpnGuard — агент на C# (шаг 1): основной цикл вместо PowerShell.
+// Делает сам: MeduzaVPN (процесс, подключение, трафик, перезапуски, запасной протокол, тест протоколов), AmneziaVPN (приложение,
+// туннель, трафик, перезапуски), режим «без VPN», wg_server, раздача ICS, трафик, история, состояние для окна/веб/значка.
 // Поручает PowerShell (VpnGuard.ps1 -PsPart, коротко, раз в 2 мин или сразу по команде): zapret, обновления VpnGuard/MeduzaVPN/
 // компонентов, веб-сервер, значок, создание сервера wg_server, остальные команды. Режим «два туннеля» — пока агент на PowerShell.
 // Собирается встроенным компилятором .NET Framework (C# 5), запускается из VpnGuard.ps1, если agent.engine = 'csharp'.
@@ -46,7 +46,7 @@ namespace VpnGuard
         static string LastRestartReason = "", AwgLastReason = "", MzOverride = "", MzAdapter = "", Activity = "", LastMode = null;
         static DateTime ActivitySince = DateTime.MinValue;
         static bool ForceIcs;
-        static Dictionary<string, object> Catalog, ProtoTest, AwgTest;
+        static Dictionary<string, object> Catalog, ProtoTest;
         static readonly List<Dictionary<string, object>> History = new List<Dictionary<string, object>>();
         static Process PsPart; static DateTime PsPartAt = DateTime.MinValue;
 
@@ -84,6 +84,7 @@ namespace VpnGuard
             LoadCfg(true);
             LoadTrafficDays();
             Log("VpnGuard " + Version + " запущен — агент на C# (PID " + Process.GetCurrentProcess().Id + ")", "INFO");
+            try { CleanupOldAwg(); } catch (Exception e) { Log("AmneziaVPN: очистка старых туннелей AmneziaWG: " + e.Message, "WARN"); }
             MeduzaStartedAt = DateTime.Now;
             while (true) {
                 var t0 = DateTime.Now;
@@ -127,7 +128,7 @@ namespace VpnGuard
             {"meduza.probeFailuresBeforeReconnect", 3}, {"meduza.maxRestartsPer30Min", 5}, {"meduza.autoProtocol", true}, {"meduza.protocolReturnMin", 60},
             {"ws4w.interfaceName", "wg_server"}, {"ws4w.serviceName", "WireGuardTunnel$wg_server"}, {"ws4w.configPath", ""}, {"ws4w.wireguardExe", @"C:\Program Files\WireGuard\wireguard.exe"},
             {"ws4w.serverAddress", ""}, {"ws4w.autoCreateServer", true}, {"sharing.enabled", true},
-            {"amnezia.exe", @"C:\Program Files\AmneziaWG\amneziawg.exe"}, {"amnezia.servicePrefix", "AmneziaWGTunnel$"}, {"amnezia.active", ""},
+            {"amnezia.exe", ""}, {"amnezia.serviceName", "AmneziaVPN-service"}, {"amnezia.adapterPattern", "amnezia|tun2socks|TAP-Windows Adapter V9"},
             {"zapret.enabled", false} };
         static void LoadCfg(bool force)
         {
@@ -236,7 +237,7 @@ namespace VpnGuard
         {
             if (string.IsNullOrEmpty(alias)) return false;
             if (alias.StartsWith("MeduzaVPN", StringComparison.OrdinalIgnoreCase) || alias == MzAdapterName() || alias == WgIf()) return true;
-            return AwgConfigs().Any(c => c.Name == alias);
+            return IsAvpnAlias(alias);
         }
         // физический выход: работающий адаптер со шлюзом IPv4, не туннель
         static string PhysAlias()
@@ -252,7 +253,7 @@ namespace VpnGuard
         }
 
         // ---------------------------------------------------------------- команды
-        static readonly string[] OwnCmds = { "check-now", "reconnect", "reconnect-meduza", "reconnect-awg", "restart-meduza", "restart-wg", "reapply-ics", "meduza-test", "meduza-catalog", "meduza-proto-reset", "awg-test",
+        static readonly string[] OwnCmds = { "check-now", "reconnect", "reconnect-meduza", "reconnect-awg", "restart-meduza", "restart-wg", "reapply-ics", "meduza-test", "meduza-catalog", "meduza-proto-reset",
             "zapret-on", "zapret-off", "zapret-check", "zapret-releases", "zapret-update", "zapret-reload", "zapret-test" };
         static void Commands()
         {
@@ -267,18 +268,17 @@ namespace VpnGuard
                 Log("Команда из монитора: " + a, "INFO");
                 switch (a) {
                     case "reconnect":
-                        if (Mode() == "amnezia") { var n = AwgActive(); if (n != null) { AwgRestarts.Clear(); AwgRestart(n.Name, "по команде из окна"); } }
+                        if (Mode() == "amnezia") { AwgRestarts.Clear(); AwgRestart("по команде из окна"); }
                         else if (Mode() == "meduza") { MzReconnectCmd(); }
                         break;
                     case "reconnect-meduza": MzReconnectCmd(); break;
-                    case "reconnect-awg": { var n = AwgActive(); if (n != null) { AwgRestarts.Clear(); AwgRestart(n.Name, "по команде из окна"); } } break;
+                    case "reconnect-awg": AwgRestarts.Clear(); AwgRestart("по команде из окна"); break;
                     case "restart-meduza": Restarts.Clear(); MzRestart("по команде из монитора"); break;
                     case "restart-wg": SvcRestart(CfgStr("ws4w.serviceName", "")); ForceIcs = true; break;
                     case "reapply-ics": ForceIcs = true; break;
                     case "meduza-test": MzProtoTest(); break;
                     case "meduza-catalog": MzCatalog(true); break;
                     case "meduza-proto-reset": if (MzOverride.Length > 0) { MzReturnAt = DateTime.MinValue; MzProtoReturn(); } break;
-                    case "awg-test": AwgConfigTest(); break;
                     default: try { ZCommand(a); } catch (Exception e) { Log("zapret: " + a + ": " + e.Message, "ERROR"); } break;
                 }
             }
@@ -524,103 +524,146 @@ namespace VpnGuard
             if (DownTicks >= 3) { DownTicks = 0; MzRestart("туннель не подключается"); }
         }
 
-        // ---------------------------------------------------------------- AmneziaWG
-        class AwgCfg { public string Name, Title, Endpoint, Address, File; }
-        static List<AwgCfg> AwgConfigs()
+        // ---------------------------------------------------------------- AmneziaVPN (режим amnezia)
+        // Приложение AmneziaVPN: сервер и протокол выбираются в нём самом, командной строки нет. Агент держит его запущенным,
+        // находит адаптер туннеля (имя/описание по шаблону — зависит от протокола), проверяет трафик и при сбое перезапускает
+        // приложение и его службу (туннель поднимается сам, если в AmneziaVPN включено «Автоподключение»).
+        static string AvpnLastAdapter = ""; static DateTime AvpnStartedAt = DateTime.MinValue;
+        static string AwgExe()
         {
-            var l = new List<AwgCfg>(); if (!Directory.Exists(AwgDir)) return l;
-            foreach (var f in Directory.GetFiles(AwgDir, "*.conf").OrderBy(x => x)) {
-                string t = ""; try { t = File.ReadAllText(f); } catch { }
-                var nm = Regex.Match(t, @"(?m)^#\s*Name\s*=\s*(.+?)\s*$").Groups[1].Value;
-                l.Add(new AwgCfg { Name = Path.GetFileNameWithoutExtension(f), Title = nm.Length > 0 ? nm : Path.GetFileNameWithoutExtension(f), File = f,
-                    Endpoint = Regex.Match(t, @"(?m)^\s*Endpoint\s*=\s*(\S+)").Groups[1].Value, Address = Regex.Match(t, @"(?m)^\s*Address\s*=\s*([^\r\n]+)").Groups[1].Value.Trim() });
+            var p = CfgStr("amnezia.exe", ""); if (p.IndexOf("AmneziaVPN", StringComparison.OrdinalIgnoreCase) >= 0 && p.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return p;
+            var loc = AppUninstall("^AmneziaVPN", "InstallLocation");
+            if (!string.IsNullOrEmpty(loc) && File.Exists(Path.Combine(loc, "AmneziaVPN.exe"))) return Path.Combine(loc, "AmneziaVPN.exe");
+            return @"C:\Program Files\AmneziaVPN\AmneziaVPN.exe";
+        }
+        static string AppUninstall(string nameRx, string value)
+        {
+            foreach (var hive in new[] { Registry.LocalMachine, Registry.CurrentUser })
+                foreach (var root in new[] { @"Software\Microsoft\Windows\CurrentVersion\Uninstall", @"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall" }) {
+                    try {
+                        using (var k = hive.OpenSubKey(root)) {
+                            if (k == null) continue;
+                            foreach (var sub in k.GetSubKeyNames()) using (var s = k.OpenSubKey(sub)) {
+                                var dn = s == null ? null : s.GetValue("DisplayName") as string;
+                                if (dn != null && Regex.IsMatch(dn, nameRx, RegexOptions.IgnoreCase)) return Convert.ToString(s.GetValue(value));
+                            }
+                        }
+                    } catch { }
+                }
+            return null;
+        }
+        static string AvpnSvcName() { return CfgStr("amnezia.serviceName", "AmneziaVPN-service"); }
+        static string AvpnPattern() { return CfgStr("amnezia.adapterPattern", "amnezia|tun2socks|TAP-Windows Adapter V9"); }
+        static Process AvpnProc() { try { return Process.GetProcessesByName("AmneziaVPN").FirstOrDefault(); } catch { return null; } }
+        // адаптер туннеля (поднятый — в первую очередь); имя запоминаем — оно нужно раздаче, пока туннель переподключается
+        static NetworkInterface AvpnNic()
+        {
+            NetworkInterface a = null;
+            try {
+                var rx = new Regex(AvpnPattern(), RegexOptions.IgnoreCase);
+                var old = OldAwgNames();
+                a = NetworkInterface.GetAllNetworkInterfaces().Where(n => (rx.IsMatch(n.Name) || rx.IsMatch(n.Description)) && !old.Contains(n.Name))
+                    .OrderBy(n => n.OperationalStatus == OperationalStatus.Up ? 0 : 1).FirstOrDefault();
+            } catch { }
+            if (a != null) AvpnLastAdapter = a.Name;
+            return a;
+        }
+        // туннели AmneziaWG, которые раньше создавал сам VpnGuard (data\amnezia\*.conf) — после перехода на AmneziaVPN не нужны
+        static HashSet<string> OldAwgNames()
+        {
+            var h = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var d in new[] { AwgDir, Path.Combine(DataDir, "amnezia-old") }) { try { if (Directory.Exists(d)) foreach (var f in Directory.GetFiles(d, "*.conf")) h.Add(Path.GetFileNameWithoutExtension(f)); } catch { } }
+            return h;
+        }
+        static void CleanupOldAwg()
+        {
+            if (!Directory.Exists(AwgDir)) return;
+            string awgExe = @"C:\Program Files\AmneziaWG\amneziawg.exe";
+            foreach (var n in OldAwgNames()) {
+                var svc = "AmneziaWGTunnel$" + n;
+                if (Svc(svc) == null) continue;
+                Log("AmneziaVPN вместо AmneziaWG: удаляю старый туннель AmneziaWG «" + n + "», созданный VpnGuard", "WARN");
+                if (!File.Exists(awgExe) || Exe(awgExe, "/uninstalltunnelservice \"" + n + "\"", 60).Code != 0) { try { var s = Svc(svc); if (s != null) s.Stop(); } catch { } }
             }
-            return l;
+            try { var dst = Path.Combine(DataDir, "amnezia-old"); if (!Directory.Exists(dst)) { Directory.Move(AwgDir, dst); Log("AmneziaVPN вместо AmneziaWG: конфиги AmneziaWG перенесены в data\\amnezia-old", "INFO"); } } catch { }
         }
-        static AwgCfg AwgActive() { var l = AwgConfigs(); var a = CfgStr("amnezia.active", ""); return l.FirstOrDefault(c => c.Name == a) ?? l.FirstOrDefault(); }
-        static string AwgExe() { return CfgStr("amnezia.exe", @"C:\Program Files\AmneziaWG\amneziawg.exe"); }
-        static string AwgSvc(string name) { return CfgStr("amnezia.servicePrefix", "AmneziaWGTunnel$") + name; }
-        static void AwgStart(string name)
+        static string AvpnAdapter() { var a = AvpnNic(); return a != null ? a.Name : AvpnLastAdapter; }
+        static bool IsAvpnAlias(string alias)
         {
-            if (!File.Exists(AwgExe())) throw new Exception("AmneziaWG не установлен (" + AwgExe() + ") — установите его на вкладке «Компоненты»");
-            var f = Path.Combine(AwgDir, name + ".conf"); if (!File.Exists(f)) throw new Exception("нет конфига " + f);
-            var r = Exe(AwgExe(), "/installtunnelservice \"" + f + "\"", 60); if (r.Code != 0) throw new Exception("installtunnelservice: код " + r.Code + " " + r.Err);
-            SetAutoStart(AwgSvc(name));
+            if (string.IsNullOrEmpty(alias)) return false;
+            if (alias == AvpnLastAdapter) return true;
+            try { return Regex.IsMatch(alias, AvpnPattern(), RegexOptions.IgnoreCase); } catch { return false; }
         }
-        static void AwgStop(string name)
+        static void AvpnStart()
         {
-            if (Svc(AwgSvc(name)) == null) return;
-            if (File.Exists(AwgExe()) && Exe(AwgExe(), "/uninstalltunnelservice \"" + name + "\"", 60).Code == 0) return;
-            try { var s = Svc(AwgSvc(name)); if (s != null) s.Stop(); } catch { }
+            var exe = AwgExe();
+            if (!File.Exists(exe)) throw new Exception("AmneziaVPN не установлен (" + exe + ") — установите его на вкладке «Компоненты»");
+            try { var s = Svc(AvpnSvcName()); if (s != null && s.Status != ServiceControllerStatus.Running) s.Start(); } catch (Exception e) { Log("AmneziaVPN: служба " + AvpnSvcName() + " не запускается: " + e.Message, "WARN"); }
+            Log("AmneziaVPN: запуск " + exe, "INFO");
+            Process.Start(new ProcessStartInfo(exe) { WorkingDirectory = Path.GetDirectoryName(exe), UseShellExecute = true, WindowStyle = ProcessWindowStyle.Minimized });
+            AvpnStartedAt = DateTime.Now;
         }
-        static void AwgStopAll(string except)
+        // закрыть приложение и разорвать туннель: служба AmneziaVPN держит его и без окна — перезапускаем её
+        static void AvpnStop()
         {
-            foreach (var c in AwgConfigs()) { if (c.Name == except) continue; if (Svc(AwgSvc(c.Name)) != null) { Log("AmneziaWG: отключаю туннель " + c.Name, "INFO"); AwgStop(c.Name); } }
+            foreach (var p in Process.GetProcessesByName("AmneziaVPN")) { try { p.Kill(); p.WaitForExit(10000); } catch { } }
+            try { foreach (var s in ServiceController.GetServices().Where(x => x.ServiceName.StartsWith("AmneziaWGTunnel$", StringComparison.OrdinalIgnoreCase) && x.ServiceName.IndexOf("AmneziaVPN", StringComparison.OrdinalIgnoreCase) >= 0 && x.Status == ServiceControllerStatus.Running)) s.Stop(); } catch { }
+            SvcRestart(AvpnSvcName());
         }
         static bool WaitUp(string name, int sec) { var dl = DateTime.Now.AddSeconds(sec); do { if (Up(name)) return true; Thread.Sleep(1000); } while (DateTime.Now < dl); return false; }
+        static string WaitAvpnUp(int sec)
+        {
+            var dl = DateTime.Now.AddSeconds(sec);
+            do { var a = AvpnNic(); if (a != null && a.OperationalStatus == OperationalStatus.Up) return a.Name; Thread.Sleep(2000); } while (DateTime.Now < dl);
+            return null;
+        }
         static bool AwgTrafficOk(string name) { bool ok = ProbeVia(name, 4000, null); AwgTraffic = ok; AwgTrafficAt = DateTime.Now; return ok; }
-        static void AwgRestart(string name, string reason)
+        static void AwgRestart(string reason)
         {
             AwgRestarts.RemoveAll(d => d < DateTime.Now.AddMinutes(-30));
-            if (AwgRestarts.Count >= CfgInt("meduza.maxRestartsPer30Min", 5)) { Log("AmneziaWG: слишком много перезапусков за 30 мин, пауза (" + reason + ")", "WARN"); return; }
+            if (AwgRestarts.Count >= CfgInt("meduza.maxRestartsPer30Min", 5)) { Log("AmneziaVPN: слишком много перезапусков за 30 мин, пауза (" + reason + ")", "WARN"); return; }
             AwgRestarts.Add(DateTime.Now); AwgLastRestart = DateTime.Now; AwgLastReason = reason; RestartCount++;
-            Log("AmneziaWG: ПЕРЕЗАПУСК туннеля " + name + " — " + reason, "WARN"); SetActivity("перезапускаю AmneziaWG (" + name + ")");
-            AwgStop(name); Thread.Sleep(2000);
-            try { AwgStart(name); ReconnectCount++; } catch (Exception e) { Log("AmneziaWG: " + e.Message, "ERROR"); return; }
-            if (WaitUp(name, 20)) { Log("AmneziaWG: туннель " + name + " поднят", "INFO"); ForceIcs = true; }
+            Log("AmneziaVPN: ПЕРЕЗАПУСК — " + reason, "WARN"); SetActivity("перезапускаю AmneziaVPN");
+            AvpnStop(); Thread.Sleep(3000);
+            try { AvpnStart(); ReconnectCount++; } catch (Exception e) { Log("AmneziaVPN: " + e.Message, "ERROR"); return; }
+            var n = WaitAvpnUp(60);
+            if (n != null) { Log("AmneziaVPN: туннель поднят (" + n + ")", "INFO"); ForceIcs = true; AwgDownTicks = 0; }
+            else Log("AmneziaVPN: после перезапуска туннель не поднялся — проверьте, что в AmneziaVPN включено «Автоподключение»", "WARN");
+        }
+        // выбран другой режим: туннель AmneziaVPN не должен работать (closeApp — закрыть и само приложение)
+        static void AvpnDisable(bool closeApp)
+        {
+            var a = AvpnNic(); bool up = a != null && a.OperationalStatus == OperationalStatus.Up;
+            if (up || (closeApp && AvpnProc() != null)) { Log("AmneziaVPN: отключаю (выбран другой режим)", "INFO"); AvpnStop(); }
         }
         static DateTime AwgWarnAt = DateTime.MinValue;
         static void AmneziaWatch()
         {
-            var c = AwgActive();
-            if (c == null) { if ((DateTime.Now - AwgWarnAt).TotalMinutes >= 10) { Log("AmneziaWG: нет ни одного конфига — импортируйте его (вкладка AmneziaWG)", "WARN"); AwgWarnAt = DateTime.Now; } return; }
-            if (!File.Exists(AwgExe())) { if ((DateTime.Now - AwgWarnAt).TotalMinutes >= 10) { Log("AmneziaWG не установлен (" + AwgExe() + ") — установите на вкладке «Компоненты»", "ERROR"); AwgWarnAt = DateTime.Now; } return; }
-            AwgStopAll(c.Name);
-            var svc = Svc(AwgSvc(c.Name));
-            if (svc == null) {
-                Log("AmneziaWG: подключаю туннель " + c.Name, "INFO"); SetActivity("подключаю AmneziaWG (" + c.Name + ")");
-                try { AwgStart(c.Name); ReconnectCount++; } catch (Exception e) { Log("AmneziaWG: " + e.Message, "ERROR"); return; }
-                if (WaitUp(c.Name, 20)) { Log("AmneziaWG: туннель " + c.Name + " поднят", "INFO"); ForceIcs = true; }
+            if (!File.Exists(AwgExe())) { if ((DateTime.Now - AwgWarnAt).TotalMinutes >= 10) { Log("AmneziaVPN не установлен (" + AwgExe() + ") — установите на вкладке «Компоненты» и добавьте сервер в приложении", "ERROR"); AwgWarnAt = DateTime.Now; } return; }
+            if (AvpnProc() == null) {
+                Log("AmneziaVPN: приложение не запущено", "WARN"); SetActivity("запускаю AmneziaVPN");
+                try { AvpnStart(); } catch (Exception e) { Log("AmneziaVPN: " + e.Message, "ERROR") ; }
                 return;
             }
-            if (svc.Status != ServiceControllerStatus.Running) {
-                Log("AmneziaWG: служба туннеля в состоянии " + svc.Status + " — запускаю", "WARN");
-                try { svc.Start(); } catch { AwgRestart(c.Name, "служба не запускается"); }
+            var a = AvpnNic();
+            if (a != null && a.OperationalStatus == OperationalStatus.Up) {
+                AwgDownTicks = 0;
+                if (AwgTrafficOk(a.Name)) { AwgProbeFailures = 0; return; }
+                AwgProbeFailures++;
+                Log("AmneziaVPN: нет трафика через туннель (" + AwgProbeFailures + "/" + CfgInt("meduza.probeFailuresBeforeReconnect", 3) + ")", "WARN");
+                if (AwgProbeFailures >= CfgInt("meduza.probeFailuresBeforeReconnect", 3)) { AwgProbeFailures = 0; AwgRestart("туннель не пропускает трафик"); }
                 return;
             }
-            if (!Up(c.Name)) { AwgDownTicks++; AwgTraffic = null; Log("AmneziaWG: адаптер " + c.Name + " не поднят (" + AwgDownTicks + ")", "WARN"); if (AwgDownTicks >= 2) { AwgDownTicks = 0; AwgRestart(c.Name, "адаптер не поднят"); } return; }
-            AwgDownTicks = 0;
-            if (AwgTrafficOk(c.Name)) { AwgProbeFailures = 0; return; }
-            AwgProbeFailures++;
-            Log("AmneziaWG: нет трафика через туннель (" + AwgProbeFailures + "/" + CfgInt("meduza.probeFailuresBeforeReconnect", 3) + ")", "WARN");
-            if (AwgProbeFailures >= CfgInt("meduza.probeFailuresBeforeReconnect", 3)) { AwgProbeFailures = 0; AwgRestart(c.Name, "туннель не пропускает трафик"); }
-        }
-        static void AwgConfigTest()
-        {
-            var list = AwgConfigs();
-            if (list.Count == 0) { Log("AmneziaWG: нет конфигов для теста", "WARN"); return; }
-            if (!File.Exists(AwgExe())) { Log("AmneziaWG: не установлен — тест невозможен", "WARN"); return; }
-            var res = new List<object>();
-            AwgTest = new Dictionary<string, object> { { "running", true }, { "index", 0 }, { "total", list.Count }, { "current", "" }, { "results", res }, { "at", "" } };
-            Log("AmneziaWG: тест конфигов: " + string.Join(", ", list.Select(x => x.Name)), "WARN");
-            var active = AwgActive(); AwgStopAll(""); int i = 0;
-            foreach (var c in list) {
-                i++; AwgTest["index"] = i; AwgTest["current"] = c.Title; SetActivity("тест AmneziaWG: " + c.Title + " (" + i + "/" + list.Count + ")");
-                var sw = Stopwatch.StartNew(); string err = ""; var ms = new List<long>();
-                try { AwgStart(c.Name); if (WaitUp(c.Name, 20)) { Thread.Sleep(2000); ProbeVia(c.Name, 3000, ms); } else err = "туннель не поднялся"; } catch (Exception e) { err = e.Message; }
-                double conn = Math.Round(sw.Elapsed.TotalSeconds, 1);
-                AwgStop(c.Name);
-                res.Add(new Dictionary<string, object> { { "protocol", c.Title }, { "name", c.Name }, { "ok", ms.Count > 0 }, { "probes", ms.Count + "/" + ProbeHosts().Length }, { "connectSec", conn }, { "pingMs", ms.Count > 0 ? (int)ms.Average() : -1 }, { "adapter", c.Name }, { "error", err } });
-                Log("AmneziaWG: тест " + c.Title + ": " + (ms.Count > 0 ? "работает, отклик " + (int)ms.Average() + " мс" : "НЕ работает " + err), "INFO");
-                Snapshot();
-            }
-            AwgTest["running"] = false; AwgTest["current"] = ""; AwgTest["at"] = DateTime.Now.ToString("dd.MM HH:mm");
-            if (Mode() == "amnezia" && active != null) { SetActivity("возвращаю AmneziaWG (" + active.Name + ")"); try { AwgStart(active.Name); WaitUp(active.Name, 20); } catch { } ForceIcs = true; }
+            AwgTraffic = null;
+            if ((DateTime.Now - AvpnStartedAt).TotalSeconds < CfgInt("meduza.startupGraceSec", 60)) return;    // только что запущено — даём подключиться
+            AwgDownTicks++;
+            Log("AmneziaVPN: туннель не подключён (" + AwgDownTicks + "/3)" + (AwgDownTicks == 1 ? " — включите в AmneziaVPN «Автоподключение», иначе после перезапуска он не подключится сам" : ""), "WARN");
+            if (AwgDownTicks >= 3) { AwgDownTicks = 0; AwgRestart("туннель не подключается"); }
         }
 
         // ---------------------------------------------------------------- режим работы
-        static string UplinkName() { var m = Mode(); if (m == "zapret") return PhysAlias(); if (m == "amnezia") { var a = AwgActive(); return a == null ? "" : a.Name; } return MzAdapterName(); }
-        static readonly Dictionary<string, string> ModeNames = new Dictionary<string, string> { { "meduza", "MeduzaVPN" }, { "amnezia", "AmneziaWG" }, { "dual", "два туннеля (MeduzaVPN + AmneziaWG)" }, { "zapret", "без VPN (только zapret)" } };
+        static string UplinkName() { var m = Mode(); if (m == "zapret") return PhysAlias(); if (m == "amnezia") return AvpnAdapter(); return MzAdapterName(); }
+        static readonly Dictionary<string, string> ModeNames = new Dictionary<string, string> { { "meduza", "MeduzaVPN" }, { "amnezia", "AmneziaVPN" }, { "dual", "два туннеля (MeduzaVPN + AmneziaVPN)" }, { "zapret", "без VPN (только zapret)" } };
         static void VpnWatch()
         {
             string mode = Mode();
@@ -628,14 +671,15 @@ namespace VpnGuard
                 if (LastMode != null) Log("Режим: " + ModeNames[LastMode] + " → " + ModeNames[mode], "WARN");
                 SetActivity("переключаю режим: " + ModeNames[mode]);
                 if (mode != "meduza" && CfgBool("vpn.stopInactive", true) && MzProc() != null) { Log("MeduzaVPN: отключаю и закрываю (выбран другой режим)", "INFO"); MzStop(); }
-                if (mode != "amnezia") AwgStopAll("");
+                if (mode != "amnezia") AvpnDisable(CfgBool("vpn.stopInactive", true));
                 if (mode == "meduza") MeduzaStartedAt = DateTime.Now;
+                if (mode == "amnezia") AvpnStartedAt = DateTime.Now;
                 ProbeFailures = 0; DownTicks = 0; LastTraffic = null; AwgProbeFailures = 0; AwgDownTicks = 0; AwgTraffic = null; ForceIcs = true;
                 LastMode = mode;
             }
-            if (mode == "meduza") MeduzaWatch();
-            else if (mode == "amnezia") { if (Up(MzAdapterName())) { Log("MeduzaVPN: подключён, но выбран режим AmneziaWG — отключаю", "WARN"); MzDisconnect(); } AmneziaWatch(); }
-            else if (mode == "zapret") { if (Up(MzAdapterName())) { Log("MeduzaVPN: подключён, но выбран режим без VPN — отключаю", "WARN"); MzDisconnect(); } AwgStopAll(""); LastTraffic = null; AwgTraffic = null; }
+            if (mode == "meduza") { MeduzaWatch(); AvpnDisable(false); }
+            else if (mode == "amnezia") { if (Up(MzAdapterName())) { Log("MeduzaVPN: подключён, но выбран режим AmneziaVPN — отключаю", "WARN"); MzDisconnect(); } AmneziaWatch(); }
+            else if (mode == "zapret") { if (Up(MzAdapterName())) { Log("MeduzaVPN: подключён, но выбран режим без VPN — отключаю", "WARN"); MzDisconnect(); } AvpnDisable(false); LastTraffic = null; AwgTraffic = null; }
         }
 
         // ---------------------------------------------------------------- wg_server
@@ -858,14 +902,32 @@ namespace VpnGuard
 
         // ---------------------------------------------------------------- PowerShell: zapret, обновления, веб-сервер, значок …
         static void QueuePs(string cmd) { try { File.WriteAllText(Path.Combine(CmdPsDir, DateTime.UtcNow.Ticks + ".cmd"), cmd, Encoding.ASCII); } catch { } PsPartAt = DateTime.MinValue; }
+        static string WebSig = null;
+        static string WebSignature() { return string.Join("|", new[] { "web.enabled", "web.port", "web.engine", "web.requirePassword", "web.token", "remote.enabled", "remote.until", "remote.allowFrom", "remote.port" }.Select(k => CfgStr(k, ""))); }
+        static string PsNeededNow()
+        {
+            if (Directory.GetFiles(CmdPsDir, "*.cmd").Length > 0) return "команда";
+            DateTime until; bool remoteEn = CfgBool("remote.enabled", false);
+            bool remoteOn = remoteEn && DateTime.TryParse(CfgStr("remote.until", ""), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out until) && until.ToLocalTime() > DateTime.Now;
+            if (remoteEn && !remoteOn) return "время удалённой диагностики вышло";
+            if (WebSig != null && WebSignature() != WebSig) return "изменены настройки веб-интерфейса или диагностики";
+            bool webRunning = Process.GetProcessesByName("VpnGuardWeb").Length > 0;
+            if ((CfgBool("web.enabled", true) || remoteOn) && !webRunning && CfgStr("web.engine", "auto") != "powershell") return "веб-сервер не работает";
+            return null;
+        }
         static void PsPartWatch()
         {
             if (PsPart != null && !PsPart.HasExited) {
                 if ((DateTime.Now - PsPartAt).TotalMinutes > 30) { Log("Агент C#: часть PowerShell работает больше 30 мин — останавливаю", "WARN"); try { PsPart.Kill(); } catch { } }
                 return;
             }
-            if ((DateTime.Now - PsPartAt).TotalSeconds < 120) return;
-            PsPartAt = DateTime.Now;
+            // обычно — раз в 30 мин (обновления VpnGuard/MeduzaVPN, компоненты, значок: у них свои интервалы в часах);
+            // сразу — по команде, если веб-сервер должен работать, а не работает, или изменили настройки веба/диагностики
+            string why = PsNeededNow();
+            double every = Math.Max(5, CfgInt("agent.psPartMin", 30)) * 60.0;
+            if ((DateTime.Now - PsPartAt).TotalSeconds < (why != null ? 120 : every)) return;
+            if (why != null && PsPartAt != DateTime.MinValue) Log("Агент C#: запускаю часть PowerShell — " + why, "INFO");
+            PsPartAt = DateTime.Now; WebSig = WebSignature();
             try {
                 PsPart = Process.Start(new ProcessStartInfo("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + Path.Combine(Root, "VpnGuard.ps1") + "\" -PsPart" + (ConfigPath != Path.Combine(Root, "config.json") ? " -ConfigPath \"" + ConfigPath + "\"" : ""))
                     { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Root });
@@ -936,7 +998,7 @@ namespace VpnGuard
         static void SnapshotCore()
         {
             string mode = Mode(); var proc = MzProc(); bool pipe = MzPipe(); string ver = MzVersion();
-            var act = AwgActive(); string tun = mode == "zapret" ? "" : mode == "amnezia" ? (act == null ? "" : act.Name) : MzAdapterName();
+            var avNic = AvpnNic(); string tun = mode == "zapret" ? "" : mode == "amnezia" ? AvpnAdapter() : MzAdapterName();
             var ma = Nic(tun); var wa = Nic(WgIf()); var wgSvc = Svc(CfgStr("ws4w.serviceName", "WireGuardTunnel$wg_server"));
             bool uUp = ma != null && ma.OperationalStatus == OperationalStatus.Up, wUp = wgSvc != null && wgSvc.Status == ServiceControllerStatus.Running && wa != null && wa.OperationalStatus == OperationalStatus.Up;
             if (uUp) { if (UltraUpSince == DateTime.MinValue) UltraUpSince = DateTime.Now; } else UltraUpSince = DateTime.MinValue;
@@ -969,15 +1031,15 @@ namespace VpnGuard
             // Туннель
             bool amz = mode == "amnezia"; bool? tTr = amz ? AwgTraffic : LastTraffic; DateTime tTrAt = amz ? AwgTrafficAt : LastTrafficAt; int tFail = amz ? AwgProbeFailures : ProbeFailures; string tWhy = amz ? AwgLastReason : LastRestartReason;
             int uL; string uS;
-            if (mode == "zapret") { uL = 0; uS = "VPN выключен — напрямую"; } else if (amz && act == null) { uL = 2; uS = "Нет конфига AmneziaWG"; } else if (!uUp) { uL = 2; uS = "Отключён"; } else if (tTr == false) { uL = 1; uS = "Нет трафика"; } else { uL = 0; uS = "Подключён"; }
-            string kindTitle = amz ? "AmneziaWG" + (act != null ? " — " + act.Title : "") : "MeduzaVPN · " + MzProtocol();
+            if (mode == "zapret") { uL = 0; uS = "VPN выключен — напрямую"; } else if (amz && tun.Length == 0) { uL = 2; uS = "AmneziaVPN не подключён"; } else if (!uUp) { uL = 2; uS = "Отключён"; } else if (tTr == false) { uL = 1; uS = "Нет трафика"; } else { uL = 0; uS = "Подключён"; }
+            string kindTitle = amz ? "AmneziaVPN" : "MeduzaVPN · " + MzProtocol();
             string trTxt = (tTr == true ? "OK" : tTr == false ? "НЕТ" : "—");
-            var ultra = Comp(uL, uS, new[] { mode == "zapret" ? "Выход: " + PhysAlias() + " · YouTube/Discord — через zapret" : amz && act != null ? "Сервер: " + act.Endpoint : "",
+            var ultra = Comp(uL, uS, new[] { mode == "zapret" ? "Выход: " + PhysAlias() + " · YouTube/Discord — через zapret" : "",
                 "Адаптер: " + (ma != null ? tun + " · " + ma.OperationalStatus + ", IP " + uIp : mode == "zapret" ? "не нужен" : "отсутствует"),
                 "Трафик: " + trTxt + ", проверка " + When(tTrAt), "Сбоев проверки подряд: " + tFail, tWhy.Length > 0 ? "Последняя причина: " + tWhy : "" }, new List<object[]> {
                 Kv("Режим", ModeNames[mode]), Kv("Адаптер", ma != null ? tun + " · " + ma.OperationalStatus + " · " + ma.Description : "отсутствует"), Kv("IP", uIp ?? "—"),
                 Kv("Скорость канала", ma != null ? (ma.Speed / 1000000) + " Мбит/с" : "—"), Kv("Подключён с", UltraUpSince == DateTime.MinValue ? "—" : When(UltraUpSince)),
-                Kv("Протокол", mode == "meduza" ? MzProtocol() : amz ? "AmneziaWG" : "—"), Kv("Проверка трафика", trTxt + " · " + When(tTrAt)), Kv("Узлы проверки", string.Join(", ", ProbeHosts())),
+                Kv("Протокол", mode == "meduza" ? MzProtocol() : amz ? "выбран в AmneziaVPN" : "—"), Kv("Проверка трафика", trTxt + " · " + When(tTrAt)), Kv("Узлы проверки", string.Join(", ", ProbeHosts())),
                 Kv("Сбоев проверки подряд", tFail + " (переподключение после " + CfgInt("meduza.probeFailuresBeforeReconnect", 3) + ")"), Kv("Переподключений с запуска агента", ReconnectCount) });
             ultra["title"] = mode == "zapret" ? "Без VPN (только zapret)" : "Туннель: " + kindTitle; ultra["kind"] = mode == "zapret" ? "" : mode; ultra["standby"] = null; ultra["switches"] = 0;
 
@@ -1005,25 +1067,31 @@ namespace VpnGuard
                 Kv("Частное подключение", ics != null ? fi(ics.Priv, 1) : "—"), Kv("Лишние подключения с ICS", icsOther.Count > 0 ? string.Join(", ", icsOther) : "нет"),
                 Kv("Восстановлена", When(LastIcsFix)), Kv("Восстановлений с запуска агента", IcsFixCount) });
 
-            // AmneziaWG
-            bool used = mode == "amnezia"; bool inst = File.Exists(AwgExe());
-            var aSvc = act != null ? Svc(AwgSvc(act.Name)) : null; var aNic = act != null ? Nic(act.Name) : null; bool aUp = aNic != null && aNic.OperationalStatus == OperationalStatus.Up;
+            // AmneziaVPN
+            bool used = mode == "amnezia"; string avExe = AwgExe(); bool inst = File.Exists(avExe);
+            var avProc = AvpnProc(); var avSvc = Svc(AvpnSvcName()); bool aUp = avNic != null && avNic.OperationalStatus == OperationalStatus.Up;
+            string aIp = aUp ? Ipv4(avNic.Name) : null;
             int aL; string aS;
-            if (AwgTest != null && AwgTest["running"] is bool && (bool)AwgTest["running"]) { aL = 1; aS = "Тест конфигов " + AwgTest["index"] + "/" + AwgTest["total"]; }
-            else if (!used) { aL = -1; aS = aSvc != null && aSvc.Status == ServiceControllerStatus.Running ? "Не используется (туннель поднят)" : "Не используется"; }
-            else if (!inst) { aL = 2; aS = "Не установлен"; } else if (act == null) { aL = 2; aS = "Нет конфига"; } else if (aSvc == null) { aL = 2; aS = "Туннель не подключён"; }
-            else if (aSvc.Status != ServiceControllerStatus.Running) { aL = 2; aS = "Служба: " + aSvc.Status; } else if (!aUp) { aL = 1; aS = "Адаптер не поднят"; } else if (AwgTraffic == false) { aL = 1; aS = "Нет трафика"; } else { aL = 0; aS = "Подключён"; }
-            string aVer = ""; try { if (inst) aVer = FileVersionInfo.GetVersionInfo(AwgExe()).ProductVersion; } catch { }
+            if (!used) { aL = -1; aS = aUp ? "Не используется (туннель поднят)" : avProc != null ? "Не используется (запущен)" : "Не используется"; }
+            else if (!inst) { aL = 2; aS = "Не установлен"; } else if (avProc == null) { aL = 2; aS = "Не запущен"; } else if (!aUp) { aL = 1; aS = "Туннель не подключён"; }
+            else if (AwgTraffic == false) { aL = 1; aS = "Нет трафика"; } else { aL = 0; aS = "Подключён"; }
+            string aVer = ""; try { if (inst) aVer = FileVersionInfo.GetVersionInfo(avExe).ProductVersion; } catch { }
             string aTr = AwgTraffic == true ? "OK" : AwgTraffic == false ? "НЕТ" : "—";
-            var awg = Comp(aL, aS, new[] { act != null ? "Конфиг: " + act.Title + " · сервер " + act.Endpoint : "Конфиг: нет", "Туннель: " + (aUp ? "IP " + Ipv4(act.Name) : aSvc != null ? aSvc.Status.ToString() : "не подключён"),
+            long avMem = 0; try { if (avProc != null) avMem = avProc.WorkingSet64 / 1048576; } catch { }
+            var awg = Comp(aL, aS, new[] { inst ? "AmneziaVPN " + aVer + " · " + (avProc != null ? "PID " + avProc.Id : "не запущен") : "AmneziaVPN не установлен",
+                "Туннель: " + (aUp ? avNic.Name + " · IP " + aIp : avNic != null ? avNic.Name + " — " + avNic.OperationalStatus : "не подключён"),
                 "Трафик: " + aTr + ", проверка " + When(AwgTrafficAt), "Перезапуски: " + AwgRestarts.Count(d => d > DateTime.Now.AddMinutes(-30)) + " за 30 мин, посл. " + When(AwgLastRestart) }, new List<object[]> {
-                Kv("Клиент AmneziaWG", inst ? "установлен · версия " + aVer : "не установлен (" + AwgExe() + ")"), Kv("Используется", used ? "да — режим AmneziaWG" : "нет (другой режим)"),
-                Kv("Активный конфиг", act != null ? act.Title + " (" + act.Name + ")" : "—"), Kv("Сервер", act != null ? act.Endpoint : "—"),
-                Kv("Служба", aSvc != null ? aSvc.ServiceName + " · " + aSvc.Status : "не установлена"), Kv("Адаптер", aNic != null ? aNic.OperationalStatus + " · IP " + (Ipv4(act.Name) ?? "—") : "отсутствует"),
-                Kv("Проверка трафика", aTr + " · " + When(AwgTrafficAt)), Kv("Сбоев проверки подряд", AwgProbeFailures), Kv("Последний перезапуск", When(AwgLastRestart)), Kv("Причина", AwgLastReason.Length > 0 ? AwgLastReason : "—"), Kv("Конфигов", AwgConfigs().Count) });
-            awg["installed"] = inst; awg["active"] = act != null ? act.Name : "";
-            awg["configs"] = AwgConfigs().Select(c => (object)new Dictionary<string, object> { { "name", c.Name }, { "title", c.Title }, { "endpoint", c.Endpoint }, { "address", c.Address }, { "running", Svc(AwgSvc(c.Name)) != null && Svc(AwgSvc(c.Name)).Status == ServiceControllerStatus.Running } }).ToArray();
-            awg["test"] = AwgTest;
+                Kv("Приложение AmneziaVPN", inst ? "установлено · версия " + aVer : "не установлено (" + avExe + ")"),
+                Kv("Процесс", avProc != null ? "PID " + avProc.Id + " · " + avMem + " МБ" : "не запущен"),
+                Kv("Служба", avSvc != null ? avSvc.ServiceName + " · " + avSvc.Status + " / " + StartMode(avSvc.ServiceName) : "не найдена"),
+                Kv("Используется", used ? "да — режим AmneziaVPN" : "нет (другой режим)"),
+                Kv("Адаптер туннеля", avNic != null ? avNic.Name + " · " + avNic.Description + " · " + avNic.OperationalStatus : "не найден (туннель не подключён)"), Kv("IP", aIp ?? "—"),
+                Kv("Проверка трафика", aTr + " · " + When(AwgTrafficAt)), Kv("Сбоев проверки подряд", AwgProbeFailures + " (перезапуск после " + CfgInt("meduza.probeFailuresBeforeReconnect", 3) + ")"),
+                Kv("Перезапусков за 30 мин", AwgRestarts.Count(d => d > DateTime.Now.AddMinutes(-30)) + " из " + CfgInt("meduza.maxRestartsPer30Min", 5) + " допустимых"),
+                Kv("Последний перезапуск", When(AwgLastRestart)), Kv("Причина", AwgLastReason.Length > 0 ? AwgLastReason : "—"),
+                Kv("Сервер и протокол", "выбираются в приложении AmneziaVPN; там же включите «Автоподключение»") });
+            awg["installed"] = inst; awg["running"] = avProc != null; awg["active"] = avNic != null ? avNic.Name : ""; awg["adapter"] = avNic != null ? avNic.Name : "";
+            awg["configs"] = new object[0]; awg["test"] = null;
 
             // zapret — свой (Zapret.cs); компоненты, обновления, веб — из части PowerShell
             object zapret;
