@@ -1,8 +1,8 @@
 {
-    "version":  "2.6",
-    "build":  "20261103-1508",
-    "notes":  "zapret+VPN: маршруты к видеосерверам YouTube провайдера; проверка скорости YouTube по реальному файлу; предупреждение о zapret вместе с VPN",
-    "date":  "2026-11-03T15:08:19.4507726+03:00",
+    "version":  "2.6.1",
+    "build":  "20261103-1510",
+    "notes":  "видеосервер с неизвестным источником перепроверяется напрямую сразу",
+    "date":  "2026-11-03T15:10:37.6975979+03:00",
     "files":  [
                   {
                       "path":  "Amnezia.ps1",
@@ -71,8 +71,8 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "b6070aad9e13ecc82bf9279bc8c6269db8d5076012c332a097e50991f03e2b58",
-                      "size":  132220
+                      "sha256":  "61b7a69d668efcffd8510b624755fcffc24d07bb4d183b8491a6cc417094d7ca",
+                      "size":  132222
                   },
                   {
                       "path":  "VpnGuardMonitor.cmd",
@@ -96,8 +96,8 @@
                   },
                   {
                       "path":  "Zapret.ps1",
-                      "sha256":  "7dbbb79be66ad3585a37f4e2e45c803d4971b8a6c770ccb06c6c591ecf4fed2f",
-                      "size":  64510
+                      "sha256":  "8bd6c6ecc6593562edb4b5cbc98a256daac0892f948b664be14d79422578ae9a",
+                      "size":  64513
                   }
               ]
 }

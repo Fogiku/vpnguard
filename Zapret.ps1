@@ -347,7 +347,7 @@ function Find-ZVideoHost([string]$SrcIp, [int]$TimeoutSec = 8, [switch]$PhysOnly
 function Get-ZVideoHost([string]$SrcIp, [int]$TimeoutSec = 8) {
     $at = [datetime]::MinValue; try { $at = [datetime]$ZState.videoHostAt } catch { }
     # найденный через VPN — чужой (зарубежный) сервер; раз в 30 мин пробуем узнать настоящий, напрямую
-    $fresh = $(if ("$($ZState.videoHostVia)" -eq 'vpn') { ((Get-Date) - $at).TotalMinutes -lt 30 } else { ((Get-Date) - $at).TotalHours -lt 6 })
+    $fresh = $(if ("$($ZState.videoHostVia)" -ne 'direct') { ((Get-Date) - $at).TotalMinutes -lt 30 } else { ((Get-Date) - $at).TotalHours -lt 6 })
     if ($ZState.videoHost -and $fresh) { return "$($ZState.videoHost)" }
     # не нашли недавно — не искать снова при каждой проверке (поиск при блокировке занимает до минуты)
     if ($script:ZVideoMissAt -and ((Get-Date) - $script:ZVideoMissAt).TotalMinutes -lt 30) { return "$($ZState.videoHost)" }
