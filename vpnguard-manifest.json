@@ -1,8 +1,8 @@
 {
-    "version":  "2.7.2",
-    "build":  "20261103-1536",
-    "notes":  "zapret+VPN: видеосерверы провайдера ищутся только напрямую, как их видит браузер, и добавляются в маршруты мимо VPN",
-    "date":  "2026-11-03T15:36:40.3371613+03:00",
+    "version":  "3.0",
+    "build":  "20261103-1558",
+    "notes":  "веб-сервер на C# (собирается на месте встроенным csc): ~40 МБ вместо ~195, запросы параллельно; тяжёлые задачи — через PowerShell по запросу",
+    "date":  "2026-11-03T15:58:06.9811995+03:00",
     "files":  [
                   {
                       "path":  "Amnezia.ps1",
@@ -36,8 +36,8 @@
                   },
                   {
                       "path":  "Remote.ps1",
-                      "sha256":  "8142cb80a7fff32b085c9f4a3b81bfefe3c56f6ebefc7c3186ed04241ba1ba66",
-                      "size":  48189
+                      "sha256":  "b2ee90c04c1cc2d7d5e0b1e92ddfd3a479d7a9ee55b141a6f047d8912d5b5784",
+                      "size":  53775
                   },
                   {
                       "path":  "RemoteDiag.ps1",
@@ -51,8 +51,8 @@
                   },
                   {
                       "path":  "Test.ps1",
-                      "sha256":  "9e778431fcac4b3da128af52cae9b569828429459d68882a64505deb915bf01c",
-                      "size":  20189
+                      "sha256":  "042867c68d37e6ab8705cf69b4fad9ba7820e2fbb51e00b8d3c684e2f29face9",
+                      "size":  21858
                   },
                   {
                       "path":  "Uninstall.cmd",
@@ -61,8 +61,8 @@
                   },
                   {
                       "path":  "Uninstall.ps1",
-                      "sha256":  "2e8b9bca4c7f8b70b69e4d7f046fded4b4db22aa5986899304c084d70ebfbc2a",
-                      "size":  2103
+                      "sha256":  "85919f28801a086060bbd47accab50f49d45b351ed956f64e94ea88411d9303b",
+                      "size":  2210
                   },
                   {
                       "path":  "Update.ps1",
@@ -71,8 +71,8 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "c97bdcefa6858c8060f858cc842ceba859316a4c81c57d39e9651c583d5afe60",
-                      "size":  132222
+                      "sha256":  "b91a48e0d99f5349a025e694af82f6eaee3d6d5e68f380a759ca3c89c040c5d9",
+                      "size":  132482
                   },
                   {
                       "path":  "VpnGuardMonitor.cmd",
@@ -81,8 +81,13 @@
                   },
                   {
                       "path":  "VpnGuardMonitor.ps1",
-                      "sha256":  "f622e9228802193d56ad0eb7651d2cad7675fa0ebf516efc6daa6d7e56f5e063",
-                      "size":  187647
+                      "sha256":  "70124ad8bddc728630acf5467a62f2c01f5946dbabf99d3214e50b7a22dc1017",
+                      "size":  187687
+                  },
+                  {
+                      "path":  "Web.cs",
+                      "sha256":  "5bcc8ad2772bd1a5a18cc3e255101c794c2f104341cea82b690d86c7423027ba",
+                      "size":  38281
                   },
                   {
                       "path":  "web/index.html",

@@ -179,34 +179,46 @@ $ok4 = -not (Test-AppPath '../x.ps1') -and -not (Test-AppPath 'config.json') -an
 '@) 120
 if ($r.Out -match 'R True True True True') { Ok 'обновление ставится; с ошибкой в коде и с неверной суммой — не ставится; опасные пути отброшены' } else { Fail "обновления: $($r.Out.Trim()) $($r.Err.Trim())" }
 
-Write-Host '5. Веб-сервер и веб-интерфейс'
-$port = Get-Random -Minimum 20000 -Maximum 40000
-$r = Invoke-Child ($loader + @"
-`$Cfg.web.port = $port; `$Cfg.web.token = 'testtoken12345678'; `$Cfg.web.enabled = `$true
-`$job = [powershell]::Create(); `$null = `$job
-`$stat = [ordered]@{ updated = (Get-Date).ToString('o'); agentVersion = 'test'; history = @(); vpn = @{ mode = 'meduza' } }
-`$stat | ConvertTo-Json | Set-Content `$StatusPath -Encoding UTF8
-`$srv = Start-Job -ArgumentList `$Root, `$DataDir, $port -ScriptBlock { param(`$root, `$data, `$port)
-    `$c = @{ web = @{ enabled = `$true; port = `$port; token = 'testtoken12345678' } } | ConvertTo-Json; Set-Content "`$data\srvcfg.json" `$c -Encoding UTF8
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "`$root\VpnGuard.ps1" -RemoteServer -ConfigPath "`$data\srvcfg.json" }
-`$base = "http://127.0.0.1:$port"
-`$up = `$false; for (`$i = 0; `$i -lt 40 -and -not `$up; `$i++) { Start-Sleep -Milliseconds 500; try { `$null = Invoke-WebRequest "`$base/api/whoami" -UseBasicParsing -TimeoutSec 3; `$up = `$true } catch { } }
-`$res = @()
-if (-not `$up) { `$res += 'сервер не запустился' } else {
-    `$p = Invoke-WebRequest "`$base/" -UseBasicParsing; if (`$p.StatusCode -ne 200 -or `$p.Content -notmatch 'VpnGuard') { `$res += 'страница / не отдаётся' }
-    `$w = Invoke-RestMethod "`$base/api/whoami" -UseBasicParsing; if (`$w.role -ne 'web') { `$res += "с этого ПК роль '`$(`$w.role)' вместо web" }
-    try { Invoke-WebRequest "`$base/api/cmd" -Method Post -Body '{"c":"check-now"}' -UseBasicParsing | Out-Null; `$res += 'POST без X-VG принят' } catch { }
-    try { Invoke-WebRequest "`$base/api/cmd" -Method Post -Headers @{ 'X-VG' = '1' } -Body '{"c":"del x"}' -UseBasicParsing | Out-Null; `$res += 'неизвестная команда принята' } catch { }
-    try { Invoke-WebRequest "`$base/api/status" -Headers @{ Host = 'evil.example' } -UseBasicParsing | Out-Null; `$res += 'чужое имя хоста принято' } catch { }
-    try { Invoke-WebRequest "`$base/api/config" -Method Post -Headers @{ 'X-VG' = '1' } -Body '{"key":"web.token","value":"x"}' -UseBasicParsing | Out-Null; `$res += 'запрещённая настройка принята' } catch { }
-    `$s = Invoke-WebRequest "`$base/api/status" -UseBasicParsing; try { `$null = `$s.Content | ConvertFrom-Json } catch { `$res += '/api/status — не JSON' }
+Write-Host '5. Веб-сервер на C# (сборка встроенным csc, вход, защита, настройки, задачи PowerShell)'
+$csc = @("$env:windir\Microsoft.NET\Framework64\v4.0.30319\csc.exe", "$env:windir\Microsoft.NET\Framework\v4.0.30319\csc.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+$exe = Join-Path $tmp 'VpnGuardWeb.exe'
+$co = & $csc /nologo /target:exe /optimize+ "/out:$exe" /r:System.Web.Extensions.dll /r:System.Drawing.dll (Join-Path $Root 'Web.cs') (Join-Path $Root 'Qr.cs') 2>&1
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $exe)) { foreach ($l in @($co) | Where-Object { "$_" -match 'error' } | Select-Object -First 5) { Fail "сборка Web.cs: $l" } }
+else {
+    $wd = Join-Path $tmp 'webdata'; New-Item -ItemType Directory (Join-Path $wd 'cmd'), (Join-Path $wd 'logs') -Force | Out-Null
+    $port = Get-Random -Minimum 20000 -Maximum 40000
+    $wcfg = Join-Path $tmp 'webcfg.json'
+    @{ web = @{ enabled = $true; port = $port; token = 'testtoken12345678'; requirePassword = $true }; zapret = @{ videoCheck = $true } } | ConvertTo-Json -Depth 4 | Set-Content $wcfg -Encoding UTF8
+    @{ updated = (Get-Date).ToString('o'); agentVersion = 'test'; history = @() } | ConvertTo-Json | Set-Content (Join-Path $wd 'status.json') -Encoding UTF8
+    $srv = Start-Process $exe -ArgumentList "`"$Root`" `"$wcfg`" `"$wd`"" -PassThru -WindowStyle Hidden
+    $base = "http://127.0.0.1:$port"; $res = @()
+    $up = $false; for ($k = 0; $k -lt 30 -and -not $up; $k++) { Start-Sleep -Milliseconds 300; try { $null = Invoke-WebRequest "$base/api/whoami" -UseBasicParsing -TimeoutSec 3; $up = $true } catch { } }
+    if (-not $up) { $res += 'сервер не запустился' } else {
+        $w = Invoke-RestMethod "$base/api/whoami" -UseBasicParsing
+        if ($w.role -ne 'web' -or $w.engine -ne 'csharp') { $res += "с этого ПК роль '$($w.role)', движок '$($w.engine)'" }
+        $pg = Invoke-WebRequest "$base/" -UseBasicParsing; if ($pg.StatusCode -ne 200 -or $pg.Content -notmatch 'VpnGuard') { $res += 'страница / не отдаётся' }
+        try { $null = (Invoke-WebRequest "$base/api/status" -UseBasicParsing).Content | ConvertFrom-Json } catch { $res += '/api/status — не JSON' }
+        foreach ($bad in @(
+            @{ n = 'POST без X-VG принят'; u = '/api/cmd'; h = @{}; b = '{"c":"check-now"}' },
+            @{ n = 'неизвестная команда принята'; u = '/api/cmd'; h = @{ 'X-VG' = '1' }; b = '{"c":"del x"}' },
+            @{ n = 'запрещённая настройка принята'; u = '/api/config'; h = @{ 'X-VG' = '1' }; b = '{"key":"web.token","value":"x"}' },
+            @{ n = 'короткий пароль принят'; u = '/api/websettings'; h = @{ 'X-VG' = '1' }; b = '{"password":"abc"}' })) {
+            try { Invoke-WebRequest "$base$($bad.u)" -Method Post -Headers $bad.h -Body $bad.b -ContentType 'application/json' -UseBasicParsing | Out-Null; $res += $bad.n } catch { }
+        }
+        try { Invoke-WebRequest "$base/api/status" -Headers @{ Host = 'evil.example' } -UseBasicParsing | Out-Null; $res += 'чужое имя хоста принято' } catch { }
+        # разрешённая настройка: config.json остаётся читаемым для агента
+        $null = Invoke-RestMethod "$base/api/config" -Method Post -Headers @{ 'X-VG' = '1' } -Body '{"key":"zapret.videoCheck","value":false}' -ContentType 'application/json' -UseBasicParsing
+        try { $cj = Get-Content $wcfg -Raw -Encoding UTF8 | ConvertFrom-Json; if ($cj.zapret.videoCheck -ne $false -or $cj.web.token -ne 'testtoken12345678') { $res += 'config.json записан неверно' } } catch { $res += 'config.json испорчен после записи' }
+        $null = Invoke-RestMethod "$base/api/cmd" -Method Post -Headers @{ 'X-VG' = '1' } -Body '{"c":"check-now"}' -ContentType 'application/json' -UseBasicParsing
+        if (-not (Get-ChildItem (Join-Path $wd 'cmd') -Filter '*.cmd')) { $res += 'команда агенту не записана' }
+        # задача через PowerShell (мост C# → VpnGuard.ps1 -WebTask)
+        $wgc = Invoke-RestMethod "$base/api/wg/clients" -UseBasicParsing -TimeoutSec 90
+        if ($null -eq $wgc.ok) { $res += "мост к PowerShell не вернул JSON: $wgc" }
+        $ws = Invoke-RestMethod "$base/api/websettings" -UseBasicParsing; if ($ws.password -ne 'testtoken12345678') { $res += '/api/websettings не видит пароль' }
+    }
+    try { Stop-Process -Id $srv.Id -Force } catch { }
+    if ($res) { foreach ($x in $res) { Fail "веб (C#): $x" } } else { Ok "собран ($([int]((Get-Item $exe).Length / 1KB)) КБ); вход, защита, запись config.json, команды агенту, мост к PowerShell" }
 }
-Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object { `$_.CommandLine -match 'RemoteServer' -and `$_.CommandLine -match 'srvcfg' } | ForEach-Object { Stop-Process -Id `$_.ProcessId -Force }
-Stop-Job `$srv -ErrorAction SilentlyContinue; Remove-Job `$srv -Force -ErrorAction SilentlyContinue
-if (`$res) { `$res | ForEach-Object { "BAD `$_" } } else { 'OK' }
-"@) 120
-if ($r.Out -match '(?m)^OK\s*$') { Ok 'страница, вход с этого ПК, защита (POST без X-VG, чужие команды и настройки, DNS rebinding)' } else { foreach ($l in ($r.Out + $r.Err) -split "`n" | Where-Object { $_.Trim() } | Select-Object -First 8) { Fail "веб: $($l.Trim())" } }
-
 Write-Host '6. Окно (отрисовка всех страниц на тестовых данных)'
 $demo = Join-Path $tmp 'demo'; New-Item -ItemType Directory $demo -Force | Out-Null
 $st = [ordered]@{ updated = (Get-Date).ToString('o'); staleAfterSec = 300; agentVersion = 'test'; intervalSec = 30; history = @(); vpn = @{ mode = 'meduza'; name = 'MeduzaVPN' } }

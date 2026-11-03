@@ -2363,7 +2363,7 @@ function Switch-RemoteUi {
             Set-CfgVal $o 'remote.enabled' $false
             $tmp = "$ConfigPath.tmp"; $o | ConvertTo-Json -Depth 6 | Set-Content $tmp -Encoding UTF8; Move-Item $tmp $ConfigPath -Force
             # сразу закрыть, не дожидаясь агента
-            try { $st = Get-Content (Join-Path $DataDir 'remote-state.json') -Raw -Encoding UTF8 | ConvertFrom-Json; if ($st.pid) { $pp = Get-Process -Id ([int]$st.pid) -ErrorAction SilentlyContinue; if ($pp -and $pp.ProcessName -like 'powershell*') { Stop-Process -Id $pp.Id -Force } } } catch { }
+            try { $st = Get-Content (Join-Path $DataDir 'remote-state.json') -Raw -Encoding UTF8 | ConvertFrom-Json; if ($st.pid) { $pp = Get-Process -Id ([int]$st.pid) -ErrorAction SilentlyContinue; if ($pp -and ($pp.ProcessName -like 'powershell*' -or $pp.ProcessName -eq 'VpnGuardWeb')) { Stop-Process -Id $pp.Id -Force } } } catch { }
             try { Remove-NetFirewallRule -DisplayName 'VpnGuard remote diagnostics' -ErrorAction SilentlyContinue } catch { }
             Set-Footer 'Удалённая диагностика выключена'
         } else {

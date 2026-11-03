@@ -29,12 +29,14 @@ param(
     [switch]$Restarted,
     [switch]$ZapretTest,
     [switch]$RemoteServer,
+    [string]$WebTask = '',
+    [string]$WebArg = '',
     [ValidateSet('agent', 'remove-agent', 'monitor', 'monitor-logon', 'remove-monitor')]
     [string]$SetupTask,
     [string]$ConfigPath = ''
 )
 
-$AgentVersion = '2.7.2'
+$AgentVersion = '3.0'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -118,6 +120,7 @@ function Get-DefaultConfig { @{
         token      = ''          # только для закрытого репозитория
     }
     web = @{
+        engine  = 'auto'         # auto — сервер на C# (bin\VpnGuardWeb.exe, собирается сам), powershell — прежний
         enabled = $true          # веб-интерфейс: http://localhost:8765/ (с других устройств сети и wg_server — по паролю token)
         port    = 8765
         token   = ''             # пароль для входа с других устройств; создаётся сам
@@ -2066,6 +2069,7 @@ if ($SetupTask) { Invoke-SetupTask $SetupTask; return }
 if ($Diag)      { try { [Console]::OutputEncoding = New-Object Text.UTF8Encoding $false } catch { }; Invoke-Diag -TryFix:$TryFix; return }
 if ($ZapretTest) { Invoke-ZapretTestRun; return }
 if ($RemoteServer) { Invoke-RemoteServer; return }
+if ($WebTask) { Invoke-WebTask $WebTask $WebArg; return }
 if ($CheckUpdate) { Invoke-MeduzaUpdate -Force; return }
 if ($InstallCli)  { Update-MeduzaCli (Get-Release); return }
 

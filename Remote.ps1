@@ -42,8 +42,88 @@ function Get-RemoteProc {
     try { $s = Get-Content $RemoteStatePath -Raw -Encoding UTF8 | ConvertFrom-Json } catch { return $null }
     if (-not $s.pid -or -not $s.running) { return $null }
     $p = Get-Process -Id ([int]$s.pid) -ErrorAction SilentlyContinue
-    if ($p -and $p.ProcessName -like 'powershell*') { return $p }
+    if ($p -and ($p.ProcessName -like 'powershell*' -or $p.ProcessName -eq 'VpnGuardWeb')) { return $p }
     return $null
+}
+
+# ---------------------------------------------------------------- сервер на C#: собрать встроенным csc.exe (.NET Framework) и запустить
+$WebExe = Join-Path $(if ($BinDir) { $BinDir } else { Join-Path $Root 'bin' }) 'VpnGuardWeb.exe'
+function Get-Csc {
+    foreach ($c in "$env:windir\Microsoft.NET\Framework64\v4.0.30319\csc.exe", "$env:windir\Microsoft.NET\Framework\v4.0.30319\csc.exe") { if (Test-Path $c) { return $c } }
+    return ''
+}
+$script:WebBuildFailSig = ''
+function Build-WebExe {
+    $src = @('Web.cs', 'Qr.cs' | ForEach-Object { Join-Path $Root $_ })
+    if (@($src | Where-Object { -not (Test-Path $_) }).Count) { return $false }
+    $sig = (@($src | ForEach-Object { (Get-FileHash $_ -Algorithm SHA256).Hash }) -join '|')
+    $sigFile = "$WebExe.sig"
+    if ((Test-Path $WebExe) -and (Test-Path $sigFile) -and "$(Get-Content $sigFile -Raw -ErrorAction SilentlyContinue)".Trim() -eq $sig) { return $true }
+    if ($script:WebBuildFailSig -eq $sig) { return $false }          # уже не собралось — не пытаться на каждой проверке
+    $csc = Get-Csc
+    if (-not $csc) { Write-Log 'Веб-сервер: нет компилятора .NET (csc.exe) — работаю на PowerShell' 'WARN'; $script:WebBuildFailSig = $sig; return $false }
+    $old = Get-RemoteProc
+    if ($old -and $old.ProcessName -eq 'VpnGuardWeb') { Stop-Process -Id $old.Id -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500 }
+    $tmp = "$WebExe.new"
+    Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+    $r = Invoke-Exe $csc ("/nologo /target:exe /optimize+ /out:`"$tmp`" /r:System.Web.Extensions.dll /r:System.Drawing.dll `"$($src[0])`" `"$($src[1])`"") 180
+    if ($r.Code -ne 0 -or -not (Test-Path $tmp)) {
+        $script:WebBuildFailSig = $sig
+        Write-Log "Веб-сервер: сборка на C# не удалась (код $($r.Code)): $((("$($r.Out) $($r.Err)" -split "`n") | Where-Object { $_ -match 'error' } | Select-Object -First 3) -join ' | ') — работаю на PowerShell" 'ERROR'
+        return $false
+    }
+    Move-Item $tmp $WebExe -Force
+    Set-Content $sigFile $sig -Encoding ASCII
+    Write-Log "Веб-сервер: собран на C# ($([int]((Get-Item $WebExe).Length / 1KB)) КБ)"
+    return $true
+}
+function Start-WebServer {
+    $useCs = "$((Get-WCfg).engine)" -ne 'powershell'
+    if ($useCs -and (Build-WebExe)) {
+        $a = "`"$Root`""; if ($ConfigPath -ne (Join-Path $Root 'config.json')) { $a += " `"$ConfigPath`"" }
+        Start-Process $WebExe -ArgumentList $a -WindowStyle Hidden -WorkingDirectory $Root | Out-Null
+        return 'C#'
+    }
+    Start-Process powershell.exe -WindowStyle Hidden -WorkingDirectory $Root `
+        -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $Root 'VpnGuard.ps1')`" -RemoteServer" | Out-Null
+    return 'PowerShell'
+}
+
+# ---------------------------------------------------------------- задачи для сервера на C# (VpnGuard.ps1 -WebTask имя [-WebArg base64])
+function Invoke-WebTask([string]$Task, [string]$Arg) {
+    [Console]::OutputEncoding = New-Object Text.UTF8Encoding $false
+    $argText = $(if ($Arg) { [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Arg)) } else { '' })
+    $out = { param($o) [Console]::Out.Write(($o | ConvertTo-Json -Depth 6 -Compress)) }
+    try {
+        switch ($Task) {
+            'check'  { [Console]::Out.Write((Get-RCheck)) }
+            'net'    { [Console]::Out.Write((Get-RNet)) }
+            'system' { [Console]::Out.Write((Get-RSystem)) }
+            'files'  { [Console]::Out.Write((Get-RFiles)) }
+            'diag'   { Invoke-Diag }
+            { $_ -in 'bundle', 'bundle-diag' } {
+                foreach ($part in @(@('СИСТЕМА', { Get-RSystem }), @('ЖИВЫЕ ПРОВЕРКИ', { Get-RCheck }), @('СЕТЬ', { Get-RNet }), @('ФАЙЛЫ И НАСТРОЙКИ', { Get-RFiles }), @('ЖУРНАЛ (2 дня)', { Get-RLogs 2 0 4000 }))) {
+                    [Console]::Out.WriteLine("`n################ $($part[0]) ################"); [Console]::Out.WriteLine((& $part[1]))
+                }
+                if ($Task -eq 'bundle-diag') { [Console]::Out.WriteLine("`n################ ДИАГНОСТИКА ################"); Invoke-Diag }
+            }
+            'wg-clients' {
+                $l = Get-WgClients
+                & $out ([ordered]@{ ok = $true; endpoint = "$($l.Endpoint)"; clients = @(@($l.Clients) | ForEach-Object { [ordered]@{ name = "$($_.Name)"; ip = "$($_.Ip)"; source = "$($_.Source)"; hasConf = [bool]($_.File -and (Test-Path $_.File)) } }) })
+            }
+            'wg-conf' {
+                $c = Get-RWgClient $argText
+                if (-not $c -or -not $c.File -or -not (Test-Path $c.File)) { & $out @{ ok = $false; error = 'конфиг этого клиента на ПК не хранится — удалите и создайте заново' } }
+                else { & $out ([ordered]@{ ok = $true; name = "$($c.Name)"; text = [IO.File]::ReadAllText($c.File) }) }
+            }
+            'wg-add'    { $c = New-WgClient $argText; & $out ([ordered]@{ ok = $true; name = "$($c.Name)"; ip = "$($c.Ip)"; text = "$($c.Text)" }) }
+            'wg-remove' {
+                $c = Get-RWgClient $argText
+                if (-not $c) { & $out @{ ok = $false; error = 'клиент не найден' } } else { $n = Remove-WgClient $c.PublicKey; & $out ([ordered]@{ ok = $true; name = "$n" }) }
+            }
+            default { & $out @{ ok = $false; error = "неизвестная задача '$Task'" } }
+        }
+    } catch { & $out @{ ok = $false; error = $_.Exception.Message } }
 }
 function Sync-RemoteFirewall($r) {
     $from = $(if (-not (Test-RemoteOn $r) -or "$($r.allowFrom)" -eq 'local') { @('LocalSubnet') + @($(try { $a = Get-WgServerAddress; if ($a) { ($a -replace '\.\d+$', '.0') + '/24' } } catch { })) | Where-Object { $_ } } else { @('Any') })
@@ -89,9 +169,8 @@ function Invoke-RemoteWatch {
     $r.port = [int](Get-WCfg).port
     Sync-RemoteFirewall $r
     if (-not (Get-RemoteProc)) {
-        Write-Log "Веб-сервер VpnGuard: запускаю на порту $($r.port)$(if (Test-RemoteOn $r) { " · удалённая диагностика до $((Get-RemoteUntil $r).ToString('dd.MM HH:mm'))" })" 'WARN'
-        Start-Process powershell.exe -WindowStyle Hidden -WorkingDirectory $Root `
-            -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $Root 'VpnGuard.ps1')`" -RemoteServer" | Out-Null
+        $eng = Start-WebServer
+        Write-Log "Веб-сервер VpnGuard ($eng): запускаю на порту $($r.port)$(if (Test-RemoteOn $r) { " · удалённая диагностика до $((Get-RemoteUntil $r).ToString('dd.MM HH:mm'))" })" 'WARN'
     }
 }
 function Get-RemoteSnapshot {
