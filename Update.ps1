@@ -24,7 +24,7 @@ function Get-UHeaders($u) {
 function Test-AppPath([string]$Path) {
     if ($Path -notmatch '^[A-Za-z0-9_\-\.]+(/[A-Za-z0-9_\-\.]+)*$' -or $Path -match '\.\.') { return $false }
     if ($Path -match '^(data|zapret|bin|\.git)(/|$)' -or $Path -ieq 'config.json') { return $false }
-    return ($Path -match '\.(ps1|cmd|cs|md|txt)$')
+    return ($Path -match '\.(ps1|cmd|cs|md|txt|html|js|css)$')
 }
 function Get-LocalSha([string]$Path) { if (Test-Path $Path) { (Get-FileHash $Path -Algorithm SHA256).Hash.ToLower() } else { '' } }
 
@@ -34,12 +34,12 @@ function Get-AppLatest {
     $c = Invoke-RestMethod "https://api.github.com/repos/$($u.repo)/commits/$($u.branch)" -Headers (Get-UHeaders $u) -TimeoutSec 30 -UseBasicParsing
     $sha = "$($c.sha)"
     if ($sha -notmatch '^[0-9a-f]{40}$') { throw 'GitHub не вернул коммит' }
-    $m = Invoke-RestMethod "https://raw.githubusercontent.com/$($u.repo)/$sha/vpnguard-manifest.json" -Headers (Get-UHeaders $u) -TimeoutSec 30 -UseBasicParsing
-    if ($m -is [string]) { $m = $m | ConvertFrom-Json }
-    if (-not $m.files) { throw 'в репозитории нет vpnguard-manifest.json или он пустой' }
-    $files = @($m.files | Where-Object { $_ -and (Test-AppPath "$($_.path)") -and "$($_.sha256)" -match '^[0-9a-fA-F]{64}$' })
+    $mt = Invoke-RestMethod "https://raw.githubusercontent.com/$($u.repo)/$sha/vpnguard-manifest.json" -Headers (Get-UHeaders $u) -TimeoutSec 30 -UseBasicParsing
+    if ($mt -is [string]) { $mt = $mt | ConvertFrom-Json }
+    if (-not $mt.files) { throw 'в репозитории нет vpnguard-manifest.json или он пустой' }
+    $files = @($mt.files | Where-Object { $_ -and (Test-AppPath "$($_.path)") -and "$($_.sha256)" -match '^[0-9a-fA-F]{64}$' })
     $changed = @($files | Where-Object { (Get-LocalSha (Join-Path $Root ("$($_.path)" -replace '/', '\'))) -ne "$($_.sha256)".ToLower() })
-    [pscustomobject]@{ Sha = $sha; Version = "$($m.version)"; Build = "$($m.build)"; Notes = "$($m.notes)"; Files = $files; Changed = $changed; Repo = $u.repo }
+    [pscustomobject]@{ Sha = $sha; Version = "$($mt.version)"; Build = "$($mt.build)"; Notes = "$($mt.notes)"; Files = $files; Changed = $changed; Repo = $u.repo }
 }
 
 function Invoke-AppUpdateCheck([switch]$Install, [switch]$Force) {

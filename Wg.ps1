@@ -12,8 +12,8 @@ function Find-WgConf {
     $svcKey = 'HKLM:\SYSTEM\CurrentControlSet\Services\' + $W.serviceName
     if (Test-Path -LiteralPath $svcKey) {
         $img = (Get-ItemProperty -LiteralPath $svcKey).ImagePath
-        $m = [regex]::Match("$img", '/tunnelservice\s+"?([^"]+?\.conf(\.dpapi)?)"?\s*$')
-        if ($m.Success -and (Test-Path $m.Groups[1].Value)) { return $m.Groups[1].Value }
+        $mt = [regex]::Match("$img", '/tunnelservice\s+"?([^"]+?\.conf(\.dpapi)?)"?\s*$')
+        if ($mt.Success -and (Test-Path $mt.Groups[1].Value)) { return $mt.Groups[1].Value }
     }
     if ($State -and $State.wgConfPath -and (Test-Path $State.wgConfPath)) { return $State.wgConfPath }
     $n = $W.interfaceName
@@ -138,17 +138,17 @@ function Get-WgClientFiles([string]$ServerConf) {
     }) | Select-Object -First 300)
     $stamp = ($files | ForEach-Object { "$($_.FullName)|$($_.LastWriteTimeUtc.Ticks)" }) -join ';'
     if ($stamp -eq $script:WgClientFileCache.Stamp) { return $script:WgClientFileCache.List }
-    $list = foreach ($f in $files) {
+    $list = foreach ($fp in $files) {
         try {
-            $c = Read-WgConf $f.FullName
+            $c = Read-WgConf $fp.FullName
             $if = $c.Sections | Where-Object { $_.Type -eq 'Interface' } | Select-Object -First 1
             $pe = $c.Sections | Where-Object { $_.Type -eq 'Peer' } | Select-Object -First 1
             if (-not $if -or -not $pe -or -not $if.Keys['PrivateKey']) { continue }
             [pscustomobject]@{
-                File = $f.FullName; Name = $f.BaseName
+                File = $fp.FullName; Name = $fp.BaseName
                 Ip = (("$($if.Keys['Address'])" -split ',')[0].Trim() -replace '/\d+$', '')
                 Endpoint = "$($pe.Keys['Endpoint'])"; Dns = "$($if.Keys['DNS'])"
-                Ours = $f.FullName.StartsWith($WgClientsDir, [StringComparison]::OrdinalIgnoreCase)
+                Ours = $fp.FullName.StartsWith($WgClientsDir, [StringComparison]::OrdinalIgnoreCase)
             }
         } catch { }
     }
@@ -161,11 +161,11 @@ function Get-WgClients {
     $info = Get-WgServerInfo
     $files = @(Get-WgClientFiles $info.Conf)
     $res = foreach ($p in $info.Peers) {
-        $f = $files | Where-Object { $_.Ip -eq $p.Ip } | Select-Object -First 1
+        $fp = $files | Where-Object { $_.Ip -eq $p.Ip } | Select-Object -First 1
         [pscustomobject]@{
-            Name = $(if ($p.Name) { $p.Name } elseif ($f) { $f.Name } else { $p.Ip })
-            Ip = $p.Ip; PublicKey = $p.PublicKey; File = $(if ($f) { $f.File } else { '' })
-            Source = $(if ($p.Managed -or ($f -and $f.Ours)) { 'VpnGuard' } elseif ($f) { 'WS4W' } else { 'только на сервере' })
+            Name = $(if ($p.Name) { $p.Name } elseif ($fp) { $fp.Name } else { $p.Ip })
+            Ip = $p.Ip; PublicKey = $p.PublicKey; File = $(if ($fp) { $fp.File } else { '' })
+            Source = $(if ($p.Managed -or ($fp -and $fp.Ours)) { 'VpnGuard' } elseif ($fp) { 'WS4W' } else { 'только на сервере' })
         }
     }
     [pscustomobject]@{ Info = $info; Clients = @($res) }
@@ -176,22 +176,22 @@ function Get-PhysicalIp {
         Where-Object { $_.InterfaceAlias -notlike 'MeduzaVPN*' -and $_.InterfaceAlias -ne $W.interfaceName -and $_.NextHop -ne '0.0.0.0' } |
         Sort-Object { [int]$_.RouteMetric + [int]$_.InterfaceMetric } | Select-Object -First 1)
     if (-not $r.Count) { return $null }
-    $a = Get-NetIPAddress -InterfaceIndex $r[0].ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '169.254.*' } | Select-Object -First 1
-    if ($a) { return $a.IPAddress }
+    $av = Get-NetIPAddress -InterfaceIndex $r[0].ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '169.254.*' } | Select-Object -First 1
+    if ($av) { return $av.IPAddress }
     return $null
 }
 
 # адрес, по которому клиенты подключаются: из настроек → из существующих клиентов → внешний IP провайдера
 function Get-WgEndpoint($Info) {
     if ($W.endpoint) { $e = "$($W.endpoint)".Trim(); if ($e -notmatch ':\d+$') { $e += ":$($Info.ListenPort)" }; return $e }
-    $f = @(Get-WgClientFiles $Info.Conf) | Where-Object { $_.Endpoint } | Select-Object -First 1
-    if ($f) { return $f.Endpoint }
+    $fp = @(Get-WgClientFiles $Info.Conf) | Where-Object { $_.Endpoint } | Select-Object -First 1
+    if ($fp) { return $fp.Endpoint }
     $src = Get-PhysicalIp
     $curl = Join-Path $env:windir 'System32\curl.exe'
     foreach ($u in 'https://api.ipify.org', 'https://ifconfig.me/ip', 'https://icanhazip.com') {
         try {
-            $a = '-s -m 6 ' + $(if ($src) { "--interface $src " } else { '' }) + $u
-            $ip = (& $curl $a.Split(' ') 2>$null | Out-String).Trim()
+            $av = '-s -m 6 ' + $(if ($src) { "--interface $src " } else { '' }) + $u
+            $ip = (& $curl $av.Split(' ') 2>$null | Out-String).Trim()
             if ($ip -match '^\d+\.\d+\.\d+\.\d+$') { return "${ip}:$($Info.ListenPort)" }
         } catch { }
     }
@@ -200,8 +200,8 @@ function Get-WgEndpoint($Info) {
 
 function Get-WgClientDns($Info) {
     if ($W.clientDns) { return "$($W.clientDns)" }
-    $f = @(Get-WgClientFiles $Info.Conf) | Where-Object { $_.Dns } | Select-Object -First 1
-    if ($f) { return $f.Dns }
+    $fp = @(Get-WgClientFiles $Info.Conf) | Where-Object { $_.Dns } | Select-Object -First 1
+    if ($fp) { return $fp.Dns }
     return $Info.Ip   # DNS-прокси раздачи (ICS) на адресе сервера
 }
 
@@ -224,7 +224,7 @@ function New-WgClient([string]$Name) {
     $used = New-Object Collections.Generic.HashSet[string]
     [void]$used.Add($info.Ip)
     foreach ($p in $info.Peers) { [void]$used.Add($p.Ip) }
-    foreach ($f in Get-WgClientFiles $info.Conf) { [void]$used.Add($f.Ip) }
+    foreach ($fp in Get-WgClientFiles $info.Conf) { [void]$used.Add($fp.Ip) }
     $ip = $null
     for ($v = $net + 2; $v -lt $bcast; $v++) { $cand = ConvertFrom-IpUInt ([uint32]$v); if (-not $used.Contains($cand)) { $ip = $cand; break } }
     if (-not $ip) { throw 'В подсети сервера не осталось свободных адресов' }
@@ -271,12 +271,12 @@ function Remove-WgClient([string]$PublicKey) {
     Write-TextLines $info.Conf $keep
     if (Test-WgTunnelUp) { try { [void](Invoke-WgTool ('set {0} peer {1} remove' -f $W.interfaceName, $PublicKey)) } catch { } }
     # файл клиента: наш — удалить, из WS4W — убрать в копии (иначе WS4W вернёт клиента)
-    $f = @(Get-WgClientFiles $info.Conf) | Where-Object { $peer -and $_.Ip -eq $peer.Ip } | Select-Object -First 1
-    if ($f) {
-        if ($f.Ours) { Remove-Item $f.File -Force -ErrorAction SilentlyContinue }
+    $fp = @(Get-WgClientFiles $info.Conf) | Where-Object { $peer -and $_.Ip -eq $peer.Ip } | Select-Object -First 1
+    if ($fp) {
+        if ($fp.Ours) { Remove-Item $fp.File -Force -ErrorAction SilentlyContinue }
         else {
             if (-not (Test-Path $WgBackupDir)) { New-Item -ItemType Directory $WgBackupDir -Force | Out-Null }
-            Move-Item $f.File (Join-Path $WgBackupDir ('client-{0}-{1}.conf' -f $f.Name, (Get-Date -Format 'yyyyMMdd-HHmmss'))) -Force
+            Move-Item $fp.File (Join-Path $WgBackupDir ('client-{0}-{1}.conf' -f $fp.Name, (Get-Date -Format 'yyyyMMdd-HHmmss'))) -Force
         }
     }
     return $(if ($peer -and $peer.Name) { $peer.Name } else { $PublicKey.Substring(0, 8) })

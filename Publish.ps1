@@ -9,17 +9,22 @@
   делает коммит и git push. Агенты на других ПК увидят новую версию при следующей проверке (раз в update.checkHours).
   config.json, data\, zapret\, bin\ в репозиторий не попадают.
 #>
-param([string]$Repo = '', [string]$Notes = '', [switch]$NoPush)
+param([string]$Repo = '', [string]$Notes = '', [switch]$NoPush, [switch]$SkipTests)
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 $git = (Get-Command git -ErrorAction Stop).Source
 
 # файлы приложения
-$files = @(Get-ChildItem $Root -File | Where-Object { $_.Extension -in '.ps1', '.cmd', '.cs', '.md' } | Sort-Object Name)
+$files = @(@(Get-ChildItem $Root -File | Where-Object { $_.Extension -in '.ps1', '.cmd', '.cs', '.md' }) + @(Get-ChildItem (Join-Path $Root 'web') -File -ErrorAction SilentlyContinue) | Sort-Object FullName)
 foreach ($f in $files | Where-Object Extension -eq '.ps1') {
     $err = $null; [void][Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$err)
     if ($err.Count) { throw "$($f.Name): $($err[0].Message) (строка $($err[0].Extent.StartLineNumber)) — выпуск отменён" }
+}
+# проверка кода: синтаксис, правила, запуск агента/обновлений/веб-сервера/окна в песочнице
+if (-not $SkipTests) {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root 'Test.ps1')
+    if ($LASTEXITCODE -ne 0) { throw 'проверка кода не прошла — выпуск отменён (исправьте ошибки выше)' }
 }
 $ver = [regex]::Match([IO.File]::ReadAllText((Join-Path $Root 'VpnGuard.ps1')), "\`$AgentVersion\s*=\s*'([^']+)'").Groups[1].Value
 if (-not $ver) { throw 'не нашёл $AgentVersion в VpnGuard.ps1' }
@@ -41,7 +46,7 @@ if ($Repo) {
 
 $m = [ordered]@{
     version = $ver; build = $build; notes = $Notes; date = (Get-Date).ToString('o')
-    files = @($files | ForEach-Object { [ordered]@{ path = $_.Name; sha256 = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(); size = $_.Length } })
+    files = @($files | ForEach-Object { [ordered]@{ path = $_.FullName.Substring($Root.Length + 1).Replace('\', '/'); sha256 = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(); size = $_.Length } })
 }
 [IO.File]::WriteAllText((Join-Path $Root 'vpnguard-manifest.json'), ($m | ConvertTo-Json -Depth 4), (New-Object Text.UTF8Encoding $false))
 

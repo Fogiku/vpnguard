@@ -34,7 +34,7 @@ param(
     [string]$ConfigPath = ''
 )
 
-$AgentVersion = '2.3'
+$AgentVersion = '2.4'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -116,6 +116,11 @@ function Get-DefaultConfig { @{
         auto       = $true       # ставить обновления самому
         checkHours = 3
         token      = ''          # только для закрытого репозитория
+    }
+    web = @{
+        enabled = $true          # веб-интерфейс: http://localhost:8765/ (с других устройств сети и wg_server — по паролю token)
+        port    = 8765
+        token   = ''             # пароль для входа с других устройств; создаётся сам
     }
     remote = @{
         enabled      = $false        # удалённая диагностика: включается из окна на N часов
@@ -329,8 +334,8 @@ function Test-TcpVia([string]$SourceIp, [string]$HostPort, [int]$TimeoutMs = 400
 }
 
 function ConvertTo-Ver([string]$s) {
-    $m = [regex]::Match("$s", '\d+(\.\d+){1,3}')
-    if ($m.Success) { return [version]$m.Value }
+    $mt = [regex]::Match("$s", '\d+(\.\d+){1,3}')
+    if ($mt.Success) { return [version]$mt.Value }
     return [version]'0.0'
 }
 
@@ -806,8 +811,8 @@ else {
     function Find-WgConf {
         $svcKey = 'HKLM:\SYSTEM\CurrentControlSet\Services\' + $W.serviceName
         if (Test-Path -LiteralPath $svcKey) {
-            $m = [regex]::Match("$((Get-ItemProperty -LiteralPath $svcKey).ImagePath)", '/tunnelservice\s+"?([^"]+?\.conf(\.dpapi)?)"?\s*$')
-            if ($m.Success -and (Test-Path $m.Groups[1].Value)) { return $m.Groups[1].Value }
+            $mt = [regex]::Match("$((Get-ItemProperty -LiteralPath $svcKey).ImagePath)", '/tunnelservice\s+"?([^"]+?\.conf(\.dpapi)?)"?\s*$')
+            if ($mt.Success -and (Test-Path $mt.Groups[1].Value)) { return $mt.Groups[1].Value }
         }
         if ($State.wgConfPath -and (Test-Path $State.wgConfPath)) { return $State.wgConfPath }
         return $W.configPath
@@ -819,8 +824,8 @@ function Get-WgServerAddress {
     if ($W.serverAddress) { return $W.serverAddress }
     $conf = Find-WgConf
     if ($conf -and $conf -like '*.conf') {
-        $m = Select-String -Path $conf -Pattern '^\s*Address\s*=\s*([\d\.]+)' | Select-Object -First 1
-        if ($m) { return $m.Matches[0].Groups[1].Value }
+        $mt = Select-String -Path $conf -Pattern '^\s*Address\s*=\s*([\d\.]+)' | Select-Object -First 1
+        if ($mt) { return $mt.Matches[0].Groups[1].Value }
     }
     $ip = Get-AdapterIPv4 $W.interfaceName
     if ($ip -and $ip -notlike '192.168.137.*') { return $ip }
@@ -1867,8 +1872,8 @@ else {
 # ---------------------------------------------------------------- режим: MeduzaVPN / AmneziaWG / без VPN (только zapret)
 
 function Get-VpnMode {
-    $m = $(if ($Cfg.vpn) { "$($Cfg.vpn.mode)" } else { '' })
-    if ($m -in 'meduza', 'amnezia', 'dual', 'zapret') { return $m }
+    $mt = $(if ($Cfg.vpn) { "$($Cfg.vpn.mode)" } else { '' })
+    if ($mt -in 'meduza', 'amnezia', 'dual', 'zapret') { return $mt }
     return 'meduza'
 }
 $ModeNames = @{ meduza = 'MeduzaVPN'; amnezia = 'AmneziaWG'; dual = 'два туннеля (MeduzaVPN + AmneziaWG)'; zapret = 'без VPN (только zapret)' }
@@ -1946,8 +1951,8 @@ function Sync-DualRoutes {
         if (-not $ad) { continue }
         if ($k -ne $act) { Set-IfMetric $n 5000; continue }
         $own0 = @(Get-NetRoute -InterfaceAlias $n -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue)
-        $m = $(if ($own0.Count) { [Math]::Max(1, $physM - [int](@($own0 | ForEach-Object { $_.RouteMetric }) | Measure-Object -Minimum).Minimum + 10) } else { 0 })
-        if ($m -gt 0) { Set-IfMetric $n ([Math]::Min(4000, $m)) }
+        $mt = $(if ($own0.Count) { [Math]::Max(1, $physM - [int](@($own0 | ForEach-Object { $_.RouteMetric }) | Measure-Object -Minimum).Minimum + 10) } else { 0 })
+        if ($mt -gt 0) { Set-IfMetric $n ([Math]::Min(4000, $mt)) }
         else { $i = Get-NetIPInterface -InterfaceAlias $n -AddressFamily IPv4 -ErrorAction SilentlyContinue; if ($i -and [int]$i.InterfaceMetric -ge 5000) { Set-IfMetric $n 5 } }
         foreach ($pfx in '0.0.0.0/1', '128.0.0.0/1') {
             if (Get-NetRoute -InterfaceAlias $n -DestinationPrefix $pfx -ErrorAction SilentlyContinue) { continue }

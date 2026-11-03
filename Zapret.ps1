@@ -69,8 +69,8 @@ function Get-ZapretLocalVersion {
     if (Test-Path $f) { return (Get-Content $f -TotalCount 1).Trim() }
     $sb = Join-Path (Get-ZapretDir) 'service.bat'
     if (Test-Path $sb) {
-        $m = Select-String -Path $sb -Pattern 'LOCAL_VERSION=([\d\.]+)' | Select-Object -First 1
-        if ($m) { return $m.Matches[0].Groups[1].Value }
+        $mt = Select-String -Path $sb -Pattern 'LOCAL_VERSION=([\d\.]+)' | Select-Object -First 1
+        if ($mt) { return $mt.Matches[0].Groups[1].Value }
     }
     return ''
 }
@@ -184,9 +184,9 @@ function Get-StrategyArgs([string]$Name) {
     $raw = [IO.File]::ReadAllText($bat) -replace '\^\s*\r?\n', ' '
     $line = ($raw -split '\r?\n') | Where-Object { $_ -match 'winws\.exe' } | Select-Object -First 1
     if (-not $line) { return $null }
-    $m = [regex]::Match($line, 'winws\.exe"?\s+(.*)$')
-    if (-not $m.Success) { return $null }
-    $a = $m.Groups[1].Value.Trim()
+    $mt = [regex]::Match($line, 'winws\.exe"?\s+(.*)$')
+    if (-not $mt.Success) { return $null }
+    $a = $mt.Groups[1].Value.Trim()
     $z = Get-ZCfg
     $gt = '12'; $gu = '12'   # 12 = игровой фильтр выключен (как в service.bat)
     if ($z.gameFilter -in 'all', 'tcp') { $gt = '1024-65535' }
@@ -305,11 +305,11 @@ function Find-ZVideoHost([string]$SrcIp, [int]$TimeoutSec = 8, [switch]$PhysOnly
     foreach ($via in $vias) {
         $ifa = $(if ($via) { "--interface $via " } else { '' })
         $r = Invoke-Exe $curl ('-s --connect-timeout 4 -m ' + $TimeoutSec + ' ' + $ifa + '"https://redirector.googlevideo.com/report_mapping?di=no"') ($TimeoutSec + 5)
-        $m = [regex]::Match("$($r.Out)", '\b(sn-[a-z0-9-]{4,})')
-        if ($m.Success) { return "rr1---$($m.Groups[1].Value).googlevideo.com" }
+        $mt = [regex]::Match("$($r.Out)", '\b(sn-[a-z0-9-]{4,})')
+        if ($mt.Success) { return "rr1---$($mt.Groups[1].Value).googlevideo.com" }
         $r = Invoke-Exe $curl ('-s -L --connect-timeout 4 -m ' + ($TimeoutSec + 7) + ' ' + $ifa + '-A "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" "https://www.youtube.com/watch?v=jNQXAC9IVRw"') ($TimeoutSec + 12)
-        $m = [regex]::Match("$($r.Out)", 'rr\d{1,2}---(sn-[a-z0-9-]{4,})\.googlevideo\.com')
-        if ($m.Success) { return "rr1---$($m.Groups[1].Value).googlevideo.com" }
+        $mt = [regex]::Match("$($r.Out)", 'rr\d{1,2}---(sn-[a-z0-9-]{4,})\.googlevideo\.com')
+        if ($mt.Success) { return "rr1---$($mt.Groups[1].Value).googlevideo.com" }
     }
     return ''
 }
@@ -633,7 +633,7 @@ function Invoke-ZapretWatch {
         # он всё равно меняет трафик YouTube/Discord — в том числе через туннель — и путает проверки
         $foreign = @(Get-CimInstance Win32_Process -Filter "Name='winws.exe'" -ErrorAction SilentlyContinue)
         if ($foreign.Count) {
-            foreach ($w in $foreign) { Write-Log "zapret выключен, но работает чужой winws (PID $($w.ProcessId), $($w.ExecutablePath)) — останавливаю" 'WARN' }
+            foreach ($wc in $foreign) { Write-Log "zapret выключен, но работает чужой winws (PID $($wc.ProcessId), $($wc.ExecutablePath)) — останавливаю" 'WARN' }
             Stop-ZapretService
             Stop-Winws
         }
@@ -742,7 +742,7 @@ function Get-ZapretConnCount {
             try { $v = ConvertTo-ZIp ([Net.IPAddress]::Parse($pp[0]).GetAddressBytes()) } catch { continue }
             $len = [int]$pp[1]
             if ($len -ge 32) { [void]$hosts.Add($v) }
-            else { $m = (0xFFFFFFFFL -shl (32 - $len)) -band 0xFFFFFFFFL; [void]$nets.Add(@(($v -band $m), $m)) }
+            else { $mt = (0xFFFFFFFFL -shl (32 - $len)) -band 0xFFFFFFFFL; [void]$nets.Add(@(($v -band $mt), $mt)) }
         }
         $script:ZNetCache = @{ Key = $key; Hosts = $hosts; Nets = $nets }
     }
@@ -830,8 +830,8 @@ function Write-ZapretDiag {
         $bad = @($r.checks | Where-Object { $_ -and -not $_.ok } | ForEach-Object { "$($_.n): $($_.why)" })
         Write-Host ("  {0,-32} {1}/{2} {3}" -f $r.name, $r.ok, $r.total, $(if ($bad.Count) { '· не прошли: ' + ($bad -join '; ') } else { '' }))
     }
-    $w = Get-CimInstance Win32_Process -Filter "Name='winws.exe'" -ErrorAction SilentlyContinue
-    if ($w) { foreach ($x in $w) { Write-Host "winws PID $($x.ProcessId): $($x.CommandLine.Substring(0, [Math]::Min(160, $x.CommandLine.Length)))…" } } else { Write-Host 'winws: не запущен' }
+    $wc = Get-CimInstance Win32_Process -Filter "Name='winws.exe'" -ErrorAction SilentlyContinue
+    if ($wc) { foreach ($x in $wc) { Write-Host "winws PID $($x.ProcessId): $($x.CommandLine.Substring(0, [Math]::Min(160, $x.CommandLine.Length)))…" } } else { Write-Host 'winws: не запущен' }
     $s = Get-Service -Name 'zapret' -ErrorAction SilentlyContinue
     if ($s) { Write-Host "Служба zapret (service.bat): $($s.Status) / $($s.StartType)" }
     $wd = Get-Service -Name 'WinDivert' -ErrorAction SilentlyContinue

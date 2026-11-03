@@ -182,7 +182,7 @@ function Start-Bg([string]$Key, [scriptblock]$Work, [object[]]$Arguments = @()) 
     if ($j -and -not $j.Handle.IsCompleted) { return $false }
     $ps = [powershell]::Create()
     [void]$ps.AddScript($Work.ToString())
-    foreach ($a in $Arguments) { [void]$ps.AddArgument($a) }
+    foreach ($av in $Arguments) { [void]$ps.AddArgument($av) }
     $script:bg[$Key] = @{ PS = $ps; Handle = $ps.BeginInvoke() }
     return $true
 }
@@ -273,8 +273,8 @@ function Send-Cmd([string]$Action, [string]$Label) {
         if ($r -ne 'Yes') { return }
         Start-Agent
     }
-    $f = Join-Path $CmdDir ('{0}.cmd' -f [DateTime]::UtcNow.Ticks)
-    Set-Content -Path $f -Value $Action -Encoding ASCII
+    $fp = Join-Path $CmdDir ('{0}.cmd' -f [DateTime]::UtcNow.Ticks)
+    Set-Content -Path $fp -Value $Action -Encoding ASCII
     Set-Footer "Отправлено агенту: $Label"
 }
 
@@ -593,10 +593,10 @@ function Update-LiveTraffic {
     Add-LiveBypass
 }
 # трафик мимо VPN (оценка): физический адаптер минус туннель и wg_server (их зашифрованный трафик тоже идёт через него)
-function Get-Bypass($p, $u, $w) {
+function Get-Bypass($p, $u, $wc) {
     if ($null -eq $p) { return $null }
     $ur = $(if ($u) { $u[0] } else { 0 }); $ut = $(if ($u) { $u[1] } else { 0 })
-    $wr = $(if ($w) { $w[0] } else { 0 }); $wt = $(if ($w) { $w[1] } else { 0 })
+    $wr = $(if ($wc) { $wc[0] } else { 0 }); $wt = $(if ($wc) { $wc[1] } else { 0 })
     [double[]]@([Math]::Max(0, $p[0] - $ur - $wr), [Math]::Max(0, $p[1] - $ut - $wt))
 }
 function Add-LiveBypass {
@@ -696,9 +696,9 @@ function Update-LogCounts {
 }
 
 # ---------------------------------------------------------------- рисование (графики, таблицы)
-function DT($g, [string]$s, $font, $color, [int]$x, [int]$y, [int]$w, [int]$h, [string]$flags = 'Left, VerticalCenter, SingleLine, EndEllipsis, NoPadding') {
-    if ($w -le 0) { return }
-    [Windows.Forms.TextRenderer]::DrawText($g, $s, $font, (New-Object Drawing.Rectangle $x, $y, $w, $h), $color, [Windows.Forms.TextFormatFlags]$flags)
+function DT($g, [string]$s, $font, $color, [int]$x, [int]$y, [int]$wc, [int]$h, [string]$flags = 'Left, VerticalCenter, SingleLine, EndEllipsis, NoPadding') {
+    if ($wc -le 0) { return }
+    [Windows.Forms.TextRenderer]::DrawText($g, $s, $font, (New-Object Drawing.Rectangle $x, $y, $wc, $h), $color, [Windows.Forms.TextFormatFlags]$flags)
 }
 function TW([string]$s, $font) { [Windows.Forms.TextRenderer]::MeasureText($s, $font).Width }
 
@@ -1106,7 +1106,7 @@ function Show-Page([string]$Name) {
     if ($Name -eq 'amnezia') { Update-ACfg; Update-AwgInfo; Invalidate-Visible }
     if ($Name -eq 'zapret') { $script:ZsSig = ''; Update-ZStratUi }
     if ($Name -eq 'software') { Update-SoftUi }
-    if ($Name -eq 'diag') { $script:RmSig = ''; try { Update-RemoteUi } catch { } }
+    if ($Name -eq 'diag') { $script:RmSig = ''; try { Update-RemoteUi } catch { }; try { Update-WebUi } catch { } }
     if ($Name -eq 'zapret' -and -not $script:ZListDirty) { if ($cbZList.SelectedIndex -lt 0) { $cbZList.SelectedIndex = 0 } else { Import-ZList } }
     # фокус на кнопку страницы — тогда колесо мыши прокручивает страницу
     try { [void]$pages[$Name].SelectNextControl($null, $true, $true, $true, $true) } catch { }
@@ -1228,7 +1228,8 @@ $heroBtns.Controls.AddRange(@(
     (New-Btn 'Переподключить туннель' { Send-Cmd 'reconnect' 'переподключение туннеля' }),
     (New-Btn 'Восстановить раздачу' { Send-Cmd 'reapply-ics' 'восстановление раздачи' }),
     (New-Btn 'Перезапустить wg_server' { Send-Cmd 'restart-wg' 'перезапуск wg_server' }),
-    $hzBtn
+    $hzBtn,
+    (New-Btn 'Веб-интерфейс' { Start-Process "http://localhost:$((Get-WebCfgUi).port)/" })
 ))
 # режим работы: MeduzaVPN / AmneziaWG / без VPN
 $modeLbl = New-Label 'Режим работы' $F.Small $Clr.Dim; $modeLbl.Anchor = 'Top,Right'
@@ -1852,16 +1853,16 @@ $appBtns.Controls.AddRange(@(
 $appBox.Controls.AddRange(@($appT, $appInfo, $appBtns))
 $appBox.Add_Resize({ $appInfo.Width = [Math]::Max(200, $appBox.ClientSize.Width - 32) })
 function Update-AppUi {
-    $a = Get-Snap 'app'
-    Set-Prop $appInfo Text $(if (-not $a) { 'Автообновление появится с агентом 2.2.' }
-        elseif (-not $a.repo) { "Версия $($a.version). Автообновление не настроено: укажите репозиторий GitHub в Настройках → «Обновление приложения»." }
+    $av = Get-Snap 'app'
+    Set-Prop $appInfo Text $(if (-not $av) { 'Автообновление появится с агентом 2.2.' }
+        elseif (-not $av.repo) { "Версия $($av.version). Автообновление не настроено: укажите репозиторий GitHub в Настройках → «Обновление приложения»." }
         else {
-            "Версия $($a.version)" + $(if ($a.build) { " (сборка $($a.build))" } else { '' }) + " · источник github.com/$($a.repo)" +
-            $(if ($a.error) { " · ошибка: $($a.error)" } elseif ([int]$a.pending -gt 0) { " · доступна $($a.latestVersion) ($($a.latestBuild)), файлов: $($a.pending)" } elseif ($a.checkedAt) { ' · актуальная' } else { '' }) +
-            $(if ($a.checkedAt) { " · проверено $(try { ([datetime]$a.checkedAt).ToString('dd.MM HH:mm') } catch { '' })" } else { '' }) +
-            $(if ($a.auto) { " · ставится само раз в $($a.checkHours) ч" } else { ' · автоустановка выключена' })
+            "Версия $($av.version)" + $(if ($av.build) { " (сборка $($av.build))" } else { '' }) + " · источник github.com/$($av.repo)" +
+            $(if ($av.error) { " · ошибка: $($av.error)" } elseif ([int]$av.pending -gt 0) { " · доступна $($av.latestVersion) ($($av.latestBuild)), файлов: $($av.pending)" } elseif ($av.checkedAt) { ' · актуальная' } else { '' }) +
+            $(if ($av.checkedAt) { " · проверено $(try { ([datetime]$av.checkedAt).ToString('dd.MM HH:mm') } catch { '' })" } else { '' }) +
+            $(if ($av.auto) { " · ставится само раз в $($av.checkHours) ч" } else { ' · автоустановка выключена' })
         })
-    Set-Prop $appInfo ForeColor $(if ($a -and $a.error) { $Clr.Bad } elseif ($a -and [int]$a.pending -gt 0) { $Clr.Warn } else { $Clr.Dim })
+    Set-Prop $appInfo ForeColor $(if ($av -and $av.error) { $Clr.Bad } elseif ($av -and [int]$av.pending -gt 0) { $Clr.Warn } else { $Clr.Dim })
 }
 Add-Blocks $pgSoft @($appBox, $softIntro, $softTools, $softTable)
 $pages['software'] = $pgSoft
@@ -2318,6 +2319,24 @@ $rmBox.Add_Layout({
     if ($rmBox.Height -ne $h) { $rmBox.Height = $h }
 })
 $rmSpacer = New-Object Windows.Forms.Panel; $rmSpacer.Dock = 'Top'; $rmSpacer.Height = 12; $rmSpacer.BackColor = $Clr.Bg
+# --- веб-интерфейс: адрес и пароль для других устройств
+$webBox = New-Object Windows.Forms.FlowLayoutPanel
+$webBox.Dock = 'Top'; $webBox.Height = 46; $webBox.BackColor = $Clr.Card; $webBox.WrapContents = $false; $webBox.Padding = '10,6,10,6'
+$webLbl = New-Label 'Веб-интерфейс' $F.Bold $Clr.Text; $webLbl.Margin = '6,8,10,0'
+$webInfo = New-Label '' $F.Base $Clr.Dim; $webInfo.Margin = '0,9,12,0'
+$webBox.Controls.AddRange(@($webLbl, $webInfo,
+    (New-Btn 'Открыть в браузере' { Start-Process "http://localhost:$((Get-WebCfgUi).port)/" } $true),
+    (New-Btn 'Скопировать адрес и пароль' { $wcf = Get-WebCfgUi; $ips = @(Get-LocalIps | ForEach-Object { "http://$($_.Ip):$($wcf.port)/  (сеть «$($_.Alias)»)" }); [Windows.Forms.Clipboard]::SetText((@('VpnGuard — веб-интерфейс') + $ips + @("Пароль: $($wcf.token)")) -join "`r`n"); Set-Footer 'Адрес и пароль веб-интерфейса скопированы' })))
+$webSpacer = New-Object Windows.Forms.Panel; $webSpacer.Dock = 'Top'; $webSpacer.Height = 12; $webSpacer.BackColor = $Clr.Bg
+function Get-WebCfgUi {
+    $d = @{ enabled = $true; port = 8765; token = '' }
+    try { $o = Read-ConfigObject; if ($o.PSObject.Properties['web']) { foreach ($pp in $o.web.PSObject.Properties) { $d[$pp.Name] = $pp.Value } } } catch { }
+    return $d
+}
+function Update-WebUi {
+    $wcf = Get-WebCfgUi
+    Set-Prop $webInfo Text $(if (-not $wcf.enabled) { 'выключен (web.enabled в config.json)' } else { "http://localhost:$($wcf.port)/ · с телефона и других устройств сети — по адресу этого ПК, пароль: $(if ($wcf.token) { $wcf.token } else { 'появится, когда агент запустит сервер' })" })
+}
 $script:PubIp = ''
 
 function Get-RemoteCfgUi {
@@ -2370,7 +2389,7 @@ function Get-RemoteConnText {
     $u = $(try { ([datetime]$r.until).ToString('dd.MM.yyyy HH:mm') } catch { '' })
     $lines = @("VpnGuard — удалённая диагностика (до $u)")
     if ($script:PubIp -and $script:PubIp -ne 'не удалось') { $lines += "Через интернет: http://$($script:PubIp):$($r.port)/   (нужен проброс TCP $($r.port) на роутере)" }
-    foreach ($a in Get-LocalIps) { $lines += "В сети «$($a.Alias)»: http://$($a.Ip):$($r.port)/" }
+    foreach ($av in Get-LocalIps) { $lines += "В сети «$($av.Alias)»: http://$($av.Ip):$($r.port)/" }
     $lines += "Токен: $($r.token)"
     $lines += "Пример: curl -H `"X-Token: $($r.token)`" http://АДРЕС:$($r.port)/bundle"
     return ($lines -join "`r`n")
@@ -2406,10 +2425,10 @@ function Update-RemoteUi {
 }
 $rmTimer = New-Object Windows.Forms.Timer
 $rmTimer.Interval = 1500
-$rmTimer.Add_Tick({ if ($script:CurPage -eq 'diag') { try { Update-RemoteUi } catch { } } })
+$rmTimer.Add_Tick({ if ($script:CurPage -eq 'diag') { try { Update-RemoteUi } catch { }; try { Update-WebUi } catch { } } })
 $rmTimer.Start()
 
-$pgDiag.Controls.AddRange(@($diagBar, $diagIntro, $rmSpacer, $rmBox, $diagBox))
+$pgDiag.Controls.AddRange(@($diagBar, $diagIntro, $rmSpacer, $rmBox, $webSpacer, $webBox, $diagBox))
 $diagBox.BringToFront()
 $pages['diag'] = $pgDiag
 
@@ -2429,8 +2448,8 @@ function Read-Shared([string]$Path) {
 function Start-Diag([bool]$TryFix) {
     if ($script:diagProc -and -not $script:diagProc.HasExited) { return }
     Remove-Item $script:diagOut, $script:diagErr -Force -ErrorAction SilentlyContinue
-    $a = "-NoProfile -ExecutionPolicy Bypass -File `"$AgentPs1`" -Diag" + $(if ($TryFix) { ' -TryFix' } else { '' })
-    $script:diagProc = Start-Process powershell.exe -ArgumentList $a -WindowStyle Hidden -PassThru `
+    $av = "-NoProfile -ExecutionPolicy Bypass -File `"$AgentPs1`" -Diag" + $(if ($TryFix) { ' -TryFix' } else { '' })
+    $script:diagProc = Start-Process powershell.exe -ArgumentList $av -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput $script:diagOut -RedirectStandardError $script:diagErr
     $script:diagStarted = Get-Date
     $btnDiag.Enabled = $false; $btnDiagFix.Enabled = $false
@@ -2708,7 +2727,7 @@ $timer.Add_Tick({
 })
 # код окна обновился (автообновление) — открыть новое окно и закрыть это
 $MonCode = @('VpnGuardMonitor.ps1', 'Amnezia.ps1', 'Wg.ps1', 'Qr.cs')
-function Get-MonStamp { ($MonCode | ForEach-Object { $f = Join-Path $Root $_; if (Test-Path $f) { (Get-Item $f).LastWriteTimeUtc.Ticks } }) -join '|' }
+function Get-MonStamp { ($MonCode | ForEach-Object { $fp = Join-Path $Root $_; if (Test-Path $fp) { (Get-Item $fp).LastWriteTimeUtc.Ticks } }) -join '|' }
 $script:MonStamp = Get-MonStamp
 $script:MonCheckAt = Get-Date
 function Test-MonUpdated {

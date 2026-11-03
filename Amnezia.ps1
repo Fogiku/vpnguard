@@ -6,7 +6,7 @@
 $AwgDir = Join-Path $DataDir 'amnezia'
 
 function Get-ACfg { if ($script:Cfg -and $script:Cfg.amnezia) { return $script:Cfg.amnezia }; return $script:A }
-function Get-AwgServicePrefix { $a = Get-ACfg; $(if ($a.servicePrefix) { $a.servicePrefix } else { 'AmneziaWGTunnel$' }) }
+function Get-AwgServicePrefix { $av = Get-ACfg; $(if ($av.servicePrefix) { $av.servicePrefix } else { 'AmneziaWGTunnel$' }) }
 
 # имя туннеля = имя файла = имя адаптера: латиница, цифры, _ = + . - (до 32 символов)
 function ConvertTo-TunnelName([string]$s) {
@@ -58,9 +58,9 @@ function Format-AmneziaConf([string]$Text) {
     $lines = @($Text -split "`r?`n")
     if (-not ($lines -match '^\s*\[Interface\]') -or -not ($lines -match '^\s*\[Peer\]')) { throw 'Это не конфиг WireGuard/AmneziaWG: нет секций [Interface] и [Peer]' }
     if (-not ($lines -match '^\s*PrivateKey\s*=')) { throw 'В конфиге нет PrivateKey' }
-    $a = Get-ACfg
+    $av = Get-ACfg
     $out = foreach ($l in $lines) {
-        if ($a.splitDefaultRoute -ne $false -and $l -match '^\s*AllowedIPs\s*=\s*(.+)$') {
+        if ($av.splitDefaultRoute -ne $false -and $l -match '^\s*AllowedIPs\s*=\s*(.+)$') {
             $ips = @($Matches[1] -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
             $ips = @($ips | ForEach-Object { if ($_ -eq '0.0.0.0/0') { '0.0.0.0/1'; '128.0.0.0/1' } elseif ($_ -eq '::/0') { '::/1'; '8000::/1' } else { $_ } })
             "AllowedIPs = $($ips -join ', ')"
@@ -100,31 +100,31 @@ function Get-AmneziaConfigs {
 }
 
 function Remove-AmneziaConfig([string]$Name) {
-    $f = Join-Path $AwgDir "$Name.conf"
-    if (Test-Path $f) {
+    $fp = Join-Path $AwgDir "$Name.conf"
+    if (Test-Path $fp) {
         $bk = Join-Path $DataDir 'backup'
         if (-not (Test-Path $bk)) { New-Item -ItemType Directory $bk -Force | Out-Null }
-        Move-Item $f (Join-Path $bk ("amnezia-{0}-{1}.conf" -f $Name, (Get-Date -Format 'yyyyMMdd-HHmmss'))) -Force
+        Move-Item $fp (Join-Path $bk ("amnezia-{0}-{1}.conf" -f $Name, (Get-Date -Format 'yyyyMMdd-HHmmss'))) -Force
     }
 }
 
 function Get-AmneziaActive {
-    $a = Get-ACfg
+    $av = Get-ACfg
     $list = @(Get-AmneziaConfigs)
-    if ($a.active -and ($list | Where-Object { $_.name -eq $a.active })) { return "$($a.active)" }
+    if ($av.active -and ($list | Where-Object { $_.name -eq $av.active })) { return "$($av.active)" }
     if ($list.Count) { return $list[0].name }
     return ''
 }
 
 # ---------------------------------------------------------------- управление туннелем (агент)
-function Get-AwgExe { $a = Get-ACfg; $(if ($a.exe) { $a.exe } else { 'C:\Program Files\AmneziaWG\amneziawg.exe' }) }
+function Get-AwgExe { $av = Get-ACfg; $(if ($av.exe) { $av.exe } else { 'C:\Program Files\AmneziaWG\amneziawg.exe' }) }
 
 function Start-AmneziaTunnel([string]$Name) {
     $exe = Get-AwgExe
     if (-not (Test-Path $exe)) { throw "AmneziaWG не установлен ($exe) — установите его на вкладке «Компоненты»" }
-    $f = Join-Path $AwgDir "$Name.conf"
-    if (-not (Test-Path $f)) { throw "нет конфига $f" }
-    $r = Invoke-Exe $exe ('/installtunnelservice "{0}"' -f $f) 60
+    $fp = Join-Path $AwgDir "$Name.conf"
+    if (-not (Test-Path $fp)) { throw "нет конфига $fp" }
+    $r = Invoke-Exe $exe ('/installtunnelservice "{0}"' -f $fp) 60
     if ($r.Code -ne 0) { throw "installtunnelservice: код $($r.Code) $($r.Err)" }
     $svc = (Get-AwgServicePrefix) + $Name
     try { Set-Service -Name $svc -StartupType Automatic -ErrorAction SilentlyContinue } catch { }
@@ -264,12 +264,12 @@ function Get-AwgTunnelInfo([string]$Name) {
     if ($r.Code -ne 0 -or -not $r.Out) { return $null }
     $lines = @($r.Out -split "`r?`n" | Where-Object { $_ })
     if ($lines.Count -lt 2) { return $null }
-    $f = $lines[1] -split "`t"      # первая строка — интерфейс, дальше пиры
-    if ($f.Count -lt 8) { return $null }
-    $hs = [long]0; [void][long]::TryParse($f[4], [ref]$hs)
-    $rx = [long]0; [void][long]::TryParse($f[5], [ref]$rx)
-    $tx = [long]0; [void][long]::TryParse($f[6], [ref]$tx)
-    [pscustomobject]@{ Endpoint = $f[2]; HsAgo = $(if ($hs -gt 0) { [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - $hs } else { -1 }); Rx = $rx; Tx = $tx }
+    $fp = $lines[1] -split "`t"      # первая строка — интерфейс, дальше пиры
+    if ($fp.Count -lt 8) { return $null }
+    $hs = [long]0; [void][long]::TryParse($fp[4], [ref]$hs)
+    $rx = [long]0; [void][long]::TryParse($fp[5], [ref]$rx)
+    $tx = [long]0; [void][long]::TryParse($fp[6], [ref]$tx)
+    [pscustomobject]@{ Endpoint = $fp[2]; HsAgo = $(if ($hs -gt 0) { [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - $hs } else { -1 }); Rx = $rx; Tx = $tx }
 }
 
 function Format-AwgBytes([double]$b) { if ($b -ge 1GB) { '{0:N2} ГБ' -f ($b / 1GB) } elseif ($b -ge 1MB) { '{0:N1} МБ' -f ($b / 1MB) } else { '{0:N0} КБ' -f ($b / 1KB) } }
@@ -280,7 +280,7 @@ function Get-AmneziaStatus {
     $used = $mode -in 'amnezia', 'dual'
     $exe = Get-AwgExe; $inst = Test-Path $exe
     $name = Get-AmneziaActive
-    $cfg = $(if ($name) { @(Get-AmneziaConfigs) | Where-Object { $_.name -eq $name } | Select-Object -First 1 } else { $null })
+    $cfgx = $(if ($name) { @(Get-AmneziaConfigs) | Where-Object { $_.name -eq $name } | Select-Object -First 1 } else { $null })
     $svc = $(if ($name) { Get-Service -Name ((Get-AwgServicePrefix) + $name) -ErrorAction SilentlyContinue } else { $null })
     $ad = $(if ($name) { Get-NetAdapter -Name $name -ErrorAction SilentlyContinue } else { $null })
     $up = [bool]($ad -and $ad.Status -eq 'Up')
@@ -301,7 +301,7 @@ function Get-AmneziaStatus {
     if ($mode -eq 'dual' -and $lv -eq 0) { $st = $(if ((Get-DualActive) -eq 'amnezia') { 'Подключён · активный' } else { 'Подключён · резерв' }) }
     $hsTxt = $(if (-not $ti) { '—' } elseif ($ti.HsAgo -lt 0) { 'не было' } elseif ($ti.HsAgo -lt 120) { "$($ti.HsAgo) с назад" } else { "$([int]($ti.HsAgo / 60)) мин назад" })
     $d = @(
-        $(if ($cfg) { "Конфиг: $($cfg.title) · сервер $($cfg.endpoint)" } else { 'Конфиг: нет' }),
+        $(if ($cfgx) { "Конфиг: $($cfgx.title) · сервер $($cfgx.endpoint)" } else { 'Конфиг: нет' }),
         ('Туннель: ' + $(if ($up) { "IP $ip · рукопожатие $hsTxt" } elseif ($svc) { "$($svc.Status)" } else { 'не подключён' })),
         ('Трафик: ' + $(if ($State.awgTraffic -eq $true) { 'OK' } elseif ($State.awgTraffic -eq $false) { 'НЕТ' } else { '—' }) + ", проверка $(Format-When $State.awgTrafficAt)"),
         "Перезапуски: $($State.awgRestarts.Count) за 30 мин, посл. $(Format-When $State.awgLastRestart)"
@@ -309,8 +309,8 @@ function Get-AmneziaStatus {
     $kv = @(
         @('Клиент AmneziaWG', $(if ($inst) { "установлен · версия $ver" } else { "не установлен ($exe)" })),
         @('Используется', $(if ($mode -eq 'amnezia') { 'да — режим AmneziaWG' } elseif ($mode -eq 'dual') { 'да — режим «два туннеля» (' + $(if ((Get-DualActive) -eq 'amnezia') { 'активный' } else { 'резерв' }) + ')' } else { 'нет (другой режим)' })),
-        @('Активный конфиг', $(if ($cfg) { "$($cfg.title) ($name)" } else { '—' })),
-        @('Сервер', $(if ($ti -and $ti.Endpoint -and $ti.Endpoint -ne '(none)') { "$($ti.Endpoint)" } elseif ($cfg) { "$($cfg.endpoint)" } else { '—' })),
+        @('Активный конфиг', $(if ($cfgx) { "$($cfgx.title) ($name)" } else { '—' })),
+        @('Сервер', $(if ($ti -and $ti.Endpoint -and $ti.Endpoint -ne '(none)') { "$($ti.Endpoint)" } elseif ($cfgx) { "$($cfgx.endpoint)" } else { '—' })),
         @('Служба', $(if ($svc) { "$($svc.Name) · $($svc.Status) / $($svc.StartType)" } else { 'не установлена' })),
         @('Адаптер', $(if ($ad) { "$($ad.Status) · IP $(if ($ip) { $ip } else { '—' })" } else { 'отсутствует' })),
         @('Последнее рукопожатие', $hsTxt),

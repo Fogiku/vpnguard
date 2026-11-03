@@ -1,13 +1,13 @@
 {
-    "version":  "2.3",
-    "build":  "20261103-1401",
-    "notes":  "удалённая проверка скорости напрямую и через туннель",
-    "date":  "2026-11-03T14:01:58.7069795+03:00",
+    "version":  "2.4",
+    "build":  "20261103-1425",
+    "notes":  "веб-интерфейс, проверка кода перед выпуском, исправлены переменные, подменявшие глобальные (режим двух туннелей, AmneziaWG, WireGuard)",
+    "date":  "2026-11-03T14:25:51.0682500+03:00",
     "files":  [
                   {
                       "path":  "Amnezia.ps1",
-                      "sha256":  "ec575c0c52342df25788aa049095cd59f1ce6c6c9c6d5e84a34637cac41e7477",
-                      "size":  22443
+                      "sha256":  "228edb39e56c04687449466db2bcf3b183c07847c8d8604c63cb3d622847f1a1",
+                      "size":  22476
                   },
                   {
                       "path":  "Install.cmd",
@@ -21,8 +21,8 @@
                   },
                   {
                       "path":  "Publish.ps1",
-                      "sha256":  "18db9148291eae1e2b34b27c8abdc0c6991123305b31e8dba54607077f0093b0",
-                      "size":  3869
+                      "sha256":  "d48561aeaa8cee7cbd90f08871641cdbf5bd36f39405503425138f175bc51adb",
+                      "size":  4466
                   },
                   {
                       "path":  "Qr.cs",
@@ -31,13 +31,13 @@
                   },
                   {
                       "path":  "README.md",
-                      "sha256":  "135b522502da250067b7d4fa96f5496564fb922c99a4924ca2a04ba4e0509312",
-                      "size":  21557
+                      "sha256":  "ef1b3270f0d4da965eb31f8b5549762480b7402f7a1f506b69c241c586864d8d",
+                      "size":  24916
                   },
                   {
                       "path":  "Remote.ps1",
-                      "sha256":  "06c4e9355f58a9bc1c7ca961a3154cd064a4a17b86d83d1be49e4c7cc3172343",
-                      "size":  27826
+                      "sha256":  "20472b6f2379135cab1cb1ecb57be35c86404a775b3fa82f91ab935335e85bb0",
+                      "size":  39489
                   },
                   {
                       "path":  "RemoteDiag.ps1",
@@ -48,6 +48,11 @@
                       "path":  "Software.ps1",
                       "sha256":  "8624f202e6990bce673e58f5b7bb3d66d84d532715406dd160f6f74b850271f2",
                       "size":  11221
+                  },
+                  {
+                      "path":  "Test.ps1",
+                      "sha256":  "9e778431fcac4b3da128af52cae9b569828429459d68882a64505deb915bf01c",
+                      "size":  20189
                   },
                   {
                       "path":  "Uninstall.cmd",
@@ -61,13 +66,13 @@
                   },
                   {
                       "path":  "Update.ps1",
-                      "sha256":  "9bf6c147ef4b1433c34ea4455e7257f60e58b432dfe4a719f5def0f39ccd6e85",
-                      "size":  9253
+                      "sha256":  "145ba30a062df6ae8b862f384ff6ecfd7a4fb06150fbd6d1699ae87e6b27d1e5",
+                      "size":  9274
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "7198cec1cc85dfa24bbd5fada36b1a31e9aa53a0439b4c43b8d2c7f8a34c33d1",
-                      "size":  131366
+                      "sha256":  "1c91062c4b32bbf6d898665253ef1af31169cdf05b4b9c26983ed77be5c9b0c5",
+                      "size":  131729
                   },
                   {
                       "path":  "VpnGuardMonitor.cmd",
@@ -76,18 +81,23 @@
                   },
                   {
                       "path":  "VpnGuardMonitor.ps1",
-                      "sha256":  "0490b37950e5b9461ae8540d5b9ee788cc84acfa2d67e547f128f3f87b6c1460",
-                      "size":  184733
+                      "sha256":  "23695eaaaf53f186be2c43c028ea56cb789f2d2d303b796c45b3549e5a92616d",
+                      "size":  186819
+                  },
+                  {
+                      "path":  "web/index.html",
+                      "sha256":  "0bc59238e6c1d2f01429a16ce2f71b2a59ef9736f2f6a0e78c33678cefcec0f4",
+                      "size":  43269
                   },
                   {
                       "path":  "Wg.ps1",
-                      "sha256":  "b5e697cdb3952213d36c12d62a6a2dccee758425db2f7d76463c4ad3376f7408",
-                      "size":  18922
+                      "sha256":  "bf3e1e42e5819b641b49270a8197aec07a64e117a1f3212ead2813eb893b5ee0",
+                      "size":  18958
                   },
                   {
                       "path":  "Zapret.ps1",
-                      "sha256":  "ea2ff84f43b2c289fbd4dd40b9433e20365d9901adcde2ce69ab147476ec103b",
-                      "size":  54290
+                      "sha256":  "55e9ab1e357ec61a0c351bf5bdb1e46dcfe8018cae8570aa71d96156705c0e87",
+                      "size":  54311
                   }
               ]
 }
