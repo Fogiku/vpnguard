@@ -1,8 +1,8 @@
 {
-    "version":  "3.1.1",
-    "build":  "20261103-1623",
-    "notes":  "значок: задача без триггеров",
-    "date":  "2026-11-03T16:23:20.4825207+03:00",
+    "version":  "3.1.2",
+    "build":  "20261103-1853",
+    "notes":  "значок у часов — в списке процессов диагностики",
+    "date":  "2026-11-03T18:53:47.6637260+03:00",
     "files":  [
                   {
                       "path":  "Amnezia.ps1",
@@ -36,8 +36,8 @@
                   },
                   {
                       "path":  "Remote.ps1",
-                      "sha256":  "1ff97632ab07bf400ca50d52a80ec4ea071d387ee0c1d64379ef51e26e58e7a8",
-                      "size":  59764
+                      "sha256":  "5118a43abb2d3e5101a49127ad4bb8a41de88d33da7a43eda1dd15b33a2a211a",
+                      "size":  59777
                   },
                   {
                       "path":  "RemoteDiag.ps1",
@@ -76,7 +76,7 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "7bfef9b2cc505cd9fdded639155c38d73da717c41a74e9f7d5ec85554a0cde09",
+                      "sha256":  "7ad8a59c9047aeb27439d8031bd1a87bbacb26df3c2be13199ff66b39e09bddd",
                       "size":  132985
                   },
                   {
