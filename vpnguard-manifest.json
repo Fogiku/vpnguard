@@ -1,13 +1,13 @@
 {
-    "version":  "3.4",
-    "build":  "20261103-2014",
+    "version":  "3.4.1",
+    "build":  "20261103-2033",
     "notes":  "",
-    "date":  "2026-11-03T20:14:47.0911108+03:00",
+    "date":  "2026-11-03T20:33:49.2260441+03:00",
     "files":  [
                   {
                       "path":  "Agent.cs",
-                      "sha256":  "2e5b2fff0a981f974c06267422126a2c84e002f65d1de46730a0f9b886f2cbdc",
-                      "size":  100765
+                      "sha256":  "db5c8e5caead8891e1932d2d7ed43e69b4afeb8ae63b46933392af0e8eaf18b5",
+                      "size":  102153
                   },
                   {
                       "path":  "Amnezia.ps1",
@@ -56,8 +56,8 @@
                   },
                   {
                       "path":  "Test.ps1",
-                      "sha256":  "0b25cd518aab84f759680935b3df6955b2cd9a18ea8ced11de0543a7a4cc58ba",
-                      "size":  27436
+                      "sha256":  "f202d08309814badb3417afef5b9b5fe1fb7ffaf9a96c3997bb500730427d24c",
+                      "size":  30789
                   },
                   {
                       "path":  "Tray.cs",
@@ -81,8 +81,8 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "11ceda18815ee8495485d26618e056c57d0a83d24d85fa99059bb236abe545a8",
-                      "size":  141994
+                      "sha256":  "25cf1aa99085f3bca0c59e4904bf10da2c34b907b0c80919a8e2729487a8d1d2",
+                      "size":  143163
                   },
                   {
                       "path":  "VpnGuardMonitor.cmd",
@@ -106,8 +106,8 @@
                   },
                   {
                       "path":  "Wg.ps1",
-                      "sha256":  "bf3e1e42e5819b641b49270a8197aec07a64e117a1f3212ead2813eb893b5ee0",
-                      "size":  18958
+                      "sha256":  "30413806867c3db7b277f1cc0ab4b71950b02f52fa740580b3c14ed589300090",
+                      "size":  21590
                   },
                   {
                       "path":  "Zapret.cs",

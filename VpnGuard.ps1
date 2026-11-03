@@ -37,7 +37,7 @@ param(
     [string]$ConfigPath = ''
 )
 
-$AgentVersion = '3.4'
+$AgentVersion = '3.4.1'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -1334,18 +1334,26 @@ function Get-WgPeerNames {
     $stamp = ((@(Get-Item $conf) + $files) | ForEach-Object { $_.LastWriteTimeUtc.Ticks }) -join '|'
     if ($stamp -eq $script:PeerNames.Stamp) { return $script:PeerNames }
     $byKey = @{}; $byIp = @{}
-    $inPeer = $false; $key = $null; $nm = $null; $before = $null
-    $flush = { if ($inPeer -and $key -and $nm) { $byKey[$key] = $nm } }
+    # имя клиента: «# Name = …» внутри блока [Peer] (так пишет VpnGuard) → комментарий над [Peer] (так пишет WS4W: «# 1», «[Peer]»)
+    # → первый свой комментарий в блоке (не «VpnGuard: …») → имя файла клиента с тем же адресом (ByIp).
+    # Комментарии после последнего ключа блока относятся к следующему блоку.
+    $inPeer = $false; $key = $null; $nmName = $null; $nmFirst = $null; $above = $null; $pending = New-Object Collections.ArrayList
+    $absorb = { foreach ($c in $pending) { if ($c -match '^(?:Name|Client|Имя)\s*[=:]\s*(.{1,60})$') { if (-not $nmName) { $nmName = $Matches[1].Trim() } } elseif ($c -and $c.Length -le 60 -and $c -notmatch '^VpnGuard' -and -not $nmFirst) { $nmFirst = $c } }; $pending.Clear() }
+    $flush = { $n = $(if ($nmName) { $nmName } elseif ($above) { $above } else { $nmFirst }); if ($inPeer -and $key -and $n) { $byKey[$key] = $n } }
     foreach ($l in @(Get-Content $conf -Encoding UTF8 -ErrorAction SilentlyContinue)) {
-        if ($l -match '^\s*\[Peer\]') { . $flush; $inPeer = $true; $key = $null; $nm = $before; $before = $null; continue }
-        if ($l -match '^\s*\[') { . $flush; $inPeer = $false; $before = $null; continue }
-        if ($l -match '^\s*[#;]\s*(?:(?:Name|Client|Имя)\s*[=:]\s*)?(.{1,60}?)\s*$') {
-            if ($inPeer -and -not $nm) { $nm = $Matches[1] } else { $before = $Matches[1] }
+        if ($l -match '^\s*\[(\w+)\]') {
+            $hdr = $Matches[1]; $up = $null
+            foreach ($c in $pending) { if ($c -match '^(?:Name|Client|Имя)\s*[=:]\s*(.{1,60})$') { $up = $Matches[1].Trim() } elseif ($c -and $c.Length -le 60 -and $c -notmatch '^VpnGuard') { $up = $c } }
+            $pending.Clear(); . $flush
+            $inPeer = $hdr -eq 'Peer'; $key = $null; $nmName = $null; $nmFirst = $null; $above = $(if ($inPeer) { $up } else { $null })
             continue
         }
+        if ($l -match '^\s*[#;]\s*(.*?)\s*$') { [void]$pending.Add($Matches[1]); continue }
+        if (-not $l.Trim()) { continue }
+        . $absorb
         if ($inPeer -and $l -match '^\s*PublicKey\s*=\s*(\S+)') { $key = $Matches[1] }
     }
-    . $flush
+    . $absorb; . $flush
     foreach ($f in $files) {
         $a = Select-String -Path $f.FullName -Pattern '^\s*Address\s*=\s*([\d\.]+)' -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($a) { $byIp[$a.Matches[0].Groups[1].Value] = $f.BaseName }

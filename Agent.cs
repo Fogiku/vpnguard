@@ -743,16 +743,28 @@ namespace VpnGuard
             var stamp = string.Join("|", new[] { conf }.Concat(files).Select(f => File.GetLastWriteTimeUtc(f).Ticks));
             if (stamp == PeerStamp) return;
             var byKey = new Dictionary<string, string>(); var byIp = new Dictionary<string, string>();
-            bool inPeer = false; string key = null, nm = null, before = null;
-            Action flush = () => { if (inPeer && key != null && nm != null) byKey[key] = nm; };
+            // имя клиента: «# Name = …» внутри блока [Peer] (так пишет VpnGuard) → комментарий над [Peer] (так пишет WS4W: «# 1», «[Peer]»)
+            // → первый свой комментарий в блоке (не «VpnGuard: …») → имя файла клиента с тем же адресом (byIp).
+            // Комментарии после последнего ключа блока относятся к следующему блоку.
+            bool inPeer = false; string key = null, nmName = null, nmFirst = null, above = null; var pending = new List<string>();
+            Func<string, string> nameOf = c => { var mm = Regex.Match(c, @"^(?:Name|Client|Имя)\s*[=:]\s*(.{1,60})$"); return mm.Success ? mm.Groups[1].Value.Trim() : null; };
+            Func<string, bool> plain = c => c.Length > 0 && c.Length <= 60 && !c.StartsWith("VpnGuard", StringComparison.OrdinalIgnoreCase);
+            Action absorb = () => { foreach (var c in pending) { var n = nameOf(c); if (n != null) { if (nmName == null) nmName = n; } else if (plain(c) && nmFirst == null) nmFirst = c; } pending.Clear(); };
+            Action flush = () => { var n = nmName ?? above ?? nmFirst; if (inPeer && key != null && n != null) byKey[key] = n; };
             foreach (var l in File.ReadAllLines(conf, Encoding.UTF8)) {
-                if (Regex.IsMatch(l, @"^\s*\[Peer\]")) { flush(); inPeer = true; key = null; nm = before; before = null; continue; }
-                if (Regex.IsMatch(l, @"^\s*\[")) { flush(); inPeer = false; before = null; continue; }
-                var m = Regex.Match(l, @"^\s*[#;]\s*(?:(?:Name|Client|Имя)\s*[=:]\s*)?(.{1,60}?)\s*$");
-                if (m.Success) { if (inPeer && nm == null) nm = m.Groups[1].Value; else before = m.Groups[1].Value; continue; }
+                var h = Regex.Match(l, @"^\s*\[(\w+)\]");
+                if (h.Success) {
+                    string up = null; foreach (var c in pending) { var n = nameOf(c) ?? (plain(c) ? c : null); if (n != null) up = n; }
+                    pending.Clear(); flush();
+                    inPeer = h.Groups[1].Value.Equals("Peer", StringComparison.OrdinalIgnoreCase); key = null; nmName = null; nmFirst = null; above = inPeer ? up : null;
+                    continue;
+                }
+                var m = Regex.Match(l, @"^\s*[#;]\s*(.*?)\s*$"); if (m.Success) { pending.Add(m.Groups[1].Value); continue; }
+                if (l.Trim().Length == 0) continue;
+                absorb();
                 var k = Regex.Match(l, @"^\s*PublicKey\s*=\s*(\S+)"); if (inPeer && k.Success) key = k.Groups[1].Value;
             }
-            flush();
+            absorb(); flush();
             foreach (var f in files) { try { var a = Regex.Match(File.ReadAllText(f), @"(?m)^\s*Address\s*=\s*([\d\.]+)"); if (a.Success) byIp[a.Groups[1].Value] = Path.GetFileNameWithoutExtension(f); } catch { } }
             PeerNamesByKey = byKey; PeerNamesByIp = byIp; PeerStamp = stamp;
         }

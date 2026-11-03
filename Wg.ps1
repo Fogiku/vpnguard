@@ -5,6 +5,8 @@
 # Перед каждым изменением — копия в data\backup. Изменения применяются сразу (wg set), без перезапуска туннеля.
 
 $WgClientsDir = Join-Path $DataDir 'clients'
+# копия конфигов клиентов вне папки VpnGuard: переживает переустановку (новая папка без data) — иначе закрытый ключ клиента не восстановить
+$WgClientsMirror = Join-Path $(if ($env:ProgramData) { $env:ProgramData } else { 'C:\ProgramData' }) 'VpnGuard\clients'
 $WgBackupDir  = Join-Path $DataDir 'backup'
 
 function Find-WgConf {
@@ -75,21 +77,27 @@ function Backup-WgConf([string]$Path) {
 }
 
 # разбор конфига: секции с номерами строк (для удаления блока [Peer])
+# секции конфига. Комментарии после последнего ключа секции относятся к следующей (Above): WS4W пишет имя клиента
+# строкой над [Peer] («# 1»); VpnGuard — внутри («[Peer]», «# Name = …»). End — последний ключ или комментарий внутри.
 function Read-WgConf([string]$Path) {
     $lines = Read-TextLines $Path
     $secs = New-Object Collections.ArrayList
     $cur = $null
+    $pending = New-Object Collections.ArrayList     # комментарии, ещё не отнесённые к секции: @(индекс, текст)
     for ($i = 0; $i -lt $lines.Count; $i++) {
         $l = $lines[$i]
         if ($l -match '^\s*\[(\w+)\]') {
-            $cur = @{ Type = $Matches[1]; Start = $i; End = $i; Keys = @{}; Comments = New-Object Collections.ArrayList }
+            $cur = @{ Type = $Matches[1]; Start = $i; End = $i; Keys = @{}; Comments = New-Object Collections.ArrayList; Above = @($pending | ForEach-Object { $_[1] }) }
+            $pending.Clear()
             [void]$secs.Add($cur); continue
         }
-        if (-not $cur) { continue }
+        if ($l -match '^\s*[#;]\s*(.*?)\s*$') { [void]$pending.Add(@($i, $Matches[1])); continue }
+        if (-not $cur -or -not $l.Trim()) { continue }
+        foreach ($pc in $pending) { [void]$cur.Comments.Add($pc[1]) }; $pending.Clear()
         $cur.End = $i
-        if ($l -match '^\s*[#;]\s*(.*?)\s*$') { [void]$cur.Comments.Add($Matches[1]); continue }
         if ($l -match '^\s*(\w+)\s*=\s*(.*?)\s*$') { $cur.Keys[$Matches[1]] = $Matches[2] }
     }
+    if ($cur) { foreach ($pc in $pending) { [void]$cur.Comments.Add($pc[1]); $cur.End = $pc[0] } }
     # хвостовые пустые строки секции не считаем её частью
     foreach ($s in $secs) { while ($s.End -gt $s.Start -and -not $lines[$s.End].Trim()) { $s.End-- } }
     @{ Lines = $lines; Sections = $secs }
@@ -98,10 +106,12 @@ function Read-WgConf([string]$Path) {
 function ConvertTo-IpUInt([string]$ip) { $b = ([Net.IPAddress]::Parse($ip)).GetAddressBytes(); [array]::Reverse($b); [BitConverter]::ToUInt32($b, 0) }
 function ConvertFrom-IpUInt([uint32]$v) { $b = [BitConverter]::GetBytes($v); [array]::Reverse($b); (New-Object Net.IPAddress (, $b)).ToString() }
 
+# имя клиента: «# Name = …» внутри блока → комментарий над [Peer] (WS4W) → первый свой комментарий в блоке
 function Get-PeerName($Sec) {
-    foreach ($c in $Sec.Comments) {
-        if ($c -match '^(?:Name|Client|Имя)\s*[=:]\s*(.+)$') { return $Matches[1].Trim() }
-    }
+    foreach ($c in $Sec.Comments) { if ($c -match '^(?:Name|Client|Имя)\s*[=:]\s*(.+)$') { return $Matches[1].Trim() } }
+    $up = $null
+    foreach ($c in @($Sec.Above)) { if ($c -match '^(?:Name|Client|Имя)\s*[=:]\s*(.+)$') { $up = $Matches[1].Trim() } elseif ($c -and $c.Length -le 60 -and $c -notmatch '^VpnGuard') { $up = $c } }
+    if ($up) { return $up }
     foreach ($c in $Sec.Comments) { if ($c -and $c -notmatch '^VpnGuard') { return $c } }
     return $null
 }
@@ -131,7 +141,14 @@ function Get-WgServerInfo {
 # клиентские конфиги: наши (data\clients) и WS4W (папки рядом с конфигом сервера)
 $script:WgClientFileCache = @{ Stamp = ''; List = @() }
 function Get-WgClientFiles([string]$ServerConf) {
-    $dirs = @($WgClientsDir)
+    # клиенты, созданные до появления копии, — тоже скопировать
+    if (Test-Path $WgClientsDir) {
+        foreach ($cf in Get-ChildItem $WgClientsDir -Filter '*.conf' -ErrorAction SilentlyContinue) {
+            $mf = Join-Path $WgClientsMirror $cf.Name
+            if (-not (Test-Path $mf)) { try { New-Item -ItemType Directory $WgClientsMirror -Force | Out-Null; Copy-Item $cf.FullName $mf -Force } catch { } }
+        }
+    }
+    $dirs = @($WgClientsDir, $WgClientsMirror)
     if ($ServerConf) { $dirs += (Split-Path (Split-Path $ServerConf)) }
     $files = @(@(foreach ($d in $dirs | Select-Object -Unique) {
         if (Test-Path $d) { Get-ChildItem $d -Recurse -Depth 2 -Filter '*.conf' -ErrorAction SilentlyContinue | Where-Object { $_.FullName -ne $ServerConf -and $_.FullName -notlike "$WgBackupDir*" } }
@@ -148,7 +165,7 @@ function Get-WgClientFiles([string]$ServerConf) {
                 File = $fp.FullName; Name = $fp.BaseName
                 Ip = (("$($if.Keys['Address'])" -split ',')[0].Trim() -replace '/\d+$', '')
                 Endpoint = "$($pe.Keys['Endpoint'])"; Dns = "$($if.Keys['DNS'])"
-                Ours = $fp.FullName.StartsWith($WgClientsDir, [StringComparison]::OrdinalIgnoreCase)
+                Ours = ($fp.FullName.StartsWith($WgClientsDir, [StringComparison]::OrdinalIgnoreCase) -or $fp.FullName.StartsWith($WgClientsMirror, [StringComparison]::OrdinalIgnoreCase))
             }
         } catch { }
     }
@@ -216,6 +233,7 @@ function New-WgClient([string]$Name) {
     if (-not (Test-Path $WgClientsDir)) { New-Item -ItemType Directory $WgClientsDir -Force | Out-Null }
     $file = Join-Path $WgClientsDir "$safe.conf"
     if (Test-Path $file) { throw "Файл $file уже существует" }
+    $mirror = Join-Path $WgClientsMirror "$safe.conf"
 
     # свободный адрес в подсети сервера
     $mask = [uint32]([Math]::Pow(2, 32) - [Math]::Pow(2, 32 - $info.Prefix))
@@ -244,6 +262,7 @@ function New-WgClient([string]$Name) {
     $lines += @('', '[Peer]', "# Name = $Name", "# VpnGuard: created $(Get-Date -Format 'yyyy-MM-dd HH:mm')", "PublicKey = $($keys.Public)", "PresharedKey = $psk", "AllowedIPs = $ip/32")
     Write-TextLines $info.Conf $lines
     Write-TextLines $file $client
+    try { if (-not (Test-Path $WgClientsMirror)) { New-Item -ItemType Directory $WgClientsMirror -Force | Out-Null }; Write-TextLines $mirror $client } catch { }
 
     # применить сразу, без перезапуска туннеля
     if (Test-WgTunnelUp) {
@@ -273,7 +292,11 @@ function Remove-WgClient([string]$PublicKey) {
     # файл клиента: наш — удалить, из WS4W — убрать в копии (иначе WS4W вернёт клиента)
     $fp = @(Get-WgClientFiles $info.Conf) | Where-Object { $peer -and $_.Ip -eq $peer.Ip } | Select-Object -First 1
     if ($fp) {
-        if ($fp.Ours) { Remove-Item $fp.File -Force -ErrorAction SilentlyContinue }
+        if ($fp.Ours) {
+            # и сам файл, и его копия вне папки VpnGuard
+            $nm = Split-Path $fp.File -Leaf
+            foreach ($cf in @($fp.File, (Join-Path $WgClientsDir $nm), (Join-Path $WgClientsMirror $nm))) { Remove-Item $cf -Force -ErrorAction SilentlyContinue }
+        }
         else {
             if (-not (Test-Path $WgBackupDir)) { New-Item -ItemType Directory $WgBackupDir -Force | Out-Null }
             Move-Item $fp.File (Join-Path $WgBackupDir ('client-{0}-{1}.conf' -f $fp.Name, (Get-Date -Format 'yyyyMMdd-HHmmss'))) -Force

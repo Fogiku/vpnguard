@@ -284,6 +284,35 @@ else {
     else { Ok "окно: отрисованы страницы $($pages -join ', ')" }
 }
 
+Write-Host '7. Имена клиентов WG-Server (формат WS4W «# 1» над [Peer] и VpnGuard «# Name =» внутри; агент C# и список одинаково)'
+$pr = Join-Path $tmp 'peers'; New-Item -ItemType Directory (Join-Path $pr 'srv\server_wg'), (Join-Path $pr 'srv\clients_wg\c1'), (Join-Path $pr 'data\logs') -Force | Out-Null
+$pconf = Join-Path $pr 'srv\server_wg\wg_server.conf'
+[IO.File]::WriteAllText($pconf, (@('# wg', '[Interface]', 'ListenPort=51820', 'Address=192.168.15.1/24', 'PrivateKey=AAAA', '', '', '# 1', '[Peer]', 'PublicKey=KEY1', 'AllowedIPs=192.168.15.4', '', '', '# 2', '[Peer]', 'PublicKey=KEY2', 'AllowedIPs=192.168.15.5/32', '',
+    '[Peer]', '# Name = телефон', '# VpnGuard: created 2026-11-03 11:53', 'PublicKey = KEY4', 'AllowedIPs = 192.168.15.10/32', '', '[Peer]', '# Name = ноутбук', '# VpnGuard: created 2026-11-04 10:00', 'PublicKey = KEY5', 'AllowedIPs = 192.168.15.11/32', '',
+    '[Peer]', 'PublicKey = KEY6', 'AllowedIPs = 192.168.15.12/32') -join "`r`n"), (New-Object Text.UTF8Encoding $false))
+"[Interface]`r`nPrivateKey = X`r`nAddress = 192.168.15.12/32`r`n[Peer]`r`nPublicKey = Y" | Set-Content (Join-Path $pr 'srv\clients_wg\c1\планшет.conf') -Encoding UTF8
+@{ ws4w = @{ configPath = $pconf } } | ConvertTo-Json | Set-Content (Join-Path $pr 'config.json') -Encoding UTF8
+$r = Invoke-Child @"
+[Console]::OutputEncoding = New-Object Text.UTF8Encoding `$false
+`$DataDir = '$pr\data'; `$W = @{ configPath = '$pconf'; interfaceName = 'wg_server'; serviceName = 'x' }; `$State = `$null
+. '$Root\Wg.ps1'
+`$c = Read-WgConf '$pconf'
+`$o = @(foreach (`$s in `$c.Sections | Where-Object { `$_.Type -eq 'Peer' }) { "`$(`$s.Keys['PublicKey'])=`$(Get-PeerName `$s)" }) -join ';'
+`$p2 = `$c.Sections | Where-Object { `$_.Keys['PublicKey'] -eq 'KEY1' }; if (`$c.Lines[`$p2.End] -match '#') { `$o += ';END' }
+`$asm = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes('$agx')); `$Ty = `$asm.GetType('VpnGuard.Agent'); `$bf = [Reflection.BindingFlags]'NonPublic,Static,Public'
+foreach (`$kv in @{ Root = '$pr'; DataDir = '$pr\data'; LogDir = '$pr\data\logs'; ConfigPath = '$pr\config.json' }.GetEnumerator()) { `$Ty.GetField(`$kv.Key, `$bf).SetValue(`$null, `$kv.Value) }
+`$Ty.GetMethod('LoadCfg', `$bf).Invoke(`$null, @(`$true)); `$Ty.GetMethod('LoadPeerNames', `$bf).Invoke(`$null, @())
+`$bk = `$Ty.GetField('PeerNamesByKey', `$bf).GetValue(`$null); `$bi = `$Ty.GetField('PeerNamesByIp', `$bf).GetValue(`$null)
+`$cs = @(foreach (`$k in 'KEY1', 'KEY2', 'KEY4', 'KEY5', 'KEY6') { `$v = ''; [void]`$bk.TryGetValue(`$k, [ref]`$v); "`$k=`$v" }) -join ';'
+`$v = ''; [void]`$bi.TryGetValue('192.168.15.12', [ref]`$v)
+"WG `$o"; "CS `$cs;IP=`$v"
+"@ 120
+$wantWg = 'KEY1=1;KEY2=2;KEY4=телефон;KEY5=ноутбук;KEY6='; $wantCs = 'KEY1=1;KEY2=2;KEY4=телефон;KEY5=ноутбук;KEY6=;IP=планшет'
+$okWg = [bool]($r.Out -split "`n" | Where-Object { $_.Trim() -eq "WG $wantWg" })
+$okCs = [bool]($r.Out -split "`n" | Where-Object { $_.Trim() -eq "CS $wantCs" })
+if ($okWg -and $okCs) { Ok 'имена клиентов: «1», «2» (WS4W), «телефон», «ноутбук» (VpnGuard), «планшет» (по файлу) — одинаково в списке и в агенте' }
+else { Fail "имена клиентов: $(($r.Out + ' ' + $r.Err).Trim())" }
+
 Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host ''
 if ($fail.Count) { Write-Host "ОШИБОК: $($fail.Count) ($([int]$sw.Elapsed.TotalSeconds) с)" -ForegroundColor Red; exit 1 }
