@@ -1,8 +1,8 @@
 {
-    "version":  "3.5",
-    "build":  "20261103-2057",
+    "version":  "3.5.1",
+    "build":  "20261103-2100",
     "notes":  "",
-    "date":  "2026-11-03T20:57:34.2014107+03:00",
+    "date":  "2026-11-03T21:00:30.4618542+03:00",
     "files":  [
                   {
                       "path":  "Agent.cs",
@@ -46,8 +46,8 @@
                   },
                   {
                       "path":  "Remote.ps1",
-                      "sha256":  "036ecc20e4f1e5cb6345b7a5b65eaf381eca6b935c6086ffb614cc36ca760f1c",
-                      "size":  58767
+                      "sha256":  "356fff73c9e9ea84bd71d855ff75aa2d5335046d56f9afe23b4932cb986b5a11",
+                      "size":  58985
                   },
                   {
                       "path":  "RemoteDiag.ps1",
@@ -86,8 +86,8 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "ba193badc684afd307850eb63d47a3909ad37cecd9676c5e21a06cf7d948f3f4",
-                      "size":  143681
+                      "sha256":  "21a44d6ab58393cd6943f3f6f82278fb125be1186d933952828169d8e446f58c",
+                      "size":  143683
                   },
                   {
                       "path":  "VpnGuardMonitor.cmd",
@@ -106,8 +106,8 @@
                   },
                   {
                       "path":  "web/index.html",
-                      "sha256":  "b96a9ac7c6a4ca1e3ee68ab3816135b35da2a67693513c76de8f86e270683a7b",
-                      "size":  59045
+                      "sha256":  "66db988a89c6ba8445ec2d943cf4cdf321cd9f8c89840812fbac9be1636d784e",
+                      "size":  59272
                   },
                   {
                       "path":  "Wg.ps1",

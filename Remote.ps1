@@ -164,7 +164,7 @@ function Invoke-WebTask([string]$Task, [string]$Arg) {
             }
             'wg-clients' {
                 $l = Get-WgClients
-                & $out ([ordered]@{ ok = $true; endpoint = "$($l.Endpoint)"; clients = @(@($l.Clients) | ForEach-Object { [ordered]@{ name = "$($_.Name)"; ip = "$($_.Ip)"; source = "$($_.Source)"; hasConf = [bool]($_.File -and (Test-Path $_.File)) } }) })
+                & $out ([ordered]@{ ok = $true; endpoint = "$($l.Endpoint)"; clients = @(@($l.Clients) | ForEach-Object { [ordered]@{ name = "$($_.Name)"; ip = "$($_.Ip)"; source = "$($_.Source)"; hasConf = [bool]($_.File -and (Test-Path $_.File)); dns = $(if ($_.File -and (Test-Path $_.File)) { $dl = Select-String -Path $_.File -Pattern '^\s*DNS\s*=\s*(.+)$' | Select-Object -First 1; if ($dl) { $dl.Matches[0].Groups[1].Value.Trim() } else { '' } } else { '' }) } }) })
             }
             'wg-conf' {
                 $c = Get-RWgClient $argText

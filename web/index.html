@@ -286,11 +286,11 @@ P.amnezia = () => {
     timeline('amnezia') + '<div class="sec">Подробности</div><div class="card">' + kvTable(a) + '</div>';
 };
 P.wg = () => {
+  const cz = (comp('wg') && comp('wg').clientZapret) || {}, zon = comp('zapret') && comp('zapret').enabled;
   const peers = (comp('wg') && comp('wg').peers) || [];
   const list = (wgList && wgList.clients) || peers.map(p => ({ name: p.name, ip: p.ip, source: '', hasConf: false }));
   const rows = list.map(c => { const p = peers.find(x => x.ip === c.ip) || {}; return `<tr><td><span class="dot l${p.active ? 0 : -1}"></span> ${esc(c.name)}${c.source === 'WS4W' ? ' <span class="sub">WS4W</span>' : ''}</td><td>${esc(c.ip)}</td><td class="hide-m">${esc(p.endpoint || '—')}</td><td>${p.hsAgo !== undefined ? ago(p.hsAgo) : '—'}</td><td class="hide-m">↓ ${fmtB(p.tx)} ↑ ${fmtB(p.rx)}</td>
-    <td class="row" style="flex-wrap:nowrap">${c.hasConf ? btn('QR и настройки', `showConf('${esc(c.ip)}')`) : ''}${btn('Удалить', `delClient('${esc(c.ip)}','${esc(c.name)}')`)}</td></tr>`; }).join('');
-  const cz = (comp('wg') && comp('wg').clientZapret) || {}, zon = comp('zapret') && comp('zapret').enabled;
+    <td class="hide-m">${c.dns ? esc(c.dns) + (cz.dns && cz.enabled && c.dns.split(',').map(x => x.trim())[0] !== cz.dns ? ' <span class="c1">← нужен ' + esc(cz.dns) + '</span>' : '') : '—'}</td><td class="row" style="flex-wrap:nowrap">${c.hasConf ? btn('QR и настройки', `showConf('${esc(c.ip)}')`) : ''}${btn('Удалить', `delClient('${esc(c.ip)}','${esc(c.name)}')`)}</td></tr>`; }).join('');
   const czCard = `<div class="sec">zapret для клиентов</div><div class="card">${cz.enabled
       ? `<p><span class="dot l${cz.running ? (cz.spoof ? 0 : 1) : 2}"></span> <b>${cz.running ? (cz.spoof ? 'Работает' : 'Ждёт zapret — пока всё через VPN') : 'Не работает'}</b>${cz.error ? ' · ' + esc(cz.error) : ''}</p>
          ${cz.dns ? `<p>У клиентов в конфиге должен быть <b>DNS = ${esc(cz.dns)}</b>. На телефоне: WireGuard → туннель → «Редактировать» → DNS-серверы. Новые клиенты получают его сами. Частный DNS / DoH на устройстве лучше выключить.</p>` : ''}
@@ -299,7 +299,7 @@ P.wg = () => {
       : `<p class="muted">Клиентам YouTube и Discord сейчас ${zon ? 'не открываются, пока zapret включён (zapret обрабатывает только трафик самого ПК)' : 'идут через VPN'}. Можно пустить их через zapret ПК: свой DNS и прокси на этом ПК — YouTube/Discord через zapret, остальное через VPN. Только TCP: голос Discord остаётся в VPN.</p>
          ${btn('Включить', "setCfg('ws4w.clientZapret',true,'zapret для клиентов')", true)}`}</div>`;
   return compHead('wg', btn('＋ Новый клиент', 'addClient()', true) + btn('Перезапустить туннель', "cmd('restart-wg','перезапуск WG-Server')")) + czCard +
-    `<div class="sec">Клиенты (зелёный — на связи за 3 минуты)</div><div class="card">${list.length ? `<table><tr><th>Клиент</th><th>IP</th><th class="hide-m">Откуда</th><th>Рукопожатие</th><th class="hide-m">Всего</th><th></th></tr>${rows}</table>` : '<p class="muted">Клиентов нет.</p>'}</div>` +
+    `<div class="sec">Клиенты (зелёный — на связи за 3 минуты)</div><div class="card">${list.length ? `<table><tr><th>Клиент</th><th>IP</th><th class="hide-m">Откуда</th><th>Рукопожатие</th><th class="hide-m">Всего</th><th class="hide-m">DNS</th><th></th></tr>${rows}</table>` : '<p class="muted">Клиентов нет.</p>'}</div>` +
     timeline('wg') + '<div class="sec">Подробности</div><div class="card">' + kvTable(comp('wg')) + '</div>' + chartBlock('w', 'Скорость WG-Server — последние 2 часа');
 };
 P.wg.after = async () => { try { const r = await api('/api/wg/clients'); if (r.ok) { const changed = JSON.stringify(r) !== JSON.stringify(wgList); wgList = r; if (changed && page === 'wg') render(true); } } catch (e) { } };
