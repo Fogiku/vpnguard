@@ -37,7 +37,7 @@ param(
     [string]$ConfigPath = ''
 )
 
-$AgentVersion = '3.4.1'
+$AgentVersion = '3.5'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -90,6 +90,9 @@ function Get-DefaultConfig { @{
         endpoint      = ''                         # адрес для клиентов (IP или имя[:порт]); пусто = из клиентов WS4W или внешний IP
         clientDns     = ''                         # DNS в конфиге клиента; пусто = как у клиентов WS4W или адрес сервера
         autoCreateServer = $true                   # нет ни конфига, ни службы wg_server — создать сервер самому
+        clientZapret     = $false                  # zapret и для клиентов: свой DNS + прокси на ПК (только агент на C#)
+        clientDnsIp      = ''                      # адрес DNS для клиентов, если порт 53 основного адреса занят; пусто = <сеть>.53
+        clientDnsUpstream = @('8.8.8.8', '8.8.4.4')  # куда пересылать остальные запросы клиентов (через VPN)
         newServerAddress = '10.253.0.1/24'
         newServerPort    = 51820
     }
@@ -2094,7 +2097,7 @@ $CsStatePath = Join-Path $DataDir 'agent-cs.json'
 $PsStatusPath = Join-Path $DataDir 'status-ps.json'
 $PsPartStatePath = Join-Path $DataDir 'pspart-state.xml'
 
-$CsAgentSources = @('Agent.cs', 'Zapret.cs')
+$CsAgentSources = @('Agent.cs', 'Zapret.cs', 'ClientZapret.cs')
 $CsAgentRefs = @('System.Web.Extensions.dll', 'System.ServiceProcess.dll', 'System.Management.dll', 'System.Core.dll', 'Microsoft.CSharp.dll', 'System.IO.Compression.dll', 'System.IO.Compression.FileSystem.dll')
 function Get-CsSig {
     $f = @($CsAgentSources | ForEach-Object { Join-Path $Root $_ })

@@ -95,7 +95,7 @@ namespace VpnGuard
                     HandOver(); return;
                 }
                 if (SourceSig() != CodeSig) { Log("Агент C#: код обновлён — перезапуск на новой версии", "INFO"); HandOver(); return; }
-                foreach (var step in new Action[] { Commands, WgWatch, VpnWatch, SharingWatch, ZapretWatch, PsPartWatch }) {
+                foreach (var step in new Action[] { Commands, WgWatch, VpnWatch, SharingWatch, ZapretWatch, ClientZapretWatch, PsPartWatch }) {
                     try { step(); } catch (Exception e) { Log("Агент C#: " + step.Method.Name + ": " + e.Message, "ERROR"); }
                     if ((DateTime.Now - LastSnapshot).TotalSeconds >= 10) Snapshot();
                 }
@@ -117,7 +117,7 @@ namespace VpnGuard
         }
         static string SourceSig()
         {
-            try { return string.Join("|", new[] { "Agent.cs", "Zapret.cs" }.Select(n => Path.Combine(Root, n)).Select(f => File.Exists(f) ? File.GetLastWriteTimeUtc(f).Ticks.ToString() : "-")); } catch { return ""; }
+            try { return string.Join("|", new[] { "Agent.cs", "Zapret.cs", "ClientZapret.cs" }.Select(n => Path.Combine(Root, n)).Select(f => File.Exists(f) ? File.GetLastWriteTimeUtc(f).Ticks.ToString() : "-")); } catch { return ""; }
         }
 
         // ---------------------------------------------------------------- настройки (умолчания — как у агента PowerShell)
@@ -1063,8 +1063,10 @@ namespace VpnGuard
             var wg = Comp(wL, wS, new[] { "Служба: " + (wgSvc != null ? wgSvc.Status + " / " + sm : "нет"), "IP: " + (wIp ?? "—") + (addr != null ? " (нужен " + addr + ")" : ""), peers != null ? "Клиенты: " + activeN + " активных из " + peers.Count : "Клиенты: —" }, new List<object[]> {
                 Kv("Служба", wgSvc != null ? wgSvc.ServiceName + " · " + wgSvc.Status + " / " + sm : "не найдена"), Kv("Адаптер", wa != null ? wa.OperationalStatus.ToString() : "отсутствует"),
                 Kv("IP", (wIp ?? "—") + (addr != null && addr != wIp ? " (нужен " + addr + ")" : "")), Kv("Порт", port.Length > 0 ? port + " UDP" : "—"), Kv("Работает с", WgUpSince == DateTime.MinValue ? "—" : When(WgUpSince)),
-                Kv("Клиенты", peers != null ? activeN + " активных из " + peers.Count : "—"), Kv("Конфиг", WgConf() ?? "—") });
+                Kv("Клиенты", peers != null ? activeN + " активных из " + peers.Count : "—"), Kv("Конфиг", WgConf() ?? "—"),
+                Kv("zapret для клиентов", CzSummary()) });
             wg["peers"] = peers != null ? peers.ToArray() : new object[0];
+            wg["clientZapret"] = CzSnapshot();
 
             // ICS
             IcsState ics = null; try { ics = IcsStatus(); } catch { }

@@ -814,7 +814,9 @@ namespace VpnGuard
             string ver = ZS("version").Length > 0 ? ZS("version") : ZLocalVersion(), remote = ZS("remoteVersion");
             string verLine = "Версия: " + (ver.Length > 0 ? ver : "не установлен") + (remote.Length > 0 && ver.Length > 0 && Ver(remote) > Ver(ver) ? " (есть " + remote + ")" : "");
             bool vpnOn = !ZDirect();
-            string vpnWarn = on && vpnOn ? "Включён вместе с VPN: YouTube и Discord этого ПК идут мимо VPN через zapret (провайдер их замедляет), а у клиентов wg_server, пока zapret включён, они не открываются — zapret работает только для самого ПК. Через VPN YouTube обычно быстрее; если zapret нужен — режим «Без VPN»." : "";
+            string vpnWarn = !on || !vpnOn ? "" : CzWanted()
+                ? "Включён вместе с VPN: YouTube и Discord этого ПК и клиентов WG-Server идут мимо VPN через zapret (у клиентов — через DNS и прокси на этом ПК, «zapret для клиентов» на вкладке WG-Server). Остальной трафик — через VPN."
+                : "Включён вместе с VPN: YouTube и Discord этого ПК идут мимо VPN через zapret (провайдер их замедляет), а у клиентов WG-Server, пока zapret включён, они не открываются — zapret обрабатывает только трафик самого ПК. Включите «zapret для клиентов» на вкладке WG-Server — тогда и у них YouTube/Discord пойдут через zapret.";
             var bad = checks.Where(c => JS(c, "ok") != "True").ToList();
             int routesN = ZRoutes().Count; DateTime hAt = ZD("healthAt");
             var details = new List<string> { vpnWarn, verLine,

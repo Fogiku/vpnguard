@@ -234,8 +234,8 @@ else {
 }
 Write-Host '5в. Агент на C# с zapret (сборка и снимок состояния в режимах meduza, amnezia, zapret)'
 $agx = Join-Path $tmp 'VpnGuardAgent.exe'
-$co = & $csc /nologo /target:winexe /optimize+ "/out:$agx" /r:System.Web.Extensions.dll /r:System.ServiceProcess.dll /r:System.Management.dll /r:System.Core.dll /r:Microsoft.CSharp.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll (Join-Path $Root 'Agent.cs') (Join-Path $Root 'Zapret.cs') 2>&1
-if ($LASTEXITCODE -ne 0 -or -not (Test-Path $agx)) { foreach ($l in @($co) | Where-Object { "$_" -match 'error' } | Select-Object -First 5) { Fail "сборка Agent.cs + Zapret.cs: $l" } }
+$co = & $csc /nologo /target:winexe /optimize+ "/out:$agx" /r:System.Web.Extensions.dll /r:System.ServiceProcess.dll /r:System.Management.dll /r:System.Core.dll /r:Microsoft.CSharp.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll (Join-Path $Root 'Agent.cs') (Join-Path $Root 'Zapret.cs') (Join-Path $Root 'ClientZapret.cs') 2>&1
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $agx)) { foreach ($l in @($co) | Where-Object { "$_" -match 'error' } | Select-Object -First 5) { Fail "сборка агента C#: $l" } }
 else {
     $ar = Join-Path $tmp 'agentroot'; New-Item -ItemType Directory (Join-Path $ar 'data\amnezia') -Force | Out-Null
     "`$AgentVersion = '9.9'" | Set-Content (Join-Path $ar 'VpnGuard.ps1') -Encoding UTF8

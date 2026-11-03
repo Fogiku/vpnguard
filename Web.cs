@@ -48,7 +48,7 @@ namespace VpnGuard
         static readonly Dictionary<string, string> WebCfgKeys = new Dictionary<string, string> {
             {"vpn.mode", @"^(meduza|amnezia|dual|zapret)$"}, {"vpn.primary", @"^(meduza|amnezia)$"}, {"zapret.strategy", @"^[\w \(\)\-\.]{0,60}$"},
             {"meduza.serviceId", @"^[\w \-\.\(\)]{0,100}$"}, {"meduza.protocol", @"^[a-z0-9\-]{1,40}$"}, {"amnezia.active", @"^[a-z0-9_=+.\-]{1,32}$"},
-            {"update.auto", "bool"}, {"zapret.videoCheck", "bool"}, {"zapret.version", @"^[\w\.\-]{0,30}$"} };
+            {"update.auto", "bool"}, {"ws4w.clientZapret", "bool"}, {"zapret.videoCheck", "bool"}, {"zapret.version", @"^[\w\.\-]{0,30}$"} };
 
         // все настройки для вкладки «Настройки» веб-интерфейса: ключ, раздел, название, тип, подсказка, значение по умолчанию.
         // тип: int:мин:макс | bool | enum:a|b|c | text:регулярка | hosts (хост:порт через запятую)
@@ -77,6 +77,8 @@ namespace VpnGuard
             new[]{"meduza.maxRestartsPer30Min","MeduzaVPN","Максимум перезапусков за 30 мин","int:1:100","защита от бесконечных перезапусков","5"},
             new[]{"ws4w.endpoint","WG-Server","Адрес для клиентов (IP или имя[:порт])","text:^[\\w\\.\\-:\\[\\]]{0,100}$","пусто — как у клиентов WS4W или внешний IP",""},
             new[]{"ws4w.clientDns","WG-Server","DNS для новых клиентов","text:^[\\d\\., a-fA-F:]{0,100}$","пусто — как у клиентов WS4W или адрес сервера",""},
+            new[]{"ws4w.clientZapret","WG-Server","zapret и для клиентов","bool","свой DNS и прокси на ПК: YouTube/Discord клиентов идут через zapret, остальное — через VPN (только агент на C#)","false"},
+            new[]{"ws4w.clientDnsIp","WG-Server","DNS для клиентов, если порт 53 занят","text:^(\\d{1,3}\\.){3}\\d{1,3}$|^$","пусто — <сеть>.53",""},
             new[]{"ws4w.autoCreateServer","WG-Server","Создавать сервер, если настроек нет","bool","нет ни конфига, ни службы wg_server","true"},
             new[]{"sharing.enabled","Раздача","Управлять раздачей ICS","bool","туннель → WG-Server","true"},
             new[]{"zapret.autoUpdate","zapret","Автообновление zapret","bool","если версия не выбрана","true"},

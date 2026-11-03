@@ -1,18 +1,23 @@
 {
-    "version":  "3.4.1",
-    "build":  "20261103-2033",
+    "version":  "3.5",
+    "build":  "20261103-2057",
     "notes":  "",
-    "date":  "2026-11-03T20:33:49.2260441+03:00",
+    "date":  "2026-11-03T20:57:34.2014107+03:00",
     "files":  [
                   {
                       "path":  "Agent.cs",
-                      "sha256":  "db5c8e5caead8891e1932d2d7ed43e69b4afeb8ae63b46933392af0e8eaf18b5",
-                      "size":  102153
+                      "sha256":  "db455407cb7dfc04709b0bdb3159a3fb5f3dac4437eb87dd35dae4f098d43e43",
+                      "size":  102307
                   },
                   {
                       "path":  "Amnezia.ps1",
                       "sha256":  "44402196973364bbeae5fbdeeab7892f855ce7065d8b942b1891b0857bb0ffa0",
                       "size":  15088
+                  },
+                  {
+                      "path":  "ClientZapret.cs",
+                      "sha256":  "a8e62a5b6e5dded91f415edd3baffea9a1e99386680d715f8bd50ab347599c72",
+                      "size":  21349
                   },
                   {
                       "path":  "Install.cmd",
@@ -56,8 +61,8 @@
                   },
                   {
                       "path":  "Test.ps1",
-                      "sha256":  "f202d08309814badb3417afef5b9b5fe1fb7ffaf9a96c3997bb500730427d24c",
-                      "size":  30789
+                      "sha256":  "135165c67eb45f6e1af4f36facd094e7f37db98831aa1467bd82431bbe1749f4",
+                      "size":  30820
                   },
                   {
                       "path":  "Tray.cs",
@@ -81,8 +86,8 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "25cf1aa99085f3bca0c59e4904bf10da2c34b907b0c80919a8e2729487a8d1d2",
-                      "size":  143163
+                      "sha256":  "ba193badc684afd307850eb63d47a3909ad37cecd9676c5e21a06cf7d948f3f4",
+                      "size":  143681
                   },
                   {
                       "path":  "VpnGuardMonitor.cmd",
@@ -96,23 +101,23 @@
                   },
                   {
                       "path":  "Web.cs",
-                      "sha256":  "f10598afc71ce07a2d929af18e68cbd9aee96bd156c622f7a3c30af8f2e2d1f8",
-                      "size":  53879
+                      "sha256":  "a70240c0f75356853d1c391e109c48faeb2ed24598ba9086c9acc5a195f2609c",
+                      "size":  54373
                   },
                   {
                       "path":  "web/index.html",
-                      "sha256":  "a2b75f5a8b16bc952ab19b20b275c682f2573e8bbeae9ab0e5a8f6b2418f7e37",
-                      "size":  57207
+                      "sha256":  "b96a9ac7c6a4ca1e3ee68ab3816135b35da2a67693513c76de8f86e270683a7b",
+                      "size":  59045
                   },
                   {
                       "path":  "Wg.ps1",
-                      "sha256":  "30413806867c3db7b277f1cc0ab4b71950b02f52fa740580b3c14ed589300090",
-                      "size":  21590
+                      "sha256":  "9788fb0f399e30bda40ccbb54ef4cc8bc589f2fea0865b573e5aa6a8455d6403",
+                      "size":  22082
                   },
                   {
                       "path":  "Zapret.cs",
-                      "sha256":  "a921049e19b77316a6f822f113d90b6a55ffc0acaec46fce461b709076f4f84e",
-                      "size":  69983
+                      "sha256":  "628fd84cb55662f1e452a3f75f1e741e6192dfb2ffaa81296805fbedf7558d1d",
+                      "size":  70432
                   },
                   {
                       "path":  "Zapret.ps1",
