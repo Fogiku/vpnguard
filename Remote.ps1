@@ -198,6 +198,13 @@ function Get-RCheck {
         if ($phys) { '===== сайты напрямую (мимо VPN, как их видит zapret)'; & $fmt @(Test-ZapretTargets $phys.Ip @(Get-ZTargets) 5) }
         $tun = Get-ActiveTunnel
         $zr = @($ZState.routes).Count
+        # скорость: 10 МБ с Cloudflare (не в маршрутах zapret) — напрямую и через туннель
+        '===== скорость загрузки (10 МБ с speed.cloudflare.com, до 20 с)'
+        $spd = { param($ip, $name) $a = $(if ($ip) { "--interface $ip " } else { '' }); $r = Invoke-Exe $curl ("-s -o NUL --connect-timeout 5 -m 20 -w ""%{speed_download} %{size_download}"" $a" + '"https://speed.cloudflare.com/__down?bytes=10000000"') 25
+            $pp = "$($r.Out)" -split '\s+'; $v = 0.0; [void][double]::TryParse($pp[0], [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$v)
+            '  {0,-28} {1,8:N1} Мбит/с  ({2:N1} МБ, curl {3})' -f $name, ($v * 8 / 1e6), ([double]$pp[1] / 1MB), $r.Code }
+        if ($phys) { & $spd $phys.Ip "напрямую ($($phys.Alias))" }
+        foreach ($k in 'meduza', 'amnezia') { $n = Get-KindAdapter $k; if ($n -and (Get-UpAdapter $n)) { & $spd (Get-AdapterIPv4 $n) "через туннель $n" } }
         if ($zr) { "===== маршрутов zapret мимо VPN: $zr — YouTube/Discord идут через физический адаптер, поэтому проверка «через туннель» для них не показательна (пакеты с адресом туннеля уходят не туда)" }
         if ($tun -and (Get-UpAdapter $tun) -and -not $zr) { "===== сайты через туннель '$tun'"; & $fmt @(Test-ZapretTargets (Get-AdapterIPv4 $tun) @('https://www.youtube.com', 'get https://www.youtube.com/', 'ytvideo', 'https://discord.com', 'https://gateway.discord.gg') 6) }
         '===== клиенты wg_server'
