@@ -229,6 +229,23 @@ function Get-StrategyArgs([string]$Name) {
 
 function Get-WinwsProcs { @(Get-Process winws -ErrorAction SilentlyContinue) }
 
+# метки времени TCP (RFC 1323): многие стратегии (--dpi-desync-fooling=ts, ALT13 и др.) без них не работают —
+# провайдер сбрасывает соединение. service.bat zapret включает их сам; в Windows по умолчанию они выключены.
+function Get-TcpTimestamps {
+    try { return "$((Get-NetTCPSetting -SettingName Internet -ErrorAction Stop).Timestamps)" } catch { }
+    $o = (& netsh.exe interface tcp show global) -join "`n"
+    if ($o -match '(?im)(Timestamps|1323)[^\n]*:\s*(enabled|включ)') { return 'Enabled' }
+    if ($o -match '(?im)(Timestamps|1323)[^\n]*:\s*(disabled|выключ|отключ)') { return 'Disabled' }
+    return ''
+}
+function Enable-TcpTimestamps {
+    if ((Get-TcpTimestamps) -eq 'Enabled') { return }
+    & netsh.exe interface tcp set global timestamps=enabled | Out-Null
+    $now = Get-TcpTimestamps
+    if ($now -eq 'Enabled') { Write-Log 'zapret: включены метки времени TCP (RFC 1323) — без них стратегии с fooling=ts не работают (так же делает service.bat)' 'WARN' }
+    else { Write-Log "zapret: не удалось включить метки времени TCP (сейчас: '$now') — стратегии с fooling=ts могут не работать" 'ERROR' }
+}
+
 function Stop-Winws {
     $p = Get-WinwsProcs
     if ($p) { $p | Stop-Process -Force -ErrorAction SilentlyContinue; $p | ForEach-Object { try { $_.WaitForExit(5000) | Out-Null } catch { } } }
@@ -249,6 +266,7 @@ function Stop-ZapretService {
 }
 
 function Start-Winws([string]$Name) {
+    try { Enable-TcpTimestamps } catch { }
     $a = Get-StrategyArgs $Name
     if (-not $a) { throw "не удалось прочитать параметры стратегии '$Name'" }
     $bin = Join-Path (Get-ZapretDir) 'bin'
@@ -887,6 +905,7 @@ function Get-ZapretSnapshot {
         @('Запущена', $(if ($winws) { "$($ZState.runningStrategy) · winws PID $($ZState.winwsPid)" } else { 'winws не запущен' })),
         @('Последний подбор', $(if ($ZState.lastTest) { "$($ZState.lastTest)" } else { '—' })),
         @('Проверка сайтов', $(if ($ZState.healthTotal) { "$($ZState.healthOk)/$($ZState.healthTotal) · $($ZState.healthAt)" } else { '—' })),
+        @('Метки времени TCP', $(try { $tsv = Get-TcpTimestamps; if ($tsv -eq 'Enabled') { 'включены' } elseif ($tsv) { "$tsv — включатся при запуске zapret" } else { '—' } } catch { '—' })),
         @('Видеосервер YouTube', $(if ($ZState.videoHost) { "$($ZState.videoHost)" + $(if ("$($ZState.videoHostVia)" -eq 'direct') { ' (провайдера, найден напрямую)' } elseif ("$($ZState.videoHostVia)" -eq 'vpn') { ' (найден через VPN — не тот, что у браузера)' } else { '' }) } else { '—' })),
         @('Видеосерверы провайдера мимо VPN', $(if (@($ZState.ggc).Count) { (@($ZState.ggc) -join ', ') } else { '—' })),
         @('Маршрутов мимо VPN', "$(@($ZState.routes).Count)"),
@@ -926,6 +945,7 @@ function Write-ZapretDiag {
     if ($wc) { foreach ($x in $wc) { Write-Host "winws PID $($x.ProcessId): $($x.CommandLine.Substring(0, [Math]::Min(160, $x.CommandLine.Length)))…" } } else { Write-Host 'winws: не запущен' }
     $s = Get-Service -Name 'zapret' -ErrorAction SilentlyContinue
     if ($s) { Write-Host "Служба zapret (service.bat): $($s.Status) / $($s.StartType)" }
+    Write-Host "Метки времени TCP (RFC 1323): $(Get-TcpTimestamps)"
     $wd = Get-Service -Name 'WinDivert' -ErrorAction SilentlyContinue
     if ($wd) { Write-Host "Драйвер WinDivert: $($wd.Status)" }
     $p = Get-PhysicalPath

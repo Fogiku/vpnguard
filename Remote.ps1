@@ -143,6 +143,7 @@ function Get-RNet {
         '===== адаптеры'; Get-NetAdapter | Sort-Object ifIndex | Format-Table ifIndex, Name, InterfaceDescription, Status, LinkSpeed -AutoSize
         '===== IPv4-интерфейсы (метрики, пересылка)'; Get-NetIPInterface -AddressFamily IPv4 | Sort-Object InterfaceMetric | Format-Table ifIndex, InterfaceAlias, InterfaceMetric, AutomaticMetric, ConnectionState, Forwarding, NlMtu -AutoSize
         '===== IPv4-адреса'; Get-NetIPAddress -AddressFamily IPv4 | Format-Table InterfaceAlias, IPAddress, PrefixLength, PrefixOrigin -AutoSize
+        '===== TCP (метки времени нужны стратегиям zapret с fooling=ts)'; & netsh.exe interface tcp show global; Get-NetTCPSetting -ErrorAction SilentlyContinue | Format-Table SettingName, Timestamps, AutoTuningLevelLocal, CongestionProvider -AutoSize
         '===== DNS-серверы'; Get-DnsClientServerAddress -AddressFamily IPv4 | Where-Object { $_.ServerAddresses } | Format-Table InterfaceAlias, ServerAddresses -AutoSize
         '===== профили сетей'; Get-NetConnectionProfile | Format-Table InterfaceAlias, Name, NetworkCategory, IPv4Connectivity -AutoSize
         '===== правила брандмауэра VpnGuard / WireGuard'; Get-NetFirewallRule | Where-Object { $_.DisplayName -match 'VpnGuard|WireGuard|WS4W|wg_server' } | Format-Table DisplayName, Enabled, Direction, Action, Profile -AutoSize

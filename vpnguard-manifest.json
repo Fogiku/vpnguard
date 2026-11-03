@@ -1,8 +1,8 @@
 {
-    "version":  "2.6.1",
-    "build":  "20261103-1510",
-    "notes":  "видеосервер с неизвестным источником перепроверяется напрямую сразу",
-    "date":  "2026-11-03T15:10:37.6975979+03:00",
+    "version":  "2.7",
+    "build":  "20261103-1524",
+    "notes":  "zapret: включать метки времени TCP перед запуском (как service.bat) — без них ALT13 и др. стратегии с fooling=ts сбрасываются провайдером",
+    "date":  "2026-11-03T15:24:53.6597709+03:00",
     "files":  [
                   {
                       "path":  "Amnezia.ps1",
@@ -36,8 +36,8 @@
                   },
                   {
                       "path":  "Remote.ps1",
-                      "sha256":  "f9f40dbfc4da50e966d9d17cb425385478606377481e44b34f7037cd4610f2fe",
-                      "size":  45579
+                      "sha256":  "7f5d5fd8802667af001f4dcaca354212145845f3dac6ef874f5080892bac1647",
+                      "size":  45859
                   },
                   {
                       "path":  "RemoteDiag.ps1",
@@ -71,8 +71,8 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "61b7a69d668efcffd8510b624755fcffc24d07bb4d183b8491a6cc417094d7ca",
-                      "size":  132222
+                      "sha256":  "1fdfde1d69b51708e2db732e7c569c49ff70bdd02aaaa4a43e9226a3ed0af5eb",
+                      "size":  132220
                   },
                   {
                       "path":  "VpnGuardMonitor.cmd",
@@ -96,8 +96,8 @@
                   },
                   {
                       "path":  "Zapret.ps1",
-                      "sha256":  "8bd6c6ecc6593562edb4b5cbc98a256daac0892f948b664be14d79422578ae9a",
-                      "size":  64513
+                      "sha256":  "cc999a4d461aa7ec18f7a51198f6c42572814d5d03803fe70f7ce9d199b4b31d",
+                      "size":  66262
                   }
               ]
 }
