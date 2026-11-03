@@ -28,7 +28,7 @@ $ZState = @{
     routes = @(); lastRouteRefresh = [datetime]::MinValue
     healthAt = [datetime]::MinValue; healthOk = 0; healthTotal = 0; healthFails = 0
     fallbackUntil = [datetime]::MinValue; winwsPid = 0; runningStrategy = ''; lastError = ''
-    healthChecks = @(); videoHost = ''; videoHostAt = [datetime]::MinValue
+    healthChecks = @(); videoHost = ''; videoHostAt = [datetime]::MinValue; videoHostVia = ''; ytJs = ''; ytJsAt = ''; ggc = @()
     releases = @(); releasesAt = ''
 }
 
@@ -285,7 +285,7 @@ function Get-ZTargets {
     $z = Get-ZCfg
     $t = @(@($z.testTargets) | Where-Object { $_ })
     if ($z.videoCheck -ne $false) {
-        if (-not @($t | Where-Object { $_ -match '^get\s' }).Count) { $t += 'get https://www.youtube.com/' }
+        if ($t -notcontains 'ytspeed') { $t += 'ytspeed' }
         if ($t -notcontains 'ytvideo') { $t += 'ytvideo' }
     }
     return $t
@@ -294,6 +294,7 @@ function Get-ZTargets {
 function Get-ZTargetLabel([string]$Spec) {
     switch -regex ($Spec) {
         '^ytvideo$'                 { return 'YouTube: видео (googlevideo)' }
+        '^ytspeed$'                 { return 'YouTube: скорость загрузки' }
         '^get\s.*youtube\.com'      { return 'YouTube: загрузка страницы' }
         'redirector\.googlevideo'   { return 'YouTube: выбор видеосервера' }
         'ytimg\.com'                { return 'YouTube: превью' }
@@ -336,22 +337,40 @@ function Find-ZVideoHost([string]$SrcIp, [int]$TimeoutSec = 8, [switch]$PhysOnly
         $ifa = $(if ($via) { "--interface $via " } else { '' })
         $r = Invoke-Exe $curl ('-s --connect-timeout 4 -m ' + $TimeoutSec + ' ' + $ifa + '"https://redirector.googlevideo.com/report_mapping?di=no"') ($TimeoutSec + 5)
         $mt = [regex]::Match("$($r.Out)", '\b(sn-[a-z0-9-]{4,})')
-        if ($mt.Success) { return "rr1---$($mt.Groups[1].Value).googlevideo.com" }
+        if ($mt.Success) { $script:ZVideoVia = $(if ($via) { 'direct' } else { 'vpn' }); return "rr1---$($mt.Groups[1].Value).googlevideo.com" }
         $r = Invoke-Exe $curl ('-s -L --connect-timeout 4 -m ' + ($TimeoutSec + 7) + ' ' + $ifa + '-A "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" "https://www.youtube.com/watch?v=jNQXAC9IVRw"') ($TimeoutSec + 12)
         $mt = [regex]::Match("$($r.Out)", 'rr\d{1,2}---(sn-[a-z0-9-]{4,})\.googlevideo\.com')
-        if ($mt.Success) { return "rr1---$($mt.Groups[1].Value).googlevideo.com" }
+        if ($mt.Success) { $script:ZVideoVia = $(if ($via) { 'direct' } else { 'vpn' }); return "rr1---$($mt.Groups[1].Value).googlevideo.com" }
     }
     return ''
 }
 function Get-ZVideoHost([string]$SrcIp, [int]$TimeoutSec = 8) {
     $at = [datetime]::MinValue; try { $at = [datetime]$ZState.videoHostAt } catch { }
-    if ($ZState.videoHost -and ((Get-Date) - $at).TotalHours -lt 6) { return "$($ZState.videoHost)" }
+    # найденный через VPN — чужой (зарубежный) сервер; раз в 30 мин пробуем узнать настоящий, напрямую
+    $fresh = $(if ("$($ZState.videoHostVia)" -eq 'vpn') { ((Get-Date) - $at).TotalMinutes -lt 30 } else { ((Get-Date) - $at).TotalHours -lt 6 })
+    if ($ZState.videoHost -and $fresh) { return "$($ZState.videoHost)" }
     # не нашли недавно — не искать снова при каждой проверке (поиск при блокировке занимает до минуты)
     if ($script:ZVideoMissAt -and ((Get-Date) - $script:ZVideoMissAt).TotalMinutes -lt 30) { return "$($ZState.videoHost)" }
     $h = Find-ZVideoHost $SrcIp $TimeoutSec
-    if ($h) { $ZState.videoHost = $h; $ZState.videoHostAt = Get-Date; $script:ZVideoMissAt = $null; return $h }
+    if ($h) {
+        if ($script:ZVideoVia -eq 'vpn' -and "$($ZState.videoHostVia)" -eq 'direct' -and $ZState.videoHost) { $ZState.videoHostAt = Get-Date; return "$($ZState.videoHost)" }   # прямой лучше
+        if ($script:ZVideoVia -eq 'direct' -and "$($ZState.videoHost)" -ne $h) { $ZState.lastRouteRefresh = [datetime]::MinValue }   # новый сервер провайдера — сразу добавить маршруты
+        $ZState.videoHost = $h; $ZState.videoHostAt = Get-Date; $ZState.videoHostVia = $script:ZVideoVia; $script:ZVideoMissAt = $null; return $h
+    }
     $script:ZVideoMissAt = Get-Date
     return "$($ZState.videoHost)"      # не узнали — старый адрес лучше, чем ничего
+}
+
+# большой статический файл с www.youtube.com (плеер base.js, 2–3 МБ): по его скорости видно замедление YouTube
+function Get-ZYtSpeedUrl([string]$SrcIp) {
+    $at = [datetime]::MinValue; try { $at = [datetime]$ZState.ytJsAt } catch { }
+    if ($ZState.ytJs -and ((Get-Date) - $at).TotalHours -lt 6) { return "$($ZState.ytJs)" }
+    $curl = Join-Path $env:windir 'System32\curl.exe'
+    $ifa = $(if ($SrcIp) { "--interface $SrcIp " } else { '' })
+    $r = Invoke-Exe $curl ('-s -L --compressed --connect-timeout 4 -m 15 ' + $ifa + '-A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0 Safari/537.36" "https://www.youtube.com/"') 20
+    $mt = [regex]::Match("$($r.Out)", '/s/player/[A-Za-z0-9_\-]+/[A-Za-z0-9_\.\-]+/[A-Za-z_]+/base\.js')
+    if ($mt.Success) { $ZState.ytJs = "https://www.youtube.com$($mt.Value)"; $ZState.ytJsAt = (Get-Date).ToString('o'); return "$($ZState.ytJs)" }
+    return "$($ZState.ytJs)"
 }
 
 # параллельно проверить сайты curl'ом с привязкой к IP физического адаптера (мимо VPN)
@@ -360,12 +379,16 @@ function Test-ZapretTargets([string]$SrcIp, [string[]]$Urls, [int]$TimeoutSec = 
     $curl = Join-Path $env:windir 'System32\curl.exe'
     # адрес видеосервера — заранее, чтобы не задерживать остальные проверки
     $vh = $(if ($Urls -contains 'ytvideo') { Get-ZVideoHost $SrcIp ([Math]::Max(6, $TimeoutSec)) } else { '' })
+    $ys = $(if ($Urls -contains 'ytspeed') { Get-ZYtSpeedUrl $SrcIp } else { '' })
     $jobs = foreach ($spec in $Urls) {
         $u = $spec; $get = $false
         if ($spec -eq 'ytvideo') {
             $h = $vh
             if (-not $h) { [pscustomobject]@{ Url = $spec; U = ''; Get = $false; P = $null; Sw = $null }; continue }
             $u = "https://$h/generate_204"
+        } elseif ($spec -eq 'ytspeed') {
+            if (-not $ys) { [pscustomobject]@{ Url = $spec; U = ''; Get = $false; P = $null; Sw = $null }; continue }
+            $u = $ys; $get = $true
         } elseif ($spec -match '^get\s+(\S+)') { $u = $Matches[1]; $get = $true }
         $psi = New-Object Diagnostics.ProcessStartInfo $curl
         $mode = $(if ($get) { '-L -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"' } else { '-I' })
@@ -382,7 +405,7 @@ function Test-ZapretTargets([string]$SrcIp, [string[]]$Urls, [int]$TimeoutSec = 
     }
     foreach ($j in $jobs) {
         $lbl = Get-ZTargetLabel $j.Url
-        if (-not $j.P) { [pscustomobject]@{ Url = $j.Url; Label = $lbl; Ok = $false; Code = ''; Exit = -2; Why = (Get-CurlReason -2 '' 0 0); Kb = 0; Ms = -1; Host = '' }; continue }
+        if (-not $j.P) { [pscustomobject]@{ Url = $j.Url; Label = $lbl; Ok = $false; Code = ''; Exit = -2; Why = $(if ($j.Url -eq 'ytspeed') { 'не удалось открыть www.youtube.com' } else { (Get-CurlReason -2 '' 0 0) }); Kb = 0; Ms = -1; Host = ''; Mbit = 0 }; continue }
         $out = ''; try { $out = $j.P.StandardOutput.ReadToEnd().Trim() } catch { }
         $exit = $(if ($j.P.HasExited) { $j.P.ExitCode } else { -1 })
         $pp = @($out -split '\s+'); $code = "$($pp[0])"; $size = 0L; if ($pp.Count -gt 1) { [void][long]::TryParse($pp[1], [ref]$size) }
@@ -392,6 +415,12 @@ function Test-ZapretTargets([string]$SrcIp, [string[]]$Urls, [int]$TimeoutSec = 
         $ms = $(if ($tt -gt 0) { [int]($tt * 1000) } else { [int]$j.Sw.ElapsedMilliseconds })
         $min = $(if ($j.Get) { 65536 } else { 0 })
         $why = Get-CurlReason $exit $code $size $min $ms
+        # скорость YouTube: нужно ≥ 1,5 Мбит/с (видео 480p); показываем замер всегда
+        $mbit = 0.0
+        if ($j.Url -eq 'ytspeed' -and $size -gt 0) {
+            $mbit = [Math]::Round($size * 8 / 1e6 / [Math]::Max(0.2, $ms / 1000), 1)
+            if ($exit -in 0, 28) { $why = $(if ($mbit -ge 1.5) { '' } else { "≈$mbit Мбит/с — мало для видео (замедление)" }) }
+        }
         # таймаут: на каком этапе застряло
         if ($exit -eq 28 -and $size -eq 0 -and $pp.Count -gt 4) {
             if ($tc -eq 0) { $why = 'не соединяется — адрес недоступен или заблокирован' }
@@ -399,13 +428,13 @@ function Test-ZapretTargets([string]$SrcIp, [string[]]$Urls, [int]$TimeoutSec = 
             else { $why = 'сервер не ответил — таймаут после соединения' }
         }
         [pscustomobject]@{ Url = $j.Url; Label = $lbl; Ok = (-not $why); Code = $code; Exit = $exit; Why = $why
-            Kb = [int]($size / 1KB); Ms = $ms; Host = ([uri]$j.U).Host }
+            Kb = [int]($size / 1KB); Ms = $ms; Host = ([uri]$j.U).Host; Mbit = $mbit }
     }
 }
 
 # компактная запись результатов проверки (для окна)
 function ConvertTo-ZChecks($Results) {
-    @(foreach ($r in @($Results)) { [ordered]@{ n = "$($r.Label)"; ok = [bool]$r.Ok; why = "$($r.Why)"; ms = [int]$r.Ms; h = "$($r.Host)"; kb = [int]$r.Kb } })
+    @(foreach ($r in @($Results)) { [ordered]@{ n = "$($r.Label)"; ok = [bool]$r.Ok; why = "$($r.Why)"; ms = [int]$r.Ms; h = "$($r.Host)"; kb = [int]$r.Kb; mbit = [double]$r.Mbit } })
 }
 
 function Get-ZapretTestRunner {
@@ -443,8 +472,8 @@ function Invoke-ZapretTestRun {
         Stop-Winws
         $res = New-Object System.Collections.ArrayList
         # адрес видеосервера узнать заново (через VPN, если напрямую закрыт)
-        if ($urls -contains 'ytvideo') { $ZState.videoHost = ''; $ZState.videoHost = Find-ZVideoHost $path.Ip 8; if ($ZState.videoHost) { $ZState.videoHostAt = Get-Date } else { $script:ZVideoMissAt = Get-Date } }
-        $prog.videoHost = "$($ZState.videoHost)"
+        if ($urls -contains 'ytvideo') { $ZState.videoHost = ''; $ZState.videoHost = Find-ZVideoHost $path.Ip 8; if ($ZState.videoHost) { $ZState.videoHostAt = Get-Date; $ZState.videoHostVia = $script:ZVideoVia } else { $script:ZVideoMissAt = Get-Date } }
+        $prog.videoHost = "$($ZState.videoHost)"; $prog.videoHostVia = "$($ZState.videoHostVia)"
 
         # без zapret: понять, блокирует ли провайдер вообще
         $prog.index = 1; $prog.current = '(без zapret)'; & $write
@@ -461,10 +490,10 @@ function Invoke-ZapretTestRun {
                 Start-Sleep -Milliseconds 800
                 $r = @(Test-ZapretTargets $path.Ip $urls ([int]$z.curlTimeoutSec))
                 # адрес видеосервера до сих пор неизвестен, а YouTube с этой стратегией открылся — узнать его напрямую и проверить видео
-                if (-not $ZState.videoHost -and ($urls -contains 'ytvideo') -and @($r | Where-Object { ($_.Ok -or $_.Kb -gt 0) -and $_.Label -like 'YouTube*' -and $_.Url -ne 'ytvideo' }).Count) {
+                if (-not $ZState.videoHost -and ($urls -contains 'ytvideo') -and @($r | Where-Object { ($_.Ok -or $_.Kb -gt 0) -and $_.Label -like 'YouTube*' -and $_.Url -notin 'ytvideo', 'ytspeed' }).Count) {
                     $vh = Find-ZVideoHost $path.Ip 6 -PhysOnly
                     if ($vh) {
-                        $ZState.videoHost = $vh; $ZState.videoHostAt = Get-Date; $prog.videoHost = $vh
+                        $ZState.videoHost = $vh; $ZState.videoHostAt = Get-Date; $ZState.videoHostVia = 'direct'; $prog.videoHost = $vh; $prog.videoHostVia = 'direct'
                         $v = @(Test-ZapretTargets $path.Ip @('ytvideo') ([int]$z.curlTimeoutSec))
                         $r = @(@($r | Where-Object { $_.Url -ne 'ytvideo' }) + $v)
                         foreach ($row in $res) { foreach ($c in @($row.checks)) { if ($c.n -like '*видео*' -and -not $c.ok) { $c.why = 'не проверено — адрес видеосервера узнан позже' } } }
@@ -482,7 +511,7 @@ function Invoke-ZapretTestRun {
         # лучшая: больше всего открытых сайтов; при равенстве — где работает видео, затем быстрее
         $bestRow = $res | Where-Object { $_.name -ne '(без zapret)' } | Sort-Object @{ e = { $_.ok }; Descending = $true },
             @{ e = { [int](@($_.checks | Where-Object { $_.n -like '*видео*' -and $_.ok }).Count) }; Descending = $true },
-            @{ e = { [int](@($_.checks | Where-Object { $_.n -like '*загрузка страницы*' } | ForEach-Object { $_.kb }) | Measure-Object -Sum).Sum }; Descending = $true }, @{ e = { $_.ms } } | Select-Object -First 1
+            @{ e = { [double](@($_.checks | Where-Object { $_.n -like '*скорость*' -or $_.n -like '*загрузка страницы*' } | ForEach-Object { if ($_.mbit) { $_.mbit * 1000 } else { $_.kb } }) | Measure-Object -Sum).Sum }; Descending = $true }, @{ e = { $_.ms } } | Select-Object -First 1
         $prog.best = $(if ($bestRow -and $bestRow.ok -gt 0) { $bestRow.name } else { '' })
     } catch {
         $prog.error = $_.Exception.Message
@@ -509,7 +538,7 @@ function Receive-ZapretTest {
 
     $ZState.lastTest = Get-Date
     $ZState.results = @($t.results | ForEach-Object { [ordered]@{ name = $_.name; ok = $_.ok; total = $_.total; error = "$($_.error)"; checks = @($_.checks | Where-Object { $_ }) } })
-    if ($t.PSObject.Properties['videoHost'] -and $t.videoHost) { $ZState.videoHost = "$($t.videoHost)"; $ZState.videoHostAt = Get-Date }
+    if ($t.PSObject.Properties['videoHost'] -and $t.videoHost) { $ZState.videoHost = "$($t.videoHost)"; $ZState.videoHostAt = Get-Date; $ZState.videoHostVia = $(if ($t.PSObject.Properties['videoHostVia']) { "$($t.videoHostVia)" } else { '' }) }
     if ($t.error) {
         $ZState.lastError = "подбор: $($t.error)"
         Write-Log "zapret: подбор не удался: $($t.error)" 'ERROR'
@@ -558,10 +587,34 @@ function Get-ZapretRouteDomains {
     @($d)
 }
 
+# кэш-серверы YouTube у провайдера (rrN---sn-XXXX.googlevideo.com): их адреса — в сети провайдера, не в диапазонах Google.
+# Без маршрута к ним видео в режиме с VPN уходит в туннель и не грузится (кэш отвечает только своим абонентам).
+function Get-ZGgcPrefixes {
+    $vh = "$($ZState.videoHost)"
+    if (-not $vh -or "$($ZState.videoHostVia)" -ne 'direct') { return @($ZState.ggc | Where-Object { $_ }) }
+    $cl = $vh -replace '^rr\d+---', ''
+    $set = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($i in 1..20) {
+        try {
+            Resolve-DnsName -Name "rr$i---$cl" -Type A -DnsOnly -QuickTimeout -ErrorAction Stop | Where-Object { $_.Type -eq 'A' } |
+                ForEach-Object { $o = $_.IPAddress -split '\.'; [void]$set.Add("$($o[0]).$($o[1]).$($o[2]).0/24") }
+        } catch { }
+    }
+    $google = @(Get-GoogleRanges)
+    $list = @($set | Where-Object { $_ })
+    if ($list.Count) {
+        $new = @($list | Where-Object { @($ZState.ggc) -notcontains $_ })
+        if ($new.Count) { Write-Log "zapret: видеосерверы YouTube у провайдера ($cl): $($list -join ', ') — пускаю мимо VPN" }
+        $ZState.ggc = $list
+    }
+    return @($ZState.ggc | Where-Object { $_ })
+}
+
 function Get-ZapretPrefixes {
     $z = Get-ZCfg
     $set = New-Object System.Collections.Generic.HashSet[string]
     if ($z.routeGoogleRanges) { foreach ($p in Get-GoogleRanges) { [void]$set.Add($p) } }
+    if ($z.routeGoogleRanges -and $z.routeIspVideo -ne $false) { foreach ($p in Get-ZGgcPrefixes) { [void]$set.Add($p) } }
     foreach ($dom in Get-ZapretRouteDomains) {
         try {
             Resolve-DnsName -Name $dom -Type A -DnsOnly -QuickTimeout -ErrorAction Stop |
@@ -811,7 +864,10 @@ function Get-ZapretSnapshot {
     $ver = $(if ($ZState.version) { $ZState.version } else { Get-ZapretLocalVersion })
     $verLine = 'Версия: ' + $(if ($ver) { $ver } else { 'не установлен' })
     if ($ZState.remoteVersion -and $ver -and (ConvertTo-Ver $ZState.remoteVersion) -gt (ConvertTo-Ver $ver)) { $verLine += " (есть $($ZState.remoteVersion))" }
+    $vpnOn = (Get-Command Get-VpnMode -ErrorAction SilentlyContinue) -and (Get-VpnMode) -ne 'zapret'
+    $vpnWarn = $(if ($z.enabled -and $vpnOn) { 'Включён вместе с VPN: YouTube и Discord этого ПК идут мимо VPN через zapret (провайдер их замедляет), а у клиентов wg_server, пока zapret включён, они не открываются — zapret работает только для самого ПК. Через VPN YouTube обычно быстрее; если zapret нужен — режим «Без VPN».' } else { '' })
     $d = @(
+        $vpnWarn,
         $verLine,
         ('Стратегия: ' + $(if ($strategy) { $strategy + $(if ($z.strategy) { ' (вручную)' } elseif ($ZState.lastTotal) { " · $($ZState.lastScore)/$($ZState.lastTotal) при подборе" } else { '' }) } else { '—' })),
         $(if ($t) { "Сейчас проверяю: $($t.current)" } elseif ($ZState.healthTotal) { "Проверка $(Format-When $ZState.healthAt): открылось $($ZState.healthOk)/$($ZState.healthTotal)" } else { 'Проверка: ещё не было' }),
@@ -822,7 +878,7 @@ function Get-ZapretSnapshot {
     $conns = 0
     if ($z.enabled) { try { $conns = Get-ZapretConnCount } catch { } }
     $kv = @(
-        @('Включён', $(if ($z.enabled) { 'да' } else { 'нет' })),
+        @('Включён', $(if ($z.enabled) { 'да' + $(if ($vpnOn) { ' — вместе с VPN (см. предупреждение выше)' } else { ' — режим «Без VPN»' }) } else { 'нет' })),
         @('Версия', $(if ($ver) { "$ver" } else { 'не установлен' })),
         @('На GitHub', $(if ($ZState.remoteVersion) { "$($ZState.remoteVersion)" } else { '—' })),
         @('Выбранная версия', $(if ($z.version) { "$($z.version) — закреплена, не обновляется" } else { 'последняя (обновляется сама)' })),
@@ -831,7 +887,8 @@ function Get-ZapretSnapshot {
         @('Запущена', $(if ($winws) { "$($ZState.runningStrategy) · winws PID $($ZState.winwsPid)" } else { 'winws не запущен' })),
         @('Последний подбор', $(if ($ZState.lastTest) { "$($ZState.lastTest)" } else { '—' })),
         @('Проверка сайтов', $(if ($ZState.healthTotal) { "$($ZState.healthOk)/$($ZState.healthTotal) · $($ZState.healthAt)" } else { '—' })),
-        @('Видеосервер YouTube', $(if ($ZState.videoHost) { "$($ZState.videoHost)" } else { '—' })),
+        @('Видеосервер YouTube', $(if ($ZState.videoHost) { "$($ZState.videoHost)" + $(if ("$($ZState.videoHostVia)" -eq 'direct') { ' (провайдера, найден напрямую)' } elseif ("$($ZState.videoHostVia)" -eq 'vpn') { ' (найден через VPN — не тот, что у браузера)' } else { '' }) } else { '—' })),
+        @('Видеосерверы провайдера мимо VPN', $(if (@($ZState.ggc).Count) { (@($ZState.ggc) -join ', ') } else { '—' })),
         @('Маршрутов мимо VPN', "$(@($ZState.routes).Count)"),
         @('Соединений мимо VPN сейчас', $(if ($z.enabled) { "$conns (TCP к YouTube/Discord и своим доменам)" } else { '—' })),
         @('Папка', "$(Get-ZapretDir)")
@@ -846,6 +903,7 @@ function Get-ZapretSnapshot {
         checks = @($ZState.healthChecks | Where-Object { $_ })
         checkedAt = $(if ($ZState.healthAt -ne [datetime]::MinValue) { $ZState.healthAt.ToString('HH:mm') } else { '' })
         videoCheck = ($z.videoCheck -ne $false)
+        vpnWarn = "$vpnWarn"
         version = "$ver"; pinned = "$($z.version)"; latest = "$($ZState.remoteVersion)"
         versions = @(@($ZState.releases) | Where-Object { $_ } | ForEach-Object { [ordered]@{ v = "$($_.v)"; date = "$($_.date)"; pre = [bool]$_.pre } })
         conns = $conns
@@ -859,7 +917,7 @@ function Write-ZapretDiag {
     Write-Host "Включён: $($z.enabled) · папка: $(Get-ZapretDir) (установлен: $(Test-ZapretInstalled))"
     Write-Host "Версия: $(Get-ZapretLocalVersion) · на GitHub: $($ZState.remoteVersion) · проверка обновлений: $($ZState.lastUpdateCheck)"
     Write-Host "Стратегия: вручную='$($z.strategy)' подобрана='$($ZState.strategy)' запущена='$($ZState.runningStrategy)' · последний подбор: $($ZState.lastTest)"
-    Write-Host "Видеосервер YouTube: $($ZState.videoHost) ($($ZState.videoHostAt)) · проверка видео: $($z.videoCheck -ne $false)"
+    Write-Host "Видеосервер YouTube: $($ZState.videoHost) ($($ZState.videoHostAt), найден: $($ZState.videoHostVia)) · проверка видео: $($z.videoCheck -ne $false) · сети видеосерверов провайдера: $(@($ZState.ggc) -join ', ')"
     foreach ($r in @($ZState.results)) {
         $bad = @($r.checks | Where-Object { $_ -and -not $_.ok } | ForEach-Object { "$($_.n): $($_.why)" })
         Write-Host ("  {0,-32} {1}/{2} {3}" -f $r.name, $r.ok, $r.total, $(if ($bad.Count) { '· не прошли: ' + ($bad -join '; ') } else { '' }))

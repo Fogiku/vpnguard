@@ -34,7 +34,7 @@ param(
     [string]$ConfigPath = ''
 )
 
-$AgentVersion = '2.5'
+$AgentVersion = '2.6'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -145,6 +145,7 @@ function Get-DefaultConfig { @{
         testTargets       = @('https://www.youtube.com', 'https://i.ytimg.com', 'https://redirector.googlevideo.com',
                               'https://discord.com', 'https://gateway.discord.gg', 'https://cdn.discordapp.com')
         routeGoogleRanges = $true       # официальные диапазоны Google (YouTube) — мимо VPN
+        routeIspVideo     = $true       # и видеосерверы YouTube у провайдера (кэш Google в сети провайдера) — иначе видео уходит в VPN и не грузится
         routeDomainLists  = @('list-google.txt')
         routeDomains      = @('discord.com', 'discord.gg', 'discordapp.com', 'discordapp.net', 'discord.media', 'discordcdn.com',
                               'gateway.discord.gg', 'cdn.discordapp.com', 'media.discordapp.net', 'updates.discord.com', 'dis.gd',

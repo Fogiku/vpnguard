@@ -1,8 +1,8 @@
 {
-    "version":  "2.5",
-    "build":  "20261103-1449",
-    "notes":  "пароль веб-интерфейса по желанию и свой; вкладка «Диагностика» в веб-интерфейсе; выбор версии zapret; WS4W → WireGuard",
-    "date":  "2026-11-03T14:49:35.7511356+03:00",
+    "version":  "2.6",
+    "build":  "20261103-1508",
+    "notes":  "zapret+VPN: маршруты к видеосерверам YouTube провайдера; проверка скорости YouTube по реальному файлу; предупреждение о zapret вместе с VPN",
+    "date":  "2026-11-03T15:08:19.4507726+03:00",
     "files":  [
                   {
                       "path":  "Amnezia.ps1",
@@ -71,8 +71,8 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "d591a94f2a43ab8f276ac9e5181f3f1c5954c75ef8170a598bf2d9416747cc04",
-                      "size":  131997
+                      "sha256":  "b6070aad9e13ecc82bf9279bc8c6269db8d5076012c332a097e50991f03e2b58",
+                      "size":  132220
                   },
                   {
                       "path":  "VpnGuardMonitor.cmd",
@@ -86,8 +86,8 @@
                   },
                   {
                       "path":  "web/index.html",
-                      "sha256":  "7498e6672c073953cc2bf7bd97a4142ba03872006b524d6e8d03aa4f2fc86a6f",
-                      "size":  51845
+                      "sha256":  "664e4796e3d372723da80492a0f264f8304eeddad690cab88a90f231f682eef7",
+                      "size":  52160
                   },
                   {
                       "path":  "Wg.ps1",
@@ -96,8 +96,8 @@
                   },
                   {
                       "path":  "Zapret.ps1",
-                      "sha256":  "87c33d3439d4e53ad63ce77c98630cb01cdffb00b9c0643a9adfe8674220e419",
-                      "size":  57519
+                      "sha256":  "7dbbb79be66ad3585a37f4e2e45c803d4971b8a6c770ccb06c6c591ecf4fed2f",
+                      "size":  64510
                   }
               ]
 }
