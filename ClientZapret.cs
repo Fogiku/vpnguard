@@ -98,13 +98,35 @@ namespace VpnGuard
             var hn = WinDivertOpen(nf, WdLayerNetwork, 0, 0);
             if (hn == WdInvalid) { WinDivertClose(hf); relay.Stop(); throw new Exception("WinDivert (ответы) не открылся, код " + Marshal.GetLastWin32Error()); }
             CzFwd = hf; CzNet = hn; CzRelay = relay;
+            // диагностика (только наблюдение, WINDIVERT_FLAG_SNIFF): что видно на транзите и что приходит от клиентов на wg_server
+            CzProbe("ip and ip.SrcAddr >= " + sub + ".0 and ip.SrcAddr <= " + sub + ".255 and ip.SrcAddr != " + wgIp, WdLayerForward, "fwd");
+            CzProbe("inbound and ip and ifIdx == " + CzWgIdx + " and ip.SrcAddr >= " + sub + ".0 and ip.SrcAddr <= " + sub + ".255", WdLayerNetwork, "in");
             new Thread(() => CzFwdLoop(hf)) { IsBackground = true, Name = "cz-fwd" }.Start();
             new Thread(() => CzNetLoop(hn)) { IsBackground = true, Name = "cz-net" }.Start();
             new Thread(() => CzAcceptLoop(relay)) { IsBackground = true, Name = "cz-relay" }.Start();
             Log("zapret для клиентов WG-Server: включён — трафик клиентов к адресам zapret (" + ZRoutes().Count + " маршрутов) идёт через zapret этого ПК, остальное — через VPN (" + phys.Alias + ", ретранслятор " + wgIp + ":" + CzRelayPort + ")", "WARN");
         }
+        static readonly List<IntPtr> CzProbes = new List<IntPtr>();
+        static readonly Dictionary<string, long> CzProbeStat = new Dictionary<string, long>();
+        static void CzProbe(string filter, int layer, string name)
+        {
+            var h = WinDivertOpen(filter, layer, -100, 1 /* SNIFF */);
+            if (h == WdInvalid) { lock (CzProbeStat) CzProbeStat[name + ".openError"] = Marshal.GetLastWin32Error(); return; }
+            lock (CzProbes) CzProbes.Add(h);
+            new Thread(() => {
+                var p = new byte[65535]; var a = new WdAddr(); uint n;
+                while (WinDivertRecv(h, p, (uint)p.Length, out n, ref a)) {
+                    try {
+                        uint dst = IpH(p, 16); bool inSet = CzInSet(dst);
+                        string k1 = name + ".if" + a.IfIdx + (((a.Flags >> 17) & 1) == 1 ? "out" : "in"), k2 = name + (inSet ? ".zapret" : ".other");
+                        lock (CzProbeStat) { long v; CzProbeStat.TryGetValue(k1, out v); CzProbeStat[k1] = v + 1; CzProbeStat.TryGetValue(k2, out v); CzProbeStat[k2] = v + 1; }
+                    } catch { }
+                }
+            }) { IsBackground = true, Name = "cz-probe-" + name }.Start();
+        }
         static void CzStop()
         {
+            lock (CzProbes) { foreach (var ph in CzProbes) { try { WinDivertClose(ph); } catch { } } CzProbes.Clear(); }
             var f = CzFwd; var n = CzNet; CzFwd = WdInvalid; CzNet = WdInvalid;
             try { if (f != WdInvalid) WinDivertClose(f); } catch { }
             try { if (n != WdInvalid) WinDivertClose(n); } catch { }
@@ -277,8 +299,10 @@ namespace VpnGuard
             return new Dictionary<string, object> { { "enabled", CzWanted() }, { "running", CzFwd != WdInvalid }, { "error", CzError },
                 { "packets", Interlocked.Read(ref CzPkts) }, { "passed", Interlocked.Read(ref CzPass) }, { "tcpConns", Interlocked.Read(ref CzTcpConns) }, { "active", CzActive },
                 { "tcpFlows", tcpN }, { "udpFlows", udpN }, { "udpPackets", Interlocked.Read(ref CzUdpPkts) }, { "mb", Math.Round(Interlocked.Read(ref CzBytes) / 1048576.0, 1) },
-                { "errors", Interlocked.Read(ref CzErrors) }, { "relay", CzFwd != WdInvalid ? IpS(CzWgIp) + ":" + CzRelayPort : "" } };
+                { "errors", Interlocked.Read(ref CzErrors) }, { "relay", CzFwd != WdInvalid ? IpS(CzWgIp) + ":" + CzRelayPort : "" },
+                { "ifWg", CzWgIdx }, { "ifEth", CzEthIdx }, { "probe", CzProbeCopy() } };
         }
+        static Dictionary<string, object> CzProbeCopy() { lock (CzProbeStat) return CzProbeStat.ToDictionary(x => x.Key, x => (object)x.Value); }
         static string CzSummary()
         {
             if (!CzWanted()) return "выключен (вкладка WG-Server)";
