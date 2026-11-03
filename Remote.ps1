@@ -94,7 +94,7 @@ function Invoke-TrayWatch {
         if (-not (Build-CsExe $TrayExe @('Tray.cs') 'winexe' @('System.Windows.Forms.dll', 'System.Drawing.dll', 'System.Web.Extensions.dll'))) { return }
         if ($was -and $isTray -and -not (Get-Process VpnGuardTray -ErrorAction SilentlyContinue)) { & schtasks.exe /run /tn VpnGuardMonitor | Out-Null }   # пересобран — запустить снова
         if (-not $isTray) {
-            $trig = @($t.Triggers)
+            $trig = @($t.Triggers | Where-Object { $_ })        # у задачи может не быть триггеров — без пустых элементов
             if (-not @($trig | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger' }).Count) { $trig += New-ScheduledTaskTrigger -AtLogOn -User $t.Principal.UserId }
             Set-ScheduledTask -TaskName 'VpnGuardMonitor' -Action (New-ScheduledTaskAction -Execute $TrayExe -Argument "`"$Root`"" -WorkingDirectory $Root) -Trigger $trig | Out-Null
             Write-Log 'Значок у часов: ярлык VpnGuard и вход в Windows теперь открывают значок (веб-интерфейс по щелчку); классическое окно — в меню значка' 'WARN'

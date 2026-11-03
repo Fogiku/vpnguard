@@ -1,8 +1,8 @@
 {
-    "version":  "3.1",
-    "build":  "20261103-1619",
-    "notes":  "значок у часов на C# вместо окна; в веб-интерфейсе — настройки, свои списки zapret, импорт AmneziaWG",
-    "date":  "2026-11-03T16:19:28.8996118+03:00",
+    "version":  "3.1.1",
+    "build":  "20261103-1623",
+    "notes":  "значок: задача без триггеров",
+    "date":  "2026-11-03T16:23:20.4825207+03:00",
     "files":  [
                   {
                       "path":  "Amnezia.ps1",
@@ -36,8 +36,8 @@
                   },
                   {
                       "path":  "Remote.ps1",
-                      "sha256":  "5c00b3196dec8199e2d4995e71c3849833f606bf4bfbd23a89c9d6275729e0b7",
-                      "size":  59630
+                      "sha256":  "1ff97632ab07bf400ca50d52a80ec4ea071d387ee0c1d64379ef51e26e58e7a8",
+                      "size":  59764
                   },
                   {
                       "path":  "RemoteDiag.ps1",
@@ -76,8 +76,8 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "7f5643dee73684fa7fe79974909099c3536ecea26675e0a012e2d81782cc4459",
-                      "size":  132983
+                      "sha256":  "7bfef9b2cc505cd9fdded639155c38d73da717c41a74e9f7d5ec85554a0cde09",
+                      "size":  132985
                   },
                   {
                       "path":  "VpnGuardMonitor.cmd",
