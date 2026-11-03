@@ -192,7 +192,7 @@ function Invoke-WebTask([string]$Task, [string]$Arg) {
     } catch { & $out @{ ok = $false; error = $_.Exception.Message } }
 }
 function Sync-RemoteFirewall($r) {
-    $from = $(if (-not (Test-RemoteOn $r) -or "$($r.allowFrom)" -eq 'local') { @('LocalSubnet') + @($(try { $a = Get-WgServerAddress; if ($a) { ($a -replace '\.\d+$', '.0') + '/24' } } catch { })) | Where-Object { $_ } } else { @('Any') })
+    $from = @(if (-not (Test-RemoteOn $r) -or "$($r.allowFrom)" -eq 'local') { @('LocalSubnet') + @($(try { $a = Get-WgServerAddress; if ($a) { ($a -replace '\.\d+$', '.0') + '/24' } } catch { })) | Where-Object { $_ } } else { @('Any') })
     # Windows возвращает адреса в своём виде (маска вместо /24) — сравниваем с тем, что ставили сами
     $sig = "$($r.port)|$($from -join ',')"
     $rule = Get-NetFirewallRule -DisplayName $RemoteRule -ErrorAction SilentlyContinue
