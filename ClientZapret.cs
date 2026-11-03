@@ -45,7 +45,7 @@ namespace VpnGuard
         static TcpListener CzRelay;
         const int CzRelayPort = 34010;
         static uint CzWgIp, CzEthIp; static int CzWgIdx, CzEthIdx; static string CzSig = "", CzError = "";
-        static long CzPkts, CzPass, CzTcpConns, CzUdpPkts, CzBytes, CzErrors; static int CzActive;
+        static long CzPkts, CzPass, CzTcpConns, CzUdpPkts, CzBytes, CzErrors, CzTcpUp, CzTcpDown, CzUdpDown, CzUdpSendFail, CzQuicDrop, CzNetRw, CzNetMiss, CzNetBig, CzNetSendFail, CzRelayNoFlow, CzConnFail; static int CzActive;
         static HashSet<uint> CzHosts = new HashSet<uint>(); static List<uint[]> CzNets = new List<uint[]>(); static string CzSetKey = "";
         static DateTime CzFwAt = DateTime.MinValue, CzCleanAt = DateTime.MinValue; static string CzFwSig = "";
 
@@ -205,6 +205,8 @@ namespace VpnGuard
             }
             if (proto == 17) {
                 int ulen = n - ihl - 8; if (ulen < 0) return true;
+                // QUIC (UDP 443): по умолчанию отбрасываем — YouTube и браузеры сразу переходят на TCP, а TCP идёт через ретранслятор и winws
+                if (dport == 443 && CfgStr("ws4w.clientQuic", "drop") != "relay") { Interlocked.Increment(ref CzQuicDrop); return true; }
                 string key = src + ":" + sport + ">" + dst + ":" + dport; CzUdpFlow f;
                 lock (CzLock) {
                     if (!CzUdp.TryGetValue(key, out f)) {
@@ -235,7 +237,8 @@ namespace VpnGuard
                 Buffer.BlockCopy(buf, 0, p, 28, n);
                 var a = new WdAddr { Flags = WdLayerNetwork | WdOutbound, IfIdx = (uint)CzWgIdx };
                 WinDivertHelperCalcChecksums(p, (uint)p.Length, ref a, 0);
-                uint sl; var nh = CzNet; if (nh == WdInvalid) return; WinDivertSend(nh, p, (uint)p.Length, out sl, ref a);
+                uint sl; var nh = CzNet; if (nh == WdInvalid) return;
+                if (WinDivertSend(nh, p, (uint)p.Length, out sl, ref a)) Interlocked.Add(ref CzUdpDown, n); else Interlocked.Increment(ref CzUdpSendFail);
                 Interlocked.Add(ref CzBytes, n);
             }
         }
@@ -251,9 +254,10 @@ namespace VpnGuard
                     if (f != null) {
                         PutIp(pkt, 12, f.Dst); pkt[ihl] = (byte)(f.DPort >> 8); pkt[ihl + 1] = (byte)f.DPort;
                         WinDivertHelperCalcChecksums(pkt, len, ref addr, 0);
-                    }
+                        Interlocked.Increment(ref CzNetRw); if (len > 1500) Interlocked.Increment(ref CzNetBig);
+                    } else Interlocked.Increment(ref CzNetMiss);
                 } catch { Interlocked.Increment(ref CzErrors); }
-                uint sl; WinDivertSend(h, pkt, len, out sl, ref addr);
+                uint sl; if (!WinDivertSend(h, pkt, len, out sl, ref addr)) Interlocked.Increment(ref CzNetSendFail);
             }
         }
 
@@ -269,24 +273,25 @@ namespace VpnGuard
         {
             var ep = (IPEndPoint)c.Client.RemoteEndPoint; uint cip = IpH(ep.Address.GetAddressBytes(), 0);
             CzTcpFlow f; lock (CzLock) CzTcp.TryGetValue(((ulong)cip << 16) | (uint)ep.Port, out f);
-            if (f == null) return;
+            if (f == null) { Interlocked.Increment(ref CzRelayNoFlow); return; }
             c.NoDelay = true;
             var srv = new TcpClient(AddressFamily.InterNetwork) { NoDelay = true };
             try {
                 var ar = srv.BeginConnect(IPAddress.Parse(IpS(f.Dst)), f.DPort, null, null);
-                if (!ar.AsyncWaitHandle.WaitOne(15000)) return; srv.EndConnect(ar);
+                if (!ar.AsyncWaitHandle.WaitOne(15000)) { Interlocked.Increment(ref CzConnFail); return; }
+                try { srv.EndConnect(ar); } catch { Interlocked.Increment(ref CzConnFail); return; }
                 Interlocked.Increment(ref CzTcpConns); Interlocked.Increment(ref CzActive);
                 var cs = c.GetStream(); var ss = srv.GetStream();
-                var up = new Thread(() => { CzPump(cs, ss, f); try { srv.Client.Shutdown(SocketShutdown.Send); } catch { } }) { IsBackground = true }; up.Start();
-                CzPump(ss, cs, f); try { c.Client.Shutdown(SocketShutdown.Send); } catch { }
+                var up = new Thread(() => { CzPump(cs, ss, f, true); try { srv.Client.Shutdown(SocketShutdown.Send); } catch { } }) { IsBackground = true }; up.Start();
+                CzPump(ss, cs, f, false); try { c.Client.Shutdown(SocketShutdown.Send); } catch { }
                 up.Join(60000);
             } catch { }
             finally { if (Interlocked.Decrement(ref CzActive) < 0) Interlocked.Exchange(ref CzActive, 0); try { srv.Close(); } catch { } }
         }
-        static void CzPump(Stream a, Stream b, CzTcpFlow f)
+        static void CzPump(Stream a, Stream b, CzTcpFlow f, bool up)
         {
             var bb = new byte[65536];
-            try { int n; while ((n = a.Read(bb, 0, bb.Length)) > 0) { b.Write(bb, 0, n); Interlocked.Add(ref CzBytes, n); f.Last = DateTime.Now; } } catch { }
+            try { int n; while ((n = a.Read(bb, 0, bb.Length)) > 0) { b.Write(bb, 0, n); Interlocked.Add(ref CzBytes, n); if (up) Interlocked.Add(ref CzTcpUp, n); else Interlocked.Add(ref CzTcpDown, n); f.Last = DateTime.Now; } } catch { }
         }
 
         // ---------------------------------------------------------------- состояние
@@ -297,7 +302,11 @@ namespace VpnGuard
                 { "packets", Interlocked.Read(ref CzPkts) }, { "passed", Interlocked.Read(ref CzPass) }, { "tcpConns", Interlocked.Read(ref CzTcpConns) }, { "active", CzActive },
                 { "tcpFlows", tcpN }, { "udpFlows", udpN }, { "udpPackets", Interlocked.Read(ref CzUdpPkts) }, { "mb", Math.Round(Interlocked.Read(ref CzBytes) / 1048576.0, 1) },
                 { "errors", Interlocked.Read(ref CzErrors) }, { "relay", CzFwd != WdInvalid ? IpS(CzWgIp) + ":" + CzRelayPort : "" },
-                { "ifWg", CzWgIdx }, { "ifEth", CzEthIdx }, { "probe", CzProbeCopy() } };
+                { "ifWg", CzWgIdx }, { "ifEth", CzEthIdx }, { "probe", CzProbeCopy() },
+                { "tcpUpKb", Interlocked.Read(ref CzTcpUp) / 1024 }, { "tcpDownKb", Interlocked.Read(ref CzTcpDown) / 1024 }, { "udpDownKb", Interlocked.Read(ref CzUdpDown) / 1024 },
+                { "udpSendFail", Interlocked.Read(ref CzUdpSendFail) }, { "quicDropped", Interlocked.Read(ref CzQuicDrop) }, { "netRewritten", Interlocked.Read(ref CzNetRw) },
+                { "netNoFlow", Interlocked.Read(ref CzNetMiss) }, { "netBig", Interlocked.Read(ref CzNetBig) }, { "netSendFail", Interlocked.Read(ref CzNetSendFail) },
+                { "relayNoFlow", Interlocked.Read(ref CzRelayNoFlow) }, { "connFail", Interlocked.Read(ref CzConnFail) } };
         }
         static Dictionary<string, object> CzProbeCopy() { lock (CzProbeStat) return CzProbeStat.ToDictionary(x => x.Key, x => (object)x.Value); }
         static string CzSummary()
