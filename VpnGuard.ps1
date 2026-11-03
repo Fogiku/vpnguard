@@ -36,7 +36,7 @@ param(
     [string]$ConfigPath = ''
 )
 
-$AgentVersion = '3.0.2'
+$AgentVersion = '3.1'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -118,6 +118,9 @@ function Get-DefaultConfig { @{
         auto       = $true       # ставить обновления самому
         checkHours = 3
         token      = ''          # только для закрытого репозитория
+    }
+    ui = @{
+        tray = $true             # значок у часов вместо окна (ярлык VpnGuard открывает его; окно — в меню значка)
     }
     web = @{
         engine  = 'auto'         # auto — сервер на C# (bin\VpnGuardWeb.exe, собирается сам), powershell — прежний
@@ -1789,7 +1792,9 @@ function Invoke-SetupTask([string]$What) {
             # MultipleInstances Parallel: второй запуск просто выводит уже открытое окно на передний план
             $set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
                 -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances Parallel
-            $reg = @{ TaskName = $MonitorTask; Action = (New-HiddenPsAction (Join-Path $Root 'VpnGuardMonitor.ps1')); Settings = $set; Principal = $principal; Force = $true }
+            $tray = Join-Path $BinDir 'VpnGuardTray.exe'
+            $act = $(if ((Test-Path $tray) -and -not ($Cfg.ui -and $Cfg.ui.tray -eq $false)) { New-ScheduledTaskAction -Execute $tray -Argument "`"$Root`"" -WorkingDirectory $Root } else { New-HiddenPsAction (Join-Path $Root 'VpnGuardMonitor.ps1') })
+            $reg = @{ TaskName = $MonitorTask; Action = $act; Settings = $set; Principal = $principal; Force = $true }
             if ($What -eq 'monitor-logon') { $reg.Trigger = New-ScheduledTaskTrigger -AtLogOn -User $user }
             Register-ScheduledTask @reg | Out-Null
             Set-MonitorShortcuts $true
@@ -1863,6 +1868,7 @@ $RemoteModule = Join-Path $Root 'Remote.ps1'
 if (Test-Path $RemoteModule) { . $RemoteModule }
 else {
     function Invoke-RemoteWatch { }
+    function Invoke-TrayWatch { }
     function Get-RemoteSnapshot { $null }
     function Invoke-RemoteServer { }
 }
@@ -2085,7 +2091,7 @@ function Get-CodeStamp { (@($SelfPath, $ZapretModule, $WgModule, $AmneziaModule,
 $SelfStamp = Get-CodeStamp
 
 function Invoke-Tick {
-    foreach ($step in 'Sync-Config', 'Invoke-Commands', 'Invoke-MeduzaUpdate', 'Invoke-WgWatch', 'Invoke-VpnWatch', 'Invoke-SharingWatch', 'Invoke-ZapretWatch', 'Invoke-SoftwareCheck', 'Invoke-RemoteWatch', 'Invoke-AppUpdateWatch') {
+    foreach ($step in 'Sync-Config', 'Invoke-Commands', 'Invoke-MeduzaUpdate', 'Invoke-WgWatch', 'Invoke-VpnWatch', 'Invoke-SharingWatch', 'Invoke-ZapretWatch', 'Invoke-SoftwareCheck', 'Invoke-RemoteWatch', 'Invoke-AppUpdateWatch', 'Invoke-TrayWatch') {
         try { & $step } catch { Write-Log "$step : $($_.Exception.Message)" 'ERROR' }
         Invoke-Heartbeat
     }

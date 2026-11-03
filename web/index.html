@@ -101,6 +101,7 @@ canvas { width: 100%; height: 190px; display: block; }
     <a href="#traffic" data-p="traffic">Трафик</a>
     <hr>
     <a href="#system" data-p="system">Компоненты и обновление</a>
+    <a href="#settings" data-p="settings">Настройки</a>
     <a href="#logs" data-p="logs">Журнал</a>
     <a href="#diag" data-p="diag">Диагностика</a>
   </nav>
@@ -121,7 +122,7 @@ canvas { width: 100%; height: 190px; display: block; }
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 let S = null, page = 'home', wgList = null, logCache = '', timer = null;
-const NAMES = { home: 'Главная', ultra: 'Туннель', meduza: 'MeduzaVPN', amnezia: 'AmneziaWG', wg: 'WireGuard', ics: 'Раздача интернета (ICS)', zapret: 'zapret-discord-youtube', traffic: 'Трафик', system: 'Компоненты и обновление', logs: 'Журнал', diag: 'Диагностика и доступ' };
+const NAMES = { home: 'Главная', ultra: 'Туннель', meduza: 'MeduzaVPN', amnezia: 'AmneziaWG', wg: 'WireGuard', ics: 'Раздача интернета (ICS)', zapret: 'zapret-discord-youtube', traffic: 'Трафик', system: 'Компоненты и обновление', logs: 'Журнал', settings: 'Настройки', diag: 'Диагностика и доступ' };
 const HKEY = { meduza: 'm', ultra: 'u', wg: 'w', ics: 'i', zapret: 'z', amnezia: 'a' };
 const MODES = [['meduza', 'MeduzaVPN'], ['amnezia', 'AmneziaWG'], ['dual', 'Два туннеля (с переключением)'], ['zapret', 'Без VPN — только zapret']];
 const LV = { 0: 'работает', 1: 'предупреждение', 2: 'сбой', '-1': 'нет данных / выключено' };
@@ -253,6 +254,18 @@ async function setZVer() {
   if (!confirm(v ? `Установить zapret ${v} и закрепить эту версию?` : 'Вернуться к последней версии zapret (обновляется сама)?')) return;
   try { await api('/api/config', { key: 'zapret.version', value: v }); await api('/api/cmd', { c: 'zapret-update' }); toast('Агент установит ' + (v ? 'zapret ' + v : 'последнюю версию') + ' — 10–30 секунд'); setTimeout(load, 4000); } catch (e) { toast(e.message, true); }
 }
+function awgFile(inp) {
+  const f = inp.files && inp.files[0]; if (!f) return;
+  const r = new FileReader(); r.onload = () => { $('#awgtext').value = r.result; if (!$('#awgname').value) $('#awgname').value = f.name.replace(/\.(conf|txt)$/i, ''); }; r.readAsText(f);
+}
+async function awgImport() {
+  const text = $('#awgtext').value.trim(); if (!text) { toast('Вставьте ключ vpn:// или текст конфига', true); return; }
+  try { const r = await api('/api/awg/import', { text, name: $('#awgname').value.trim() }); toast('Импортирован конфиг ' + r.name); $('#awgtext').value = ''; $('#awgname').value = ''; setTimeout(load, 1500); } catch (e) { toast('Не удалось: ' + e.message, true); }
+}
+async function awgRemove(name, title) {
+  if (!confirm(`Удалить конфиг «${title}»? Копия сохранится в data\\backup.`)) return;
+  try { await api('/api/awg/remove', { name }); toast('Конфиг удалён'); setTimeout(load, 1500); } catch (e) { toast(e.message, true); }
+}
 function setMode(m) {
   const msg = { meduza: 'Переключиться на MeduzaVPN?', amnezia: 'Переключиться на AmneziaWG? MeduzaVPN будет отключён.', dual: 'Включить режим «два туннеля»? Оба VPN будут подняты, при сбое трафик переключится на второй.', zapret: 'Отключить VPN? ПК и клиенты wg_server пойдут в интернет напрямую, YouTube/Discord — через zapret.' }[m];
   if (confirm(msg)) setCfg('vpn.mode', m, 'режим'); else render();
@@ -277,7 +290,11 @@ P.meduza = () => {
 P.amnezia = () => {
   const a = comp('amnezia') || {}, cfgs = a.configs || [], t = a.test, res = (t && t.results) || [];
   return compHead('amnezia', btn('Переподключить', "cmd('reconnect-awg','переподключение AmneziaWG')") + btn('Тест конфигов', "cmd('awg-test','тест конфигов','Поднять по очереди каждый конфиг и проверить трафик?')") + btn('Режим AmneziaWG', "setMode('amnezia')")) +
-    `<div class="sec">Конфиги</div><div class="card">${cfgs.length ? `<table><tr><th>Конфиг</th><th class="hide-m">Сервер</th><th></th></tr>${cfgs.map(c => `<tr class="${c.name === a.active ? 'cur' : ''}"><td><span class="dot l${c.running ? 0 : -1}"></span> ${esc(c.title)}${c.name === a.active ? ' ← активный' : ''}</td><td class="hide-m">${esc(c.endpoint)}</td><td>${c.name === a.active ? '' : btn('Сделать активным', `setCfg('amnezia.active','${esc(c.name)}','активный конфиг')`)}</td></tr>`).join('')}</table>` : '<p class="muted">Конфигов нет. Импорт — в окне VpnGuard на этом ПК (вкладка AmneziaWG).</p>'}</div>
+    `<div class="sec">Конфиги</div><div class="card">${cfgs.length ? `<table><tr><th>Конфиг</th><th class="hide-m">Сервер</th><th></th></tr>${cfgs.map(c => `<tr class="${c.name === a.active ? 'cur' : ''}"><td><span class="dot l${c.running ? 0 : -1}"></span> ${esc(c.title)}${c.name === a.active ? ' ← активный' : ''}</td><td class="hide-m">${esc(c.endpoint)}</td><td class="row" style="flex-wrap:nowrap">${c.name === a.active ? '' : btn('Сделать активным', `setCfg('amnezia.active','${esc(c.name)}','активный конфиг')`)}${btn('Удалить', `awgRemove('${esc(c.name)}','${esc(c.title)}')`)}</td></tr>`).join('')}</table>` : '<p class="muted">Конфигов нет — импортируйте ниже.</p>'}</div>
+    <div class="sec">Импорт конфига</div><div class="card"><p class="muted">Из AmneziaVPN: настройки сервера → «Поделиться» → формат AmneziaWG. Можно выбрать файл .conf или вставить ключ <code>vpn://…</code> / текст конфига.</p>
+      <div class="row"><input type="file" id="awgfile" accept=".conf,.txt" onchange="awgFile(this)"><input type="text" id="awgname" placeholder="название (страна / сервер)" style="flex:1;min-width:180px"></div>
+      <textarea class="log" id="awgtext" style="height:140px;margin-top:8px" placeholder="vpn://…  или  [Interface] … [Peer] …"></textarea>
+      <div class="row" style="margin-top:8px">${btn('Импортировать', 'awgImport()', true)}</div></div>
     ${res.length ? `<div class="sec">Тест конфигов</div><div class="card"><table><tr><th>Конфиг</th><th>Результат</th><th>Отклик</th><th class="hide-m">Ошибка</th></tr>${res.map(r => `<tr><td>${esc(r.protocol)}</td><td class="c${r.ok ? 0 : 2}">${r.ok ? 'работает' : 'не работает'}</td><td>${r.pingMs >= 0 ? r.pingMs + ' мс' : '—'}</td><td class="hide-m">${esc(r.error)}</td></tr>`).join('')}</table></div>` : ''}` +
     timeline('amnezia') + '<div class="sec">Подробности</div><div class="card">' + kvTable(a) + '</div>';
 };
@@ -323,8 +340,50 @@ P.zapret = () => {
       <p class="muted">${z.manual ? 'Выбрана вручную: ' + esc(z.manual) : z.current ? 'Подобрана автоматически: ' + esc(z.current) : 'Стратегия ещё не выбрана.'}</p></div>
     <div class="sec">Проверка сайтов сейчас${z.checkedAt ? ' · ' + esc(z.checkedAt) : ''}</div><div class="card">${ch.length ? `<table><tr><th>Что проверяется</th><th class="hide-m">Адрес</th><th>Результат</th><th>Время</th></tr>${ch.map(c => `<tr><td><span class="dot l${c.ok ? 0 : 2}"></span> ${esc(c.n)}</td><td class="hide-m muted">${esc(c.h)}</td><td class="c${c.ok ? 0 : 2}">${c.ok ? (c.mbit ? '≈' + c.mbit + ' Мбит/с' : 'открывается') : esc(c.why)}</td><td>${c.ms >= 0 ? c.ms + ' мс' : '—'}</td></tr>`).join('')}</table>` : '<p class="muted">Проверки ещё не было.</p>'}</div>
     <div class="sec">Результаты подбора</div><div class="card">${res.length ? `<table><tr><th>Стратегия</th><th>Открылось</th><th class="hide-m">Не прошли</th><th></th></tr>${res.map(r => `<tr class="${r.name === z.current ? 'cur' : ''}"><td>${esc(r.name)}</td><td><div class="row" style="flex-wrap:nowrap"><div class="bar"><i class="l${r.ok >= r.total ? 0 : r.ok ? 1 : 2}" style="width:${100 * r.ok / Math.max(1, r.total)}%"></i></div>${r.ok}/${r.total}</div></td><td class="hide-m ${r.error || bad(r.checks) ? 'c2' : 'c0'}" style="font-size:12px">${r.error ? esc(r.error) : bad(r.checks) || (r.checks && r.checks.length ? 'всё открылось' : '')}</td><td>${r.name !== '(без zapret)' && r.name !== z.manual ? btn('Выбрать', `setCfg('zapret.strategy','${esc(r.name)}','стратегия zapret')`) : ''}</td></tr>`).join('')}</table>` : '<p class="muted">Подбора ещё не было.</p>'}</div>` +
+    `<div class="sec">Свои списки</div><div class="card" id="zlists"><p class="muted">загрузка…</p></div>` +
     timeline('zapret') + '<div class="sec">Подробности</div><div class="card">' + kvTable(z) + '</div>' + chartBlock('z', 'Трафик мимо VPN — последние 2 часа (оценка)');
 };
+let zl = null;
+P.zapret.after = async () => { if ($('#zlists') && !$('#zltext')) await loadZLists(); };
+async function loadZLists(sel) {
+  try { zl = await api('/api/zlist'); } catch (e) { $('#zlists').innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
+  const cur = sel || ($('#zlsel') && $('#zlsel').value) || zl.lists[0].name, L = zl.lists.find(x => x.name === cur) || zl.lists[0];
+  $('#zlists').innerHTML = !zl.installed ? '<p class="muted">zapret ещё не установлен — включите его, он скачается, затем добавьте списки.</p>' :
+    `<div class="row"><select id="zlsel" onchange="loadZLists(this.value)">${zl.lists.map(x => `<option value="${esc(x.name)}"${x.name === L.name ? ' selected' : ''}>${esc(x.title)}</option>`).join('')}</select>
+     <span class="sub">${esc(L.name)} · записей: ${L.text.split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).length}</span></div>
+     <p class="muted">По одному на строку: ${L.kind === 'domain' ? 'youtube.com, rutracker.org … (поддомены включаются сами)' : '1.2.3.4 или 1.2.3.0/24'}. Строки с # — комментарии. После сохранения zapret перезапустится, маршруты пересчитаются.</p>
+     <textarea class="log" id="zltext" style="height:200px">${esc(L.text)}</textarea><div class="row" style="margin-top:8px">${btn('Сохранить и применить', `saveZList('${esc(L.name)}')`, true)}</div>`;
+}
+async function loadZListsKeep(k) { await loadZLists(k.sel); if ($('#zltext')) $('#zltext').value = k.text; }
+async function saveZList(name) {
+  try { await api('/api/zlist', { name, text: $('#zltext').value }); toast('Список сохранён — zapret применит его'); loadZLists(name); } catch (e) { toast(e.message, true); }
+}
+// ---------------------------------------------------------------- настройки
+let setData = null;
+P.settings = () => `<div id="setbox"><p class="muted">загрузка…</p></div>`;
+P.settings.after = async () => {
+  try { setData = await api('/api/settings'); } catch (e) { $('#setbox').innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
+  const secs = []; for (const x of setData.settings) if (!secs.includes(x.section)) secs.push(x.section);
+  const field = x => {
+    const id = 'set_' + x.key.replace(/\./g, '_');
+    if (x.type === 'bool') return `<label class="row" style="gap:8px"><input type="checkbox" id="${id}" ${x.value ? 'checked' : ''}> включено</label>`;
+    if (x.type.startsWith('enum:')) return `<select id="${id}">${x.type.slice(5).split('|').map(v => `<option${v === x.value ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select>`;
+    if (x.type.startsWith('int:')) { const p = x.type.split(':'); return `<input type="text" inputmode="numeric" id="${id}" value="${esc(x.value)}" style="width:110px" title="от ${p[1]} до ${p[2]}">`; }
+    return `<input type="text" id="${id}" value="${esc(x.value)}" style="width:100%;max-width:420px">`;
+  };
+  $('#setbox').innerHTML = secs.map(sec => `<div class="sec">${esc(sec)}</div><div class="card"><table class="kv">${setData.settings.filter(x => x.section === sec).map(x => `<tr><td>${esc(x.label)}${x.hint ? `<div class="sub">${esc(x.hint)}</div>` : ''}</td><td>${field(x)}</td></tr>`).join('')}</table></div>`).join('') +
+    `<div class="card row">${btn('Сохранить', 'saveSettings()', true)}${btn('Отменить изменения', "render(true)")}<span class="sub">Источник обновлений VpnGuard: github.com/${esc(setData.repo)} (меняется только в config.json). Пароль и удалённая диагностика — на вкладке «Диагностика».</span></div>`;
+};
+async function saveSettings() {
+  const ch = {};
+  for (const x of setData.settings) {
+    const el = $('#set_' + x.key.replace(/\./g, '_')); if (!el) continue;
+    const v = x.type === 'bool' ? el.checked : el.value.trim();
+    if (String(v) !== String(x.value)) ch[x.key] = v;
+  }
+  if (!Object.keys(ch).length) { toast('Изменений нет'); return; }
+  try { const r = await api('/api/settings', ch); toast(`Сохранено настроек: ${r.changed} — агент применит их сам`); render(true); } catch (e) { toast(e.message, true); }
+}
 P.traffic = () => {
   const days = ((S.traffic && S.traffic.days) || []).slice().reverse();
   return chartBlock('u', 'Туннель — последние 2 часа') + chartBlock('w', 'wg_server (клиенты) — последние 2 часа') + chartBlock('p', 'Физический адаптер — последние 2 часа') +
@@ -398,10 +457,12 @@ function render(force) {
   if (!S) return;
   // во время ввода (выбор в списке, поиск) не перерисовывать
   const ae = document.activeElement; if (!force && ae && ['SELECT', 'INPUT', 'TEXTAREA'].includes(ae.tagName) && page !== 'home') return;
-  if ((page === 'logs' && $('#log') || page === 'diag' && $('#remote')) && !force) return;
+  if ((page === 'logs' && $('#log') || page === 'diag' && $('#remote') || page === 'settings' && $('#setbox')) && !force) return;
+  const keep = page === 'zapret' && $('#zltext') ? { text: $('#zltext').value, sel: $('#zlsel') && $('#zlsel').value } : page === 'amnezia' && $('#awgtext') ? { awg: $('#awgtext').value, awgname: $('#awgname').value } : null;
   $('#page').innerHTML = (P[page] || P.home)();
   for (const cv of document.querySelectorAll('canvas[data-chart]')) drawChart(cv, cv.dataset.chart);
-  if (P[page] && P[page].after) P[page].after();
+  if (keep && keep.awg !== undefined && $('#awgtext')) { $('#awgtext').value = keep.awg; $('#awgname').value = keep.awgname; }
+  if (keep && keep.text !== undefined && zl) { loadZListsKeep(keep); } else if (P[page] && P[page].after) P[page].after();
 }
 function go() {
   page = (location.hash || '#home').slice(1); if (!P[page]) page = 'home';

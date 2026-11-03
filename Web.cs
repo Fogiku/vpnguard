@@ -50,6 +50,75 @@ namespace VpnGuard
             {"meduza.serviceId", @"^[\w \-\.\(\)]{0,100}$"}, {"meduza.protocol", @"^[a-z0-9\-]{1,40}$"}, {"amnezia.active", @"^[a-z0-9_=+.\-]{1,32}$"},
             {"update.auto", "bool"}, {"zapret.videoCheck", "bool"}, {"zapret.version", @"^[\w\.\-]{0,30}$"} };
 
+        // все настройки для вкладки «Настройки» веб-интерфейса: ключ, раздел, название, тип, подсказка, значение по умолчанию.
+        // тип: int:мин:макс | bool | enum:a|b|c | text:регулярка | hosts (хост:порт через запятую)
+        static readonly string[][] Settings = {
+            new[]{"checkIntervalSec","Общее","Интервал проверки, сек","int:10:600","как часто агент проверяет всё","30"},
+            new[]{"logRetentionDays","Общее","Хранить журналы, дней","int:1:365","","14"},
+            new[]{"vpn.mode","Режим","Режим работы","enum:meduza|amnezia|dual|zapret","meduza · amnezia · dual (два туннеля) · zapret (без VPN)","meduza"},
+            new[]{"vpn.primary","Режим","Два туннеля: основной","enum:meduza|amnezia","через какой идёт трафик, пока он работает","meduza"},
+            new[]{"vpn.dualHot","Режим","Два туннеля: резерв всегда поднят","bool","выключено — резерв поднимается только при сбое","true"},
+            new[]{"vpn.failoverChecks","Режим","Два туннеля: проверок до переключения","int:1:10","подряд без трафика (отключение — сразу)","2"},
+            new[]{"vpn.failbackMin","Режим","Два туннеля: вернуться на основной через, мин","int:0:1440","0 — не возвращать","5"},
+            new[]{"vpn.stopInactive","Режим","Закрывать неиспользуемый VPN","bool","чтобы не работали два туннеля сразу","true"},
+            new[]{"meduza.serviceId","MeduzaVPN","VPN (id или часть имени)","text:^[\\w \\-\\.\\(\\)]{0,100}$","пусто — единственный на аккаунте",""},
+            new[]{"meduza.protocol","MeduzaVPN","Протокол","text:^[a-z0-9\\-]{1,40}$","ultra","ultra"},
+            new[]{"meduza.autoProtocol","MeduzaVPN","Пробовать другие протоколы","bool","если связь пропала и переподключение не помогло","true"},
+            new[]{"meduza.protocolReturnMin","MeduzaVPN","Возвращать выбранный протокол, мин","int:0:1440","0 — не возвращать","60"},
+            new[]{"meduza.adapterName","MeduzaVPN","Имя адаптера туннеля","text:^[\\w \\-\\.]{1,60}$","","MeduzaVPN ULTRA"},
+            new[]{"meduza.autoUpdate","MeduzaVPN","Автообновление MeduzaVPN","bool","скачивание, проверка подписи, тихая установка","true"},
+            new[]{"meduza.updateCheckHours","MeduzaVPN","Проверять обновления каждые, ч","int:1:168","","6"},
+            new[]{"meduza.probeHosts","MeduzaVPN","Проверка трафика (хост:порт, …)","hosts","через запятую","1.1.1.1:443, 8.8.8.8:443, 9.9.9.9:443"},
+            new[]{"meduza.probeFailuresBeforeReconnect","MeduzaVPN","Неудачных проверок до переподключения","int:1:50","","3"},
+            new[]{"meduza.startupGraceSec","MeduzaVPN","Ждать автоподключения после старта, сек","int:0:600","","60"},
+            new[]{"meduza.maxRestartsPer30Min","MeduzaVPN","Максимум перезапусков за 30 мин","int:1:100","защита от бесконечных перезапусков","5"},
+            new[]{"amnezia.splitDefaultRoute","AmneziaWG","Делить маршрут 0.0.0.0/0","bool","нужно для zapret и ответов wg_server","true"},
+            new[]{"ws4w.endpoint","WireGuard","Адрес для клиентов (IP или имя[:порт])","text:^[\\w\\.\\-:\\[\\]]{0,100}$","пусто — как у клиентов WS4W или внешний IP",""},
+            new[]{"ws4w.clientDns","WireGuard","DNS для новых клиентов","text:^[\\d\\., a-fA-F:]{0,100}$","пусто — как у клиентов WS4W или адрес сервера",""},
+            new[]{"ws4w.autoCreateServer","WireGuard","Создавать сервер, если настроек нет","bool","нет ни конфига, ни службы wg_server","true"},
+            new[]{"sharing.enabled","Раздача","Управлять раздачей ICS","bool","туннель → wg_server","true"},
+            new[]{"zapret.autoUpdate","zapret","Автообновление zapret","bool","если версия не выбрана","true"},
+            new[]{"zapret.updateCheckHours","zapret","Проверять обновления каждые, ч","int:1:168","","12"},
+            new[]{"zapret.retestHours","zapret","Переподбирать стратегию каждые, ч","int:1:720","и сразу — если сайты перестали открываться","24"},
+            new[]{"zapret.healthCheckMin","zapret","Проверять сайты каждые, мин","int:2:240","","10"},
+            new[]{"zapret.videoCheck","zapret","Проверять видео YouTube","bool","видеосервер и скорость загрузки","true"},
+            new[]{"zapret.routeIspVideo","zapret","Видеосерверы провайдера — мимо VPN","bool","иначе в режиме с VPN видео может не грузиться","true"},
+            new[]{"zapret.gameFilter","zapret","Игровой фильтр","enum:disabled|all|tcp|udp","disabled — выключен (как в service.bat)","disabled"},
+            new[]{"software.checkHours","Обновления","Проверять версии компонентов, ч","int:1:168","","12"},
+            new[]{"update.auto","Обновления","Ставить обновления VpnGuard само","bool","проверка sha256 и кода, копия старых файлов","true"},
+            new[]{"update.checkHours","Обновления","Проверять обновления VpnGuard каждые, ч","int:1:168","","3"},
+        };
+        static object SettingValue(string[] d)
+        {
+            object v = CfgGet(d[0], null);
+            if (d[3] == "hosts") { var arr = v as System.Collections.ArrayList; if (arr != null) return string.Join(", ", arr.ToArray().Select(x => Convert.ToString(x))); if (v is object[]) return string.Join(", ", ((object[])v).Select(x => Convert.ToString(x))); return v == null ? d[5] : Convert.ToString(v); }
+            if (d[3] == "bool") { if (v == null) return d[5] == "true"; if (v is bool) return v; bool b; return bool.TryParse(Convert.ToString(v), out b) && b; }
+            if (d[3].StartsWith("int")) { int i; return int.TryParse(Convert.ToString(v ?? d[5]), out i) ? i : int.Parse(d[5]); }
+            return v == null ? d[5] : Convert.ToString(v);
+        }
+        static string ValidateSetting(string[] d, object raw, out object val)
+        {
+            val = null; string t = d[3]; string sv = raw == null ? "" : Convert.ToString(raw).Trim();
+            if (t == "bool") { bool b; if (raw is bool) val = raw; else if (bool.TryParse(sv, out b)) val = b; else return "нужно да/нет"; return null; }
+            if (t.StartsWith("int:")) { var p = t.Split(':'); int i; if (!int.TryParse(sv, out i)) return "нужно число"; int mn = int.Parse(p[1]), mx = int.Parse(p[2]); if (i < mn || i > mx) return "от " + mn + " до " + mx; val = i; return null; }
+            if (t.StartsWith("enum:")) { if (!t.Substring(5).Split('|').Contains(sv)) return "недопустимое значение"; val = sv; return null; }
+            if (t.StartsWith("text:")) { if (!Regex.IsMatch(sv, t.Substring(5))) return "недопустимые символы"; val = sv; return null; }
+            if (t == "hosts") {
+                var list = sv.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries).ToArray();
+                if (list.Length == 0) return "нужен хотя бы один хост:порт";
+                foreach (var h in list) if (!Regex.IsMatch(h, @"^[\w\.\-]+:\d{1,5}$")) return "неверный формат: " + h + " (нужно хост:порт)";
+                val = list; return null;
+            }
+            return "неизвестный тип";
+        }
+
+        // свои списки zapret: файл, тип записей, заглушка (zapret требует непустой файл)
+        static readonly string[][] ZLists = {
+            new[]{"list-general-user.txt","Свои домены — обрабатывать zapret и пускать мимо VPN","domain","domain.example.abc"},
+            new[]{"list-exclude-user.txt","Исключения — домены, которые zapret не трогает","domain","domain.example.abc"},
+            new[]{"ipset-exclude-user.txt","Исключения — IP-адреса и подсети","ip","203.0.113.113/32"} };
+        static string ZListsDir() { string d = CfgStr("zapret.dir", ""); return Path.Combine(d.Length > 0 ? d : Path.Combine(Root, "zapret"), "lists"); }
+
         public static int Main(string[] args)
         {
             Root = args.Length > 0 ? args[0].TrimEnd('\\') : AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\');
@@ -356,11 +425,11 @@ namespace VpnGuard
                 if (!string.IsNullOrEmpty(tok)) Fail(ip, "Удалённый доступ");
                 Text(ctx, 401, "нужен вход: пароль веб-интерфейса или токен диагностики (X-Token или ?t=)"); return;
             }
-            var readOnly = new[] { "/api/status", "/api/logs", "/api/wg/clients", "/api/wg/conf", "/api/wg/qr", "/api/whoami", "/api/remote", "/api/websettings" };
+            var readOnly = new[] { "/api/status", "/api/logs", "/api/wg/clients", "/api/wg/conf", "/api/wg/qr", "/api/whoami", "/api/remote", "/api/websettings", "/api/settings", "/api/zlist" };
             bool write = path.StartsWith("/api/") && !readOnly.Contains(path);
             if (write && (req.HttpMethod != "POST" || string.IsNullOrEmpty(req.Headers["X-VG"]))) { Text(ctx, 405, "нужен POST с заголовком X-VG"); return; }
             bool post = req.HttpMethod == "POST";
-            if (post && (path == "/api/remote" || path == "/api/websettings") && string.IsNullOrEmpty(req.Headers["X-VG"])) { Text(ctx, 405, "нужен заголовок X-VG"); return; }
+            if (post && (path == "/api/remote" || path == "/api/websettings" || path == "/api/settings" || path == "/api/zlist") && string.IsNullOrEmpty(req.Headers["X-VG"])) { Text(ctx, 405, "нужен заголовок X-VG"); return; }
 
             Interlocked.Increment(ref Requests); LastReq = DateTime.Now.ToString("dd.MM HH:mm:ss") + " " + ip + " " + path; SaveState(true, "");
             if (role == "diag" && path != "/status") Log("Удалённая диагностика: " + ip + " запросил " + path + (q["c"] != null ? " (" + q["c"] + ")" : ""), "INFO");
@@ -435,6 +504,72 @@ namespace VpnGuard
                         { "allowFrom", from }, { "allowActions", CfgBool("remote.allowActions", false) }, { "port", WebPort() }, { "ips", LocalIps() },
                         { "publicIp", on && from != "local" ? PublicIp() : "" }, { "requests", Requests } });
                     return;
+                }
+                case "/api/settings": {
+                    if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; }
+                    if (post) {
+                        var b = Body(req); var errs = new Dictionary<string, object>(); int n = 0;
+                        foreach (var d in Settings) {
+                            if (!b.ContainsKey(d[0])) continue;
+                            object v; string e = ValidateSetting(d, b[d[0]], out v);
+                            if (e != null) { errs[d[0]] = d[2] + ": " + e; continue; }
+                            if (Json.Serialize(v) == Json.Serialize(CfgGet(d[0], null))) continue;
+                            CfgSet(d[0], v); n++;
+                        }
+                        if (errs.Count > 0) { JsonOut(ctx, new Dictionary<string, object> { { "ok", false }, { "error", string.Join("; ", errs.Values) }, { "fields", errs } }, 400); return; }
+                        if (n > 0) { Log("Веб-интерфейс: изменено настроек: " + n + " (" + ip + ")", "INFO"); SendCmd("check-now", "после изменения настроек"); }
+                        JsonOut(ctx, new Dictionary<string, object> { { "ok", true }, { "changed", n } }); return;
+                    }
+                    var list = Settings.Select(d => (object)new Dictionary<string, object> { { "key", d[0] }, { "section", d[1] }, { "label", d[2] }, { "type", d[3] }, { "hint", d[4] }, { "value", SettingValue(d) } }).ToList();
+                    JsonOut(ctx, new Dictionary<string, object> { { "ok", true }, { "settings", list }, { "repo", CfgStr("update.repo", "Fogiku/vpnguard") } }); return;
+                }
+                case "/api/zlist": {
+                    if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; }
+                    string dir = ZListsDir();
+                    if (post) {
+                        var b = Body(req); var def = ZLists.FirstOrDefault(z => z[0] == BStr(b, "name"));
+                        if (def == null) { JsonOut(ctx, Err("неизвестный список"), 400); return; }
+                        if (!Directory.Exists(dir)) { JsonOut(ctx, Err("zapret ещё не установлен — включите его, он скачается, затем добавьте списки"), 400); return; }
+                        var outl = new List<string>(); var bad = new List<string>();
+                        foreach (var raw in BStr(b, "text").Split(new[] { "\r\n", "\n" }, StringSplitOptions.None)) {
+                            string l = raw.Trim(); if (l.Length == 0) continue;
+                            if (l.StartsWith("#")) { outl.Add(l); continue; }
+                            if (def[2] == "domain") {
+                                l = Regex.Replace(Regex.Replace(Regex.Replace(l.ToLowerInvariant(), "^[a-z]+://", ""), "[/:?#].*$", ""), @"^(\*\.|www\.)", "");
+                                if (Regex.IsMatch(l, "[а-яё]")) { try { l = new System.Globalization.IdnMapping().GetAscii(l); } catch { } }
+                                if (Regex.IsMatch(l, @"^([a-z0-9-]+\.)+[a-z0-9-]{2,}$")) outl.Add(l); else bad.Add(raw.Trim());
+                            } else {
+                                if (Regex.IsMatch(l, @"^\d{1,3}(\.\d{1,3}){3}(/\d{1,2})?$") || Regex.IsMatch(l, @"^[0-9a-f:]+(/\d{1,3})?$")) outl.Add(l); else bad.Add(l);
+                            }
+                        }
+                        if (bad.Count > 0) { JsonOut(ctx, Err("не понял строки: " + string.Join(", ", bad.Take(10)) + (def[2] == "domain" ? " — нужно: домен, например rutracker.org" : " — нужно: IP или подсеть, например 1.2.3.0/24")), 400); return; }
+                        var fin = outl.Distinct().ToList();
+                        if (!fin.Any(x => !x.StartsWith("#"))) { fin.Insert(0, "# Never leave this file empty"); fin.Add(def[3]); }
+                        File.WriteAllText(Path.Combine(dir, def[0]), string.Join("\r\n", fin) + "\r\n", new UTF8Encoding(false));
+                        Log("Веб-интерфейс: сохранён список zapret " + def[0] + " (" + fin.Count(x => !x.StartsWith("#") && x != def[3]) + " записей, " + ip + ")", "INFO");
+                        SendCmd("zapret-reload", "применение списка " + def[0]);
+                        JsonOut(ctx, new Dictionary<string, object> { { "ok", true } }); return;
+                    }
+                    var lists = ZLists.Select(z => {
+                        string f = Path.Combine(dir, z[0]); string txt = "";
+                        if (File.Exists(f)) txt = string.Join("\n", (ReadShared(f) ?? "").Split(new[] { "\r\n", "\n" }, StringSplitOptions.None).Where(l => l.Trim() != z[3] && !Regex.IsMatch(l, @"^#\s*Never leave this file empty")).ToArray()).Trim();
+                        return (object)new Dictionary<string, object> { { "name", z[0] }, { "title", z[1] }, { "kind", z[2] }, { "exists", File.Exists(f) }, { "text", txt } };
+                    }).ToList();
+                    JsonOut(ctx, new Dictionary<string, object> { { "ok", true }, { "dir", dir }, { "installed", Directory.Exists(dir) }, { "lists", lists } }); return;
+                }
+                case "/api/awg/import": {
+                    if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; }
+                    var b = Body(req); string txt = BStr(b, "text");
+                    if (txt.Trim().Length == 0 || txt.Length > 60000) { JsonOut(ctx, Err("пустой или слишком большой конфиг"), 400); return; }
+                    var r = PsJson("awg-import", Json.Serialize(new Dictionary<string, object> { { "text", txt }, { "name", BStr(b, "name").Trim() } }));
+                    if (r.ContainsKey("ok") && r["ok"] is bool && (bool)r["ok"]) Log("Веб-интерфейс: импортирован конфиг AmneziaWG " + r["name"] + " (" + ip + ")", "INFO");
+                    JsonOut(ctx, r); return;
+                }
+                case "/api/awg/remove": {
+                    if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; }
+                    string n = BStr(Body(req), "name");
+                    if (!Regex.IsMatch(n, @"^[a-z0-9_=+.\-]{1,32}$")) { JsonOut(ctx, Err("неверное имя"), 400); return; }
+                    var r = PsJson("awg-remove", n); JsonOut(ctx, r); return;
                 }
                 case "/api/diag-run": if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; } Text(ctx, 200, HideSecrets(PsTask("diag", "", 240))); return;
                 case "/api/wg/clients": if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; } JsonOut(ctx, PsJson("wg-clients", "")); return;

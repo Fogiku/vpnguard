@@ -52,6 +52,61 @@ function Get-Csc {
     foreach ($c in "$env:windir\Microsoft.NET\Framework64\v4.0.30319\csc.exe", "$env:windir\Microsoft.NET\Framework\v4.0.30319\csc.exe") { if (Test-Path $c) { return $c } }
     return ''
 }
+# собрать программу на C# из исходников рядом (встроенный csc.exe .NET Framework); подпись = sha256 исходников
+$script:CsBuildFail = @{}
+function Build-CsExe([string]$Exe, [string[]]$Sources, [string]$Target, [string[]]$Refs) {
+    $src = @($Sources | ForEach-Object { Join-Path $Root $_ })
+    if (@($src | Where-Object { -not (Test-Path $_) }).Count) { return $false }
+    $sig = (@($src | ForEach-Object { (Get-FileHash $_ -Algorithm SHA256).Hash }) -join '|')
+    if ((Test-Path $Exe) -and "$(Get-Content "$Exe.sig" -Raw -ErrorAction SilentlyContinue)".Trim() -eq $sig) { return $true }
+    if ($script:CsBuildFail[$Exe] -eq $sig) { return $false }
+    $csc = Get-Csc
+    if (-not $csc) { $script:CsBuildFail[$Exe] = $sig; Write-Log "Сборка $(Split-Path $Exe -Leaf): нет компилятора .NET (csc.exe)" 'WARN'; return $false }
+    $name = [IO.Path]::GetFileNameWithoutExtension($Exe)
+    Get-Process -Name $name -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 400
+    New-Item -ItemType Directory (Split-Path $Exe) -Force | Out-Null
+    $tmp = "$Exe.new"; Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+    $r = Invoke-Exe $csc ("/nologo /target:$Target /optimize+ /out:`"$tmp`" " + (($Refs | ForEach-Object { "/r:$_" }) -join ' ') + ' ' + (($src | ForEach-Object { "`"$_`"" }) -join ' ')) 180
+    if ($r.Code -ne 0 -or -not (Test-Path $tmp)) {
+        $script:CsBuildFail[$Exe] = $sig
+        Write-Log "Сборка $name не удалась (код $($r.Code)): $((("$($r.Out) $($r.Err)" -split "`n") | Where-Object { $_ -match 'error' } | Select-Object -First 3) -join ' | ')" 'ERROR'
+        return $false
+    }
+    Move-Item $tmp $Exe -Force
+    Set-Content "$Exe.sig" $sig -Encoding ASCII
+    Write-Log "Собрано на C#: $name ($([int]((Get-Item $Exe).Length / 1KB)) КБ)"
+    return $true
+}
+
+# ---------------------------------------------------------------- значок у часов (вместо окна): задача VpnGuardMonitor и ярлык открывают его
+$TrayExe = Join-Path $(if ($BinDir) { $BinDir } else { Join-Path $Root 'bin' }) 'VpnGuardTray.exe'
+$script:TrayCheckAt = [datetime]::MinValue
+function Invoke-TrayWatch {
+    if (((Get-Date) - $script:TrayCheckAt).TotalMinutes -lt 5) { return }
+    $script:TrayCheckAt = Get-Date
+    $t = Get-ScheduledTask -TaskName 'VpnGuardMonitor' -ErrorAction SilentlyContinue
+    if (-not $t) { return }
+    $want = -not ($Cfg.ui -and $Cfg.ui.tray -eq $false)
+    $isTray = "$($t.Actions[0].Execute)" -like '*VpnGuardTray.exe'
+    if ($want) {
+        $was = [bool](Get-Process VpnGuardTray -ErrorAction SilentlyContinue)
+        if (-not (Build-CsExe $TrayExe @('Tray.cs') 'winexe' @('System.Windows.Forms.dll', 'System.Drawing.dll', 'System.Web.Extensions.dll'))) { return }
+        if ($was -and $isTray -and -not (Get-Process VpnGuardTray -ErrorAction SilentlyContinue)) { & schtasks.exe /run /tn VpnGuardMonitor | Out-Null }   # пересобран — запустить снова
+        if (-not $isTray) {
+            $trig = @($t.Triggers)
+            if (-not @($trig | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger' }).Count) { $trig += New-ScheduledTaskTrigger -AtLogOn -User $t.Principal.UserId }
+            Set-ScheduledTask -TaskName 'VpnGuardMonitor' -Action (New-ScheduledTaskAction -Execute $TrayExe -Argument "`"$Root`"" -WorkingDirectory $Root) -Trigger $trig | Out-Null
+            Write-Log 'Значок у часов: ярлык VpnGuard и вход в Windows теперь открывают значок (веб-интерфейс по щелчку); классическое окно — в меню значка' 'WARN'
+            if (-not (Get-Process VpnGuardTray -ErrorAction SilentlyContinue)) { & schtasks.exe /run /tn VpnGuardMonitor | Out-Null }
+        }
+    } elseif ($isTray) {
+        Set-ScheduledTask -TaskName 'VpnGuardMonitor' -Action (New-HiddenPsAction (Join-Path $Root 'VpnGuardMonitor.ps1')) | Out-Null
+        Get-Process VpnGuardTray -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        Write-Log 'Значок у часов выключен (ui.tray = false): ярлык снова открывает классическое окно'
+    }
+}
+
 $script:WebBuildFailSig = ''
 function Build-WebExe {
     $src = @('Web.cs', 'Qr.cs' | ForEach-Object { Join-Path $Root $_ })
@@ -120,6 +175,17 @@ function Invoke-WebTask([string]$Task, [string]$Arg) {
             'wg-remove' {
                 $c = Get-RWgClient $argText
                 if (-not $c) { & $out @{ ok = $false; error = 'клиент не найден' } } else { $n = Remove-WgClient $c.PublicKey; & $out ([ordered]@{ ok = $true; name = "$n" }) }
+            }
+            'awg-import' {
+                $j = $argText | ConvertFrom-Json
+                $n = Import-AmneziaConfig "$($j.text)" "$($j.name)"
+                & $out ([ordered]@{ ok = $true; name = "$n" })
+            }
+            'awg-remove' {
+                $c = @(Get-AmneziaConfigs) | Where-Object { $_.name -eq $argText } | Select-Object -First 1
+                if (-not $c) { & $out @{ ok = $false; error = 'конфиг не найден' } }
+                elseif ($argText -eq (Get-AmneziaActive) -and (Get-VpnMode) -in 'amnezia', 'dual') { & $out @{ ok = $false; error = 'этот конфиг сейчас используется — сначала сделайте активным другой или смените режим' } }
+                else { Remove-AmneziaConfig $argText; Write-Log "Веб-интерфейс: удалён конфиг AmneziaWG $argText (копия в data\backup)"; & $out ([ordered]@{ ok = $true; name = "$argText" }) }
             }
             default { & $out @{ ok = $false; error = "неизвестная задача '$Task'" } }
         }

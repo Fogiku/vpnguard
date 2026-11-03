@@ -1,8 +1,8 @@
 {
-    "version":  "3.0.2",
-    "build":  "20261103-1607",
-    "notes":  "автоматический переход веб-сервера с PowerShell на C#; VpnGuardWeb в списке процессов диагностики",
-    "date":  "2026-11-03T16:07:58.1335374+03:00",
+    "version":  "3.1",
+    "build":  "20261103-1619",
+    "notes":  "значок у часов на C# вместо окна; в веб-интерфейсе — настройки, свои списки zapret, импорт AmneziaWG",
+    "date":  "2026-11-03T16:19:28.8996118+03:00",
     "files":  [
                   {
                       "path":  "Amnezia.ps1",
@@ -31,13 +31,13 @@
                   },
                   {
                       "path":  "README.md",
-                      "sha256":  "ef1b3270f0d4da965eb31f8b5549762480b7402f7a1f506b69c241c586864d8d",
-                      "size":  24916
+                      "sha256":  "ac29a46894d6128e9626c9a8936b18d01410ef5c2e6454072d0acf5644750e0e",
+                      "size":  26702
                   },
                   {
                       "path":  "Remote.ps1",
-                      "sha256":  "f3a059804a29a64ae1c0ac386651112b355cb972bc8f4a33ef0e41f497ef1225",
-                      "size":  54245
+                      "sha256":  "5c00b3196dec8199e2d4995e71c3849833f606bf4bfbd23a89c9d6275729e0b7",
+                      "size":  59630
                   },
                   {
                       "path":  "RemoteDiag.ps1",
@@ -51,8 +51,13 @@
                   },
                   {
                       "path":  "Test.ps1",
-                      "sha256":  "042867c68d37e6ab8705cf69b4fad9ba7820e2fbb51e00b8d3c684e2f29face9",
-                      "size":  21858
+                      "sha256":  "383da3fdf4415802be4e5509475c8cf55c0e899c5b8d0d7ed8fea66be322afb7",
+                      "size":  23251
+                  },
+                  {
+                      "path":  "Tray.cs",
+                      "sha256":  "fab4e427c6534e0de259f59646f1a59855a5c8f4ee2fe1847452aeb48497cf1b",
+                      "size":  11783
                   },
                   {
                       "path":  "Uninstall.cmd",
@@ -61,8 +66,8 @@
                   },
                   {
                       "path":  "Uninstall.ps1",
-                      "sha256":  "85919f28801a086060bbd47accab50f49d45b351ed956f64e94ea88411d9303b",
-                      "size":  2210
+                      "sha256":  "938b2a9a1c9678aa972c6c9b74bf608498b2cda824d641eeaf700c315711dc09",
+                      "size":  2258
                   },
                   {
                       "path":  "Update.ps1",
@@ -71,8 +76,8 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "59771bba2daca081f734ea7db1d6609963b340fc056610ad346be8eacd02c012",
-                      "size":  132484
+                      "sha256":  "7f5643dee73684fa7fe79974909099c3536ecea26675e0a012e2d81782cc4459",
+                      "size":  132983
                   },
                   {
                       "path":  "VpnGuardMonitor.cmd",
@@ -86,13 +91,13 @@
                   },
                   {
                       "path":  "Web.cs",
-                      "sha256":  "5bcc8ad2772bd1a5a18cc3e255101c794c2f104341cea82b690d86c7423027ba",
-                      "size":  38281
+                      "sha256":  "86eebdc97342052fa546703cb31e6bc79e6b57bc68eefe8578b5e52d82a20257",
+                      "size":  54345
                   },
                   {
                       "path":  "web/index.html",
-                      "sha256":  "664e4796e3d372723da80492a0f264f8304eeddad690cab88a90f231f682eef7",
-                      "size":  52160
+                      "sha256":  "6e153ae65ec609f8c973cc336dd47d5428374e574f2e26b3216f9656883346f5",
+                      "size":  59192
                   },
                   {
                       "path":  "Wg.ps1",

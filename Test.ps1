@@ -219,6 +219,19 @@ else {
     try { Stop-Process -Id $srv.Id -Force } catch { }
     if ($res) { foreach ($x in $res) { Fail "веб (C#): $x" } } else { Ok "собран ($([int]((Get-Item $exe).Length / 1KB)) КБ); вход, защита, запись config.json, команды агенту, мост к PowerShell" }
 }
+Write-Host '5б. Значок у часов на C# (сборка и запуск)'
+$tray = Join-Path $tmp 'VpnGuardTray.exe'
+$co = & $csc /nologo /target:winexe /optimize+ "/out:$tray" /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll (Join-Path $Root 'Tray.cs') 2>&1
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $tray)) { foreach ($l in @($co) | Where-Object { "$_" -match 'error' } | Select-Object -First 5) { Fail "сборка Tray.cs: $l" } }
+else {
+    $tr = Join-Path $tmp 'trayroot'; New-Item -ItemType Directory (Join-Path $tr 'data') -Force | Out-Null; '#' | Set-Content (Join-Path $tr 'VpnGuard.ps1')
+    $st2 = [ordered]@{ updated = (Get-Date).ToString('o'); staleAfterSec = 300; vpn = @{ mode = 'meduza' } }
+    foreach ($k in 'ultra', 'meduza', 'wg', 'ics', 'zapret') { $st2[$k] = @{ level = $(if ($k -eq 'zapret') { 2 } else { 0 }); state = 'тест'; enabled = $true } }
+    $st2 | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $tr 'data\status.json') -Encoding UTF8
+    $tp = Start-Process $tray -ArgumentList "`"$tr`"" -PassThru
+    Start-Sleep -Seconds 4; $tp.Refresh()
+    if ($tp.HasExited) { Fail "значок завершился сразу (код $($tp.ExitCode))" } else { Ok "собран ($([int]((Get-Item $tray).Length / 1KB)) КБ), запускается и читает состояние"; Stop-Process -Id $tp.Id -Force }
+}
 Write-Host '6. Окно (отрисовка всех страниц на тестовых данных)'
 $demo = Join-Path $tmp 'demo'; New-Item -ItemType Directory $demo -Force | Out-Null
 $st = [ordered]@{ updated = (Get-Date).ToString('o'); staleAfterSec = 300; agentVersion = 'test'; intervalSec = 30; history = @(); vpn = @{ mode = 'meduza'; name = 'MeduzaVPN' } }

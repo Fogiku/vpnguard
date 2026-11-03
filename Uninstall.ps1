@@ -14,7 +14,7 @@ Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 # zapret: остановить winws и вернуть YouTube/Discord в VPN (убрать наши маршруты)
 Get-Process winws -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-Get-Process VpnGuardWeb -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-Process VpnGuardWeb, VpnGuardTray -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 $zs = Join-Path $PSScriptRoot 'data\zapret-state.json'
 if (Test-Path $zs) {
     try {
