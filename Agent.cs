@@ -25,7 +25,7 @@ using Microsoft.Win32;
 
 namespace VpnGuard
 {
-    public static class Agent
+    public static partial class Agent
     {
         static string Root, DataDir, LogDir, CmdDir, CmdPsDir, ConfigPath, StatusPath, PsStatusPath, BinDir, AwgDir, Version = "";
         static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue, RecursionLimit = 200 };
@@ -62,6 +62,7 @@ namespace VpnGuard
             foreach (var d in new[] { DataDir, LogDir, CmdDir, CmdPsDir }) Directory.CreateDirectory(d);
             try { var m = Regex.Match(File.ReadAllText(Path.Combine(Root, "VpnGuard.ps1")), @"\$AgentVersion\s*=\s*'([^']+)'"); if (m.Success) Version = m.Groups[1].Value; } catch { }
             CodeSig = SourceSig();
+            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
             if (snapOnly) { LoadCfg(true); LastMode = Mode(); try { SnapshotCore(); return 0; } catch (Exception e) { Console.Error.WriteLine(e); return 1; } }
             // как и VpnGuard.ps1: без прав администратора не управлять ничем и сразу выйти
             if (!new System.Security.Principal.WindowsPrincipal(System.Security.Principal.WindowsIdentity.GetCurrent()).IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator)) { Log("Агент C#: нужны права администратора", "ERROR"); return 1; }
@@ -93,7 +94,7 @@ namespace VpnGuard
                     HandOver(); return;
                 }
                 if (SourceSig() != CodeSig) { Log("Агент C#: код обновлён — перезапуск на новой версии", "INFO"); HandOver(); return; }
-                foreach (var step in new Action[] { Commands, WgWatch, VpnWatch, SharingWatch, PsPartWatch }) {
+                foreach (var step in new Action[] { Commands, WgWatch, VpnWatch, SharingWatch, ZapretWatch, PsPartWatch }) {
                     try { step(); } catch (Exception e) { Log("Агент C#: " + step.Method.Name + ": " + e.Message, "ERROR"); }
                     if ((DateTime.Now - LastSnapshot).TotalSeconds >= 10) Snapshot();
                 }
@@ -115,7 +116,7 @@ namespace VpnGuard
         }
         static string SourceSig()
         {
-            try { var f = Path.Combine(Root, "Agent.cs"); return File.Exists(f) ? File.GetLastWriteTimeUtc(f).Ticks.ToString() : ""; } catch { return ""; }
+            try { return string.Join("|", new[] { "Agent.cs", "Zapret.cs" }.Select(n => Path.Combine(Root, n)).Select(f => File.Exists(f) ? File.GetLastWriteTimeUtc(f).Ticks.ToString() : "-")); } catch { return ""; }
         }
 
         // ---------------------------------------------------------------- настройки (умолчания — как у агента PowerShell)
@@ -251,7 +252,8 @@ namespace VpnGuard
         }
 
         // ---------------------------------------------------------------- команды
-        static readonly string[] OwnCmds = { "check-now", "reconnect", "reconnect-meduza", "reconnect-awg", "restart-meduza", "restart-wg", "reapply-ics", "meduza-test", "meduza-catalog", "meduza-proto-reset", "awg-test" };
+        static readonly string[] OwnCmds = { "check-now", "reconnect", "reconnect-meduza", "reconnect-awg", "restart-meduza", "restart-wg", "reapply-ics", "meduza-test", "meduza-catalog", "meduza-proto-reset", "awg-test",
+            "zapret-on", "zapret-off", "zapret-check", "zapret-releases", "zapret-update", "zapret-reload", "zapret-test" };
         static void Commands()
         {
             var files = Directory.GetFiles(CmdDir, "*.cmd").OrderBy(f => f).ToList();
@@ -277,6 +279,7 @@ namespace VpnGuard
                     case "meduza-catalog": MzCatalog(true); break;
                     case "meduza-proto-reset": if (MzOverride.Length > 0) { MzReturnAt = DateTime.MinValue; MzProtoReturn(); } break;
                     case "awg-test": AwgConfigTest(); break;
+                    default: try { ZCommand(a); } catch (Exception e) { Log("zapret: " + a + ": " + e.Message, "ERROR"); } break;
                 }
             }
             if (files.Count > 0) Snapshot();
@@ -1022,8 +1025,9 @@ namespace VpnGuard
             awg["configs"] = AwgConfigs().Select(c => (object)new Dictionary<string, object> { { "name", c.Name }, { "title", c.Title }, { "endpoint", c.Endpoint }, { "address", c.Address }, { "running", Svc(AwgSvc(c.Name)) != null && Svc(AwgSvc(c.Name)).Status == ServiceControllerStatus.Running } }).ToArray();
             awg["test"] = AwgTest;
 
-            // zapret и прочее — из части PowerShell
-            object zapret = ps.ContainsKey("zapret") ? ps["zapret"] : new Dictionary<string, object> { { "level", -1 }, { "state", "Нет данных" }, { "details", new string[0] }, { "kv", new object[0] }, { "enabled", CfgBool("zapret.enabled", false) } };
+            // zapret — свой (Zapret.cs); компоненты, обновления, веб — из части PowerShell
+            object zapret;
+            try { zapret = ZSnapshot(); } catch (Exception e) { zapret = new Dictionary<string, object> { { "level", 2 }, { "state", "Ошибка" }, { "details", new[] { e.Message } }, { "kv", new object[0] }, { "enabled", CfgBool("zapret.enabled", false) } }; }
             int zL = -1, zc = 0; var zd = zapret as Dictionary<string, object>; if (zd != null) { int.TryParse(Convert.ToString(zd.ContainsKey("level") ? zd["level"] : -1), out zL); if (zd.ContainsKey("conns")) int.TryParse(Convert.ToString(zd["conns"]), out zc); }
 
             // история (точка не чаще интервала проверки)

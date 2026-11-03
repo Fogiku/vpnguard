@@ -37,7 +37,7 @@ param(
     [string]$ConfigPath = ''
 )
 
-$AgentVersion = '3.2.1'
+$AgentVersion = '3.3'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -2077,8 +2077,9 @@ function Invoke-VpnWatch {
 }
 
 # ---------------------------------------------------------------- агент на C# (agent.engine = 'csharp')
-# Основной цикл (MeduzaVPN, AmneziaWG, wg_server, раздача, трафик, состояние) ведёт bin\VpnGuardAgent.exe из Agent.cs.
-# Он раз в 2 мин (или сразу по команде) запускает этот файл с -PsPart: zapret, обновления, компоненты, веб-сервер, значок.
+# Основной цикл (MeduzaVPN, AmneziaWG, wg_server, раздача, zapret, трафик, состояние) ведёт bin\VpnGuardAgent.exe из Agent.cs + Zapret.cs.
+# Он раз в 2 мин (или сразу по команде) запускает этот файл с -PsPart: обновления, компоненты, веб-сервер, значок.
+# Подбор стратегии zapret — как и раньше отдельным процессом -ZapretTest.
 
 $CsAgentExe  = Join-Path $BinDir 'VpnGuardAgent.exe'
 $CsAgentSrc  = Join-Path $Root 'Agent.cs'
@@ -2086,7 +2087,13 @@ $CsStatePath = Join-Path $DataDir 'agent-cs.json'
 $PsStatusPath = Join-Path $DataDir 'status-ps.json'
 $PsPartStatePath = Join-Path $DataDir 'pspart-state.xml'
 
-function Get-CsSig { if (Test-Path $CsAgentSrc) { (Get-FileHash $CsAgentSrc -Algorithm SHA256).Hash } else { '' } }
+$CsAgentSources = @('Agent.cs', 'Zapret.cs')
+$CsAgentRefs = @('System.Web.Extensions.dll', 'System.ServiceProcess.dll', 'System.Management.dll', 'System.Core.dll', 'Microsoft.CSharp.dll', 'System.IO.Compression.dll', 'System.IO.Compression.FileSystem.dll')
+function Get-CsSig {
+    $f = @($CsAgentSources | ForEach-Object { Join-Path $Root $_ })
+    if (@($f | Where-Object { -not (Test-Path $_) }).Count) { return '' }
+    (@($f | ForEach-Object { (Get-FileHash $_ -Algorithm SHA256).Hash }) -join '|')
+}
 function Get-CsState {
     $s = $null; try { $s = Get-Content $CsStatePath -Raw -Encoding UTF8 | ConvertFrom-Json } catch { }
     if (-not $s) { $s = [pscustomobject]@{ sig = ''; starts = @(); fallbackSig = '' } }
@@ -2106,7 +2113,7 @@ function Start-CsAgent {
     if (Get-Process VpnGuardAgent -ErrorAction SilentlyContinue) { return $true }
     $sig = Get-CsSig
     $st = Get-CsState
-    if (-not (Build-CsExe $CsAgentExe @('Agent.cs') 'winexe' @('System.Web.Extensions.dll', 'System.ServiceProcess.dll', 'System.Management.dll', 'System.Core.dll', 'Microsoft.CSharp.dll'))) {
+    if (-not (Build-CsExe $CsAgentExe $CsAgentSources 'winexe' $CsAgentRefs)) {
         Write-Log 'Агент на C# не собрался — работает агент на PowerShell (до обновления Agent.cs)' 'ERROR'
         $st.fallbackSig = $sig; Save-CsState $st
         return $false
@@ -2145,7 +2152,6 @@ function Test-HandToCs {
 function Write-PsStatus {
     $o = [ordered]@{
         updated  = (Get-Date).ToString('o'); pid = $PID; activity = "$($State.activity)"
-        zapret   = $(try { Get-ZapretSnapshot } catch { [ordered]@{ level = 2; state = 'Ошибка модуля'; details = @("$($_.Exception.Message)"); kv = @(); enabled = $false } })
         software = $(try { @(Get-SoftwareSnapshot) } catch { @() })
         remote   = $(try { Get-RemoteSnapshot } catch { $null })
         app      = $(try { Get-AppSnapshot } catch { $null })
@@ -2171,7 +2177,8 @@ function Invoke-PsPart {
     if (-not (Test-Path $CmdDir)) { New-Item -ItemType Directory $CmdDir -Force | Out-Null }
     function Write-StatusSnapshot { Write-PsStatus }  # вместо общего состояния (его пишет агент C#)
     try {
-        foreach ($step in 'Invoke-Commands', 'Invoke-MeduzaUpdate', 'Invoke-ZapretWatch', 'Invoke-SoftwareCheck', 'Invoke-RemoteWatch', 'Invoke-AppUpdateWatch', 'Invoke-TrayWatch') {
+        # zapret ведёт сам агент на C# (Zapret.cs)
+        foreach ($step in 'Invoke-Commands', 'Invoke-MeduzaUpdate', 'Invoke-SoftwareCheck', 'Invoke-RemoteWatch', 'Invoke-AppUpdateWatch', 'Invoke-TrayWatch') {
             try { & $step } catch { Write-Log "$step : $($_.Exception.Message)" 'ERROR' }
             if (((Get-Date) - $State.lastSnapshot).TotalSeconds -ge 10) { try { Write-PsStatus } catch { } }
         }

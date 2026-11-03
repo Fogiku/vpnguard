@@ -232,15 +232,15 @@ else {
     Start-Sleep -Seconds 4; $tp.Refresh()
     if ($tp.HasExited) { Fail "значок завершился сразу (код $($tp.ExitCode))" } else { Ok "собран ($([int]((Get-Item $tray).Length / 1KB)) КБ), запускается и читает состояние"; Stop-Process -Id $tp.Id -Force }
 }
-Write-Host '5в. Агент на C# (сборка и снимок состояния в режимах meduza, amnezia, zapret)'
+Write-Host '5в. Агент на C# с zapret (сборка и снимок состояния в режимах meduza, amnezia, zapret)'
 $agx = Join-Path $tmp 'VpnGuardAgent.exe'
-$co = & $csc /nologo /target:winexe /optimize+ "/out:$agx" /r:System.Web.Extensions.dll /r:System.ServiceProcess.dll /r:System.Management.dll /r:System.Core.dll /r:Microsoft.CSharp.dll (Join-Path $Root 'Agent.cs') 2>&1
-if ($LASTEXITCODE -ne 0 -or -not (Test-Path $agx)) { foreach ($l in @($co) | Where-Object { "$_" -match 'error' } | Select-Object -First 5) { Fail "сборка Agent.cs: $l" } }
+$co = & $csc /nologo /target:winexe /optimize+ "/out:$agx" /r:System.Web.Extensions.dll /r:System.ServiceProcess.dll /r:System.Management.dll /r:System.Core.dll /r:Microsoft.CSharp.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll (Join-Path $Root 'Agent.cs') (Join-Path $Root 'Zapret.cs') 2>&1
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $agx)) { foreach ($l in @($co) | Where-Object { "$_" -match 'error' } | Select-Object -First 5) { Fail "сборка Agent.cs + Zapret.cs: $l" } }
 else {
     $ar = Join-Path $tmp 'agentroot'; New-Item -ItemType Directory (Join-Path $ar 'data\amnezia') -Force | Out-Null
     "`$AgentVersion = '9.9'" | Set-Content (Join-Path $ar 'VpnGuard.ps1') -Encoding UTF8
     "[Interface]`r`n# Name = Тест`r`nAddress = 10.8.0.2/32`r`n[Peer]`r`nEndpoint = 1.2.3.4:51820" | Set-Content (Join-Path $ar 'data\amnezia\test1.conf') -Encoding UTF8
-    @{ updated = (Get-Date).ToString('o'); activity = ''; zapret = @{ level = 0; state = 'Работает'; details = @('x'); kv = @(, @('Ключ', 'Значение')); enabled = $true; conns = 3 }; software = @(); meduzaRemoteVersion = '1.2.3' } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $ar 'data\status-ps.json') -Encoding UTF8
+    @{ updated = (Get-Date).ToString('o'); activity = ''; zapret = @{ level = 0; state = 'Работает'; details = @('x'); kv = @(, @('Ключ', 'Значение')); enabled = $true; conns = 3 }; software = @(@{ id = 'x'; installed = '1' }); meduzaRemoteVersion = '1.2.3' } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $ar 'data\status-ps.json') -Encoding UTF8
     $bad = @()
     foreach ($mode in 'meduza', 'amnezia', 'zapret') {
         $acfg = Join-Path $ar 'config.json'
@@ -255,7 +255,10 @@ else {
             if ($null -eq $o.level -or -not "$($o.state)") { $bad += "$mode/${k}: нет level/state" }
             foreach ($row in @($o.kv)) { if (@($row).Count -ne 2) { $bad += "$mode/${k}: строка kv из $(@($row).Count) элементов" } }
         }
-        if ($j.zapret.state -ne 'Работает') { $bad += "${mode}: zapret не взят из status-ps.json" }
+        # zapret в пустой папке: выключен, а в режиме «без VPN» (включён всегда) — не установлен
+        $zw = $(if ($mode -eq 'zapret') { 'Не установлен' } else { 'Выключен' })
+        if ($j.zapret.state -ne $zw -or $null -eq $j.zapret.strategies -or $j.zapret.enabled -ne ($mode -eq 'zapret')) { $bad += "${mode}: zapret — '$($j.zapret.state)', ждали '$zw'" }
+        if (@($j.software).Count -ne 1) { $bad += "${mode}: компоненты не взяты из status-ps.json" }
         if ($mode -eq 'amnezia' -and (@($j.amnezia.configs).Count -ne 1 -or $j.amnezia.configs[0].title -ne 'Тест')) { $bad += 'amnezia: конфиг не прочитан' }
         if (@($j.history).Count -lt 1) { $bad += "${mode}: нет истории" }
     }

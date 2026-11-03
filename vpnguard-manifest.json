@@ -1,13 +1,13 @@
 {
-    "version":  "3.2.1",
-    "build":  "20261103-1920",
+    "version":  "3.3",
+    "build":  "20261103-1939",
     "notes":  "",
-    "date":  "2026-11-03T19:20:31.6107083+03:00",
+    "date":  "2026-11-03T19:39:05.9296619+03:00",
     "files":  [
                   {
                       "path":  "Agent.cs",
-                      "sha256":  "7ba019f0dfc60d09c60c236eb5273a6265a3666c8b98d1d75cbe19d7a8894338",
-                      "size":  94048
+                      "sha256":  "42f67bfbb9078999dd973ac40b71e1358364aa4a17ce25bc5b24d6a053092c75",
+                      "size":  94553
                   },
                   {
                       "path":  "Amnezia.ps1",
@@ -56,8 +56,8 @@
                   },
                   {
                       "path":  "Test.ps1",
-                      "sha256":  "0eb0d459ac2ae8e18ff7e2cf0b1b4d25cf77d7e83a898ec707619244bf679bdb",
-                      "size":  26434
+                      "sha256":  "0790599c6908c6c377caea92464d2d137b6c161843edd78b48448e74ec5b059d",
+                      "size":  27039
                   },
                   {
                       "path":  "Tray.cs",
@@ -81,8 +81,8 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "2ec276f6a306937d720e6e72a8cd3ae2c90ac2b8f816eafe62c14880ac04abaf",
-                      "size":  141942
+                      "sha256":  "34b4ad76b9caaaa6782e302f6eef371c2b7cfa31a0c6a4db413f6ad751019b94",
+                      "size":  142211
                   },
                   {
                       "path":  "VpnGuardMonitor.cmd",
@@ -108,6 +108,11 @@
                       "path":  "Wg.ps1",
                       "sha256":  "bf3e1e42e5819b641b49270a8197aec07a64e117a1f3212ead2813eb893b5ee0",
                       "size":  18958
+                  },
+                  {
+                      "path":  "Zapret.cs",
+                      "sha256":  "fa0b14ba3ed1de05fee4a89b66f5c67d4061d9c6616b1132502352ae99d750d0",
+                      "size":  69033
                   },
                   {
                       "path":  "Zapret.ps1",
