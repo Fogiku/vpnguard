@@ -45,7 +45,7 @@ namespace VpnGuard
         static TcpListener CzRelay;
         const int CzRelayPort = 34010;
         static uint CzWgIp, CzEthIp; static int CzWgIdx, CzEthIdx; static string CzSig = "", CzError = "";
-        static long CzPkts, CzPass, CzTcpConns, CzUdpPkts, CzBytes, CzErrors, CzTcpUp, CzTcpDown, CzUdpDown, CzUdpSendFail, CzQuicDrop, CzNetRw, CzNetMiss, CzNetBig, CzNetSendFail, CzRelayNoFlow, CzConnFail, CzFwdBig, CzFwdMax, CzNetMax, CzMssClamped; static int CzActive, CzConnLogged, CzSynLogged, CzTraceLeft = 400; static readonly HashSet<ulong> CzTraced = new HashSet<ulong>();
+        static long CzPkts, CzPass, CzTcpConns, CzUdpPkts, CzBytes, CzErrors, CzTcpUp, CzTcpDown, CzUdpDown, CzUdpSendFail, CzQuicDrop, CzNetRw, CzNetMiss, CzNetBig, CzNetSendFail, CzRelayNoFlow, CzConnFail, CzFwdBig, CzFwdMax, CzNetMax, CzMssClamped; static readonly System.Diagnostics.Stopwatch CzSw = System.Diagnostics.Stopwatch.StartNew(); static int CzActive, CzConnLogged, CzSynLogged, CzTraceLeft = 400; static readonly HashSet<ulong> CzTraced = new HashSet<ulong>();
         static HashSet<uint> CzHosts = new HashSet<uint>(); static List<uint[]> CzNets = new List<uint[]>(); static string CzSetKey = "";
         static DateTime CzFwAt = DateTime.MinValue, CzCleanAt = DateTime.MinValue; static string CzFwSig = "";
 
@@ -236,7 +236,7 @@ namespace VpnGuard
             int f = p[ihl + 13], doff = (p[ihl + 12] >> 4) * 4, dl = n - ihl - doff;
             string fl = ((f & 2) != 0 ? "S" : "") + ((f & 16) != 0 ? "A" : "") + ((f & 8) != 0 ? "P" : "") + ((f & 1) != 0 ? "F" : "") + ((f & 4) != 0 ? "R" : "");
             uint seq = IpH(p, ihl + 4), ack = IpH(p, ihl + 8); int win = (p[ihl + 14] << 8) | p[ihl + 15];
-            Log("трасса " + IpS((uint)(key >> 16)) + ":" + (key & 0xFFFF) + " " + dir + " " + fl + " seq=" + seq + " ack=" + ack + " len=" + dl + " win=" + win + " ip=" + n + " id=" + ((p[4] << 8) | p[5]) + " ttl=" + p[8], "INFO");
+            Log("трасса " + (CzSw.ElapsedMilliseconds % 100000).ToString("00000") + "мс " + IpS((uint)(key >> 16)) + ":" + (key & 0xFFFF) + " " + dir + " " + fl + " seq=" + seq + " ack=" + ack + " len=" + dl + " win=" + win + " ip=" + n + " id=" + ((p[4] << 8) | p[5]) + " ttl=" + p[8], "INFO");
         }
         static void CzClampMss(byte[] p, int ihl, int n, uint src, int sport)
         {
@@ -314,12 +314,12 @@ namespace VpnGuard
                 try { srv.EndConnect(ar); } catch { Interlocked.Increment(ref CzConnFail); return; }
                 Interlocked.Increment(ref CzTcpConns); Interlocked.Increment(ref CzActive);
                 var cs = c.GetStream(); var ss = srv.GetStream();
-                long[] cnt = new long[2]; var t0 = DateTime.Now; string first = null;
+                long[] cnt = new long[2]; var t0 = DateTime.Now; string first = null; long connMs = CzSw.ElapsedMilliseconds;
                 var up = new Thread(() => { cnt[0] = CzPump(cs, ss, f, true); lock (cnt) if (first == null) first = "клиент"; try { srv.Client.Shutdown(SocketShutdown.Send); } catch { } }) { IsBackground = true }; up.Start();
                 cnt[1] = CzPump(ss, cs, f, false); lock (cnt) if (first == null) first = "сайт"; try { c.Client.Shutdown(SocketShutdown.Send); } catch { }
                 up.Join(60000);
                 if (Interlocked.Increment(ref CzConnLogged) <= 40)
-                    Log("zapret для клиентов: " + ep.Address + ":" + ep.Port + " → " + IpS(f.Dst) + ":" + f.DPort + " · к сайту " + cnt[0] + " Б, к клиенту " + cnt[1] + " Б, " + Math.Round((DateTime.Now - t0).TotalSeconds, 1) + " с, первым закрыл " + first, "INFO");
+                    Log("zapret для клиентов: " + ep.Address + ":" + ep.Port + " → " + IpS(f.Dst) + ":" + f.DPort + " · к сайту " + cnt[0] + " Б, к клиенту " + cnt[1] + " Б, " + Math.Round((DateTime.Now - t0).TotalSeconds, 1) + " с, первым закрыл " + first + ", сайт подключён в " + (connMs % 100000).ToString("00000") + "мс", "INFO");
             } catch { }
             finally { if (Interlocked.Decrement(ref CzActive) < 0) Interlocked.Exchange(ref CzActive, 0); try { srv.Close(); } catch { } }
         }
