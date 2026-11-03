@@ -45,7 +45,7 @@ namespace VpnGuard
         static TcpListener CzRelay;
         const int CzRelayPort = 34010;
         static uint CzWgIp, CzEthIp; static int CzWgIdx, CzEthIdx; static string CzSig = "", CzError = "";
-        static long CzPkts, CzPass, CzTcpConns, CzUdpPkts, CzBytes, CzErrors, CzTcpUp, CzTcpDown, CzUdpDown, CzUdpSendFail, CzQuicDrop, CzNetRw, CzNetMiss, CzNetBig, CzNetSendFail, CzRelayNoFlow, CzConnFail; static int CzActive;
+        static long CzPkts, CzPass, CzTcpConns, CzUdpPkts, CzBytes, CzErrors, CzTcpUp, CzTcpDown, CzUdpDown, CzUdpSendFail, CzQuicDrop, CzNetRw, CzNetMiss, CzNetBig, CzNetSendFail, CzRelayNoFlow, CzConnFail, CzFwdBig, CzFwdMax, CzNetMax; static int CzActive, CzConnLogged;
         static HashSet<uint> CzHosts = new HashSet<uint>(); static List<uint[]> CzNets = new List<uint[]>(); static string CzSetKey = "";
         static DateTime CzFwAt = DateTime.MinValue, CzCleanAt = DateTime.MinValue; static string CzFwSig = "";
 
@@ -194,6 +194,8 @@ namespace VpnGuard
             if (!CzInSet(dst)) return false;
             int sport = (p[ihl] << 8) | p[ihl + 1], dport = (p[ihl + 2] << 8) | p[ihl + 3];
             if (proto == 6) {
+                if (n > 1300) Interlocked.Increment(ref CzFwdBig);
+                if (n > Interlocked.Read(ref CzFwdMax)) Interlocked.Exchange(ref CzFwdMax, n);
                 ulong key = ((ulong)src << 16) | (uint)sport;
                 lock (CzLock) { CzTcpFlow f; if (!CzTcp.TryGetValue(key, out f) || f.Dst != dst || f.DPort != dport) { f = new CzTcpFlow { Dst = dst, DPort = dport }; CzTcp[key] = f; } f.Last = DateTime.Now; }
                 // к ретранслятору на ПК: как будто клиент подключился к адресу ПК в сети wg_server
@@ -255,6 +257,7 @@ namespace VpnGuard
                         PutIp(pkt, 12, f.Dst); pkt[ihl] = (byte)(f.DPort >> 8); pkt[ihl + 1] = (byte)f.DPort;
                         WinDivertHelperCalcChecksums(pkt, len, ref addr, 0);
                         Interlocked.Increment(ref CzNetRw); if (len > 1500) Interlocked.Increment(ref CzNetBig);
+                        if (len > Interlocked.Read(ref CzNetMax)) Interlocked.Exchange(ref CzNetMax, len);
                     } else Interlocked.Increment(ref CzNetMiss);
                 } catch { Interlocked.Increment(ref CzErrors); }
                 uint sl; if (!WinDivertSend(h, pkt, len, out sl, ref addr)) Interlocked.Increment(ref CzNetSendFail);
@@ -282,16 +285,20 @@ namespace VpnGuard
                 try { srv.EndConnect(ar); } catch { Interlocked.Increment(ref CzConnFail); return; }
                 Interlocked.Increment(ref CzTcpConns); Interlocked.Increment(ref CzActive);
                 var cs = c.GetStream(); var ss = srv.GetStream();
-                var up = new Thread(() => { CzPump(cs, ss, f, true); try { srv.Client.Shutdown(SocketShutdown.Send); } catch { } }) { IsBackground = true }; up.Start();
-                CzPump(ss, cs, f, false); try { c.Client.Shutdown(SocketShutdown.Send); } catch { }
+                long[] cnt = new long[2]; var t0 = DateTime.Now;
+                var up = new Thread(() => { cnt[0] = CzPump(cs, ss, f, true); try { srv.Client.Shutdown(SocketShutdown.Send); } catch { } }) { IsBackground = true }; up.Start();
+                cnt[1] = CzPump(ss, cs, f, false); try { c.Client.Shutdown(SocketShutdown.Send); } catch { }
                 up.Join(60000);
+                if (Interlocked.Increment(ref CzConnLogged) <= 40)
+                    Log("zapret для клиентов: " + ep.Address + ":" + ep.Port + " → " + IpS(f.Dst) + ":" + f.DPort + " · к сайту " + cnt[0] + " Б, к клиенту " + cnt[1] + " Б, " + Math.Round((DateTime.Now - t0).TotalSeconds, 1) + " с", "INFO");
             } catch { }
             finally { if (Interlocked.Decrement(ref CzActive) < 0) Interlocked.Exchange(ref CzActive, 0); try { srv.Close(); } catch { } }
         }
-        static void CzPump(Stream a, Stream b, CzTcpFlow f, bool up)
+        static long CzPump(Stream a, Stream b, CzTcpFlow f, bool up)
         {
-            var bb = new byte[65536];
-            try { int n; while ((n = a.Read(bb, 0, bb.Length)) > 0) { b.Write(bb, 0, n); Interlocked.Add(ref CzBytes, n); if (up) Interlocked.Add(ref CzTcpUp, n); else Interlocked.Add(ref CzTcpDown, n); f.Last = DateTime.Now; } } catch { }
+            var bb = new byte[65536]; long total = 0;
+            try { int n; while ((n = a.Read(bb, 0, bb.Length)) > 0) { b.Write(bb, 0, n); total += n; Interlocked.Add(ref CzBytes, n); if (up) Interlocked.Add(ref CzTcpUp, n); else Interlocked.Add(ref CzTcpDown, n); f.Last = DateTime.Now; } } catch { }
+            return total;
         }
 
         // ---------------------------------------------------------------- состояние
@@ -306,7 +313,8 @@ namespace VpnGuard
                 { "tcpUpKb", Interlocked.Read(ref CzTcpUp) / 1024 }, { "tcpDownKb", Interlocked.Read(ref CzTcpDown) / 1024 }, { "udpDownKb", Interlocked.Read(ref CzUdpDown) / 1024 },
                 { "udpSendFail", Interlocked.Read(ref CzUdpSendFail) }, { "quicDropped", Interlocked.Read(ref CzQuicDrop) }, { "netRewritten", Interlocked.Read(ref CzNetRw) },
                 { "netNoFlow", Interlocked.Read(ref CzNetMiss) }, { "netBig", Interlocked.Read(ref CzNetBig) }, { "netSendFail", Interlocked.Read(ref CzNetSendFail) },
-                { "relayNoFlow", Interlocked.Read(ref CzRelayNoFlow) }, { "connFail", Interlocked.Read(ref CzConnFail) } };
+                { "relayNoFlow", Interlocked.Read(ref CzRelayNoFlow) }, { "connFail", Interlocked.Read(ref CzConnFail) },
+                { "fwdBig", Interlocked.Read(ref CzFwdBig) }, { "fwdMax", Interlocked.Read(ref CzFwdMax) }, { "netMax", Interlocked.Read(ref CzNetMax) } };
         }
         static Dictionary<string, object> CzProbeCopy() { lock (CzProbeStat) return CzProbeStat.ToDictionary(x => x.Key, x => (object)x.Value); }
         static string CzSummary()
