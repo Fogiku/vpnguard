@@ -1,8 +1,8 @@
 {
-    "version":  "2.4",
-    "build":  "20261103-1425",
-    "notes":  "веб-интерфейс, проверка кода перед выпуском, исправлены переменные, подменявшие глобальные (режим двух туннелей, AmneziaWG, WireGuard)",
-    "date":  "2026-11-03T14:25:51.0682500+03:00",
+    "version":  "2.5",
+    "build":  "20261103-1449",
+    "notes":  "пароль веб-интерфейса по желанию и свой; вкладка «Диагностика» в веб-интерфейсе; выбор версии zapret; WS4W → WireGuard",
+    "date":  "2026-11-03T14:49:35.7511356+03:00",
     "files":  [
                   {
                       "path":  "Amnezia.ps1",
@@ -36,8 +36,8 @@
                   },
                   {
                       "path":  "Remote.ps1",
-                      "sha256":  "20472b6f2379135cab1cb1ecb57be35c86404a775b3fa82f91ab935335e85bb0",
-                      "size":  39489
+                      "sha256":  "f9f40dbfc4da50e966d9d17cb425385478606377481e44b34f7037cd4610f2fe",
+                      "size":  45579
                   },
                   {
                       "path":  "RemoteDiag.ps1",
@@ -71,8 +71,8 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "1c91062c4b32bbf6d898665253ef1af31169cdf05b4b9c26983ed77be5c9b0c5",
-                      "size":  131729
+                      "sha256":  "d591a94f2a43ab8f276ac9e5181f3f1c5954c75ef8170a598bf2d9416747cc04",
+                      "size":  131997
                   },
                   {
                       "path":  "VpnGuardMonitor.cmd",
@@ -81,13 +81,13 @@
                   },
                   {
                       "path":  "VpnGuardMonitor.ps1",
-                      "sha256":  "23695eaaaf53f186be2c43c028ea56cb789f2d2d303b796c45b3549e5a92616d",
-                      "size":  186819
+                      "sha256":  "f622e9228802193d56ad0eb7651d2cad7675fa0ebf516efc6daa6d7e56f5e063",
+                      "size":  187647
                   },
                   {
                       "path":  "web/index.html",
-                      "sha256":  "0bc59238e6c1d2f01429a16ce2f71b2a59ef9736f2f6a0e78c33678cefcec0f4",
-                      "size":  43269
+                      "sha256":  "7498e6672c073953cc2bf7bd97a4142ba03872006b524d6e8d03aa4f2fc86a6f",
+                      "size":  51845
                   },
                   {
                       "path":  "Wg.ps1",
@@ -96,8 +96,8 @@
                   },
                   {
                       "path":  "Zapret.ps1",
-                      "sha256":  "55e9ab1e357ec61a0c351bf5bdb1e46dcfe8018cae8570aa71d96156705c0e87",
-                      "size":  54311
+                      "sha256":  "87c33d3439d4e53ad63ce77c98630cb01cdffb00b9c0643a9adfe8674220e419",
+                      "size":  57519
                   }
               ]
 }

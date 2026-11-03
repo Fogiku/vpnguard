@@ -20,7 +20,7 @@ function Get-RCfg {
     return $d
 }
 function Get-WCfg {
-    $d = @{ enabled = $true; port = 8765; token = '' }
+    $d = @{ enabled = $true; port = 8765; token = ''; requirePassword = $true }
     if ($Cfg.web) { foreach ($k in @($Cfg.web.Keys)) { $d[$k] = $Cfg.web[$k] } }
     return $d
 }
@@ -85,7 +85,7 @@ function Invoke-RemoteWatch {
         if ((Get-RemoteProc) -or (Get-NetFirewallRule -DisplayName $RemoteRule -ErrorAction SilentlyContinue)) { Stop-RemoteServer 'веб-интерфейс выключен, диагностика выключена' }
         return
     }
-    if ($wc.enabled -and "$($wc.token)".Length -lt 12) { Set-ConfigValue 'web.token' (New-WebToken); Write-Log 'Веб-интерфейс: создан пароль для входа с других устройств (виден в окне и в config.json, web.token)' }
+    if ($wc.enabled -and $wc.requirePassword -ne $false -and "$($wc.token)".Length -lt 6) { Set-ConfigValue 'web.token' (New-WebToken); Write-Log 'Веб-интерфейс: создан пароль для входа с других устройств (виден в окне и в config.json, web.token)' }
     $r.port = [int](Get-WCfg).port
     Sync-RemoteFirewall $r
     if (-not (Get-RemoteProc)) {
@@ -270,7 +270,7 @@ function Send-RJson($Ctx, $Obj, [int]$Code = 200) { Send-RResponse $Ctx $Code ($
 # команды веб-интерфейса — то же, что кнопки окна
 $WebCmds = @('check-now', 'reconnect', 'reconnect-meduza', 'reconnect-awg', 'restart-meduza', 'restart-wg', 'reapply-ics', 'check-update',
     'zapret-on', 'zapret-off', 'zapret-test', 'zapret-update', 'zapret-reload', 'zapret-check', 'meduza-test', 'meduza-catalog', 'meduza-proto-reset',
-    'awg-test', 'software-check', 'install-missing', 'app-check', 'app-update', 'dual-switch')
+    'awg-test', 'software-check', 'install-missing', 'app-check', 'app-update', 'dual-switch', 'zapret-releases')
 # настройки, которые можно менять из веб-интерфейса, с проверкой значения
 $WebCfgKeys = [ordered]@{
     'vpn.mode'         = '^(meduza|amnezia|dual|zapret)$'
@@ -281,6 +281,28 @@ $WebCfgKeys = [ordered]@{
     'amnezia.active'   = '^[a-z0-9_=+.\-]{1,32}$'
     'update.auto'      = 'bool'
     'zapret.videoCheck' = 'bool'
+    'zapret.version'   = '^[\w\.\-]{0,30}$'
+}
+
+# вход: пароль в заголовке/параметре — как есть, в cookie — хэш пароля (смена пароля сбрасывает все входы)
+function Get-WebCookie([string]$Pass) { $h = [Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes("vpnguard|$Pass")); -join ($h | ForEach-Object { $_.ToString('x2') }) }
+function Test-WebPass($Wc, [string]$Tok) {
+    $pw = "$($Wc.token)"; if ($pw.Length -lt 6 -or -not $Tok) { return $false }
+    return ($Tok -ceq $pw -or $Tok -ceq (Get-WebCookie $pw))
+}
+# частные сети: 10/8, 172.16/12, 192.168/16, 100.64/10 (CGNAT), link-local, localhost — вход без пароля разрешён только отсюда
+function Test-PrivateIp($Addr) {
+    if ($Addr.IsIPv4MappedToIPv6) { $Addr = $Addr.MapToIPv4() }
+    if ([Net.IPAddress]::IsLoopback($Addr)) { return $true }
+    if ($Addr.AddressFamily -ne 'InterNetwork') { return ($Addr.IsIPv6LinkLocal -or $Addr.IsIPv6SiteLocal) }
+    $b = $Addr.GetAddressBytes()
+    return (($b[0] -eq 10) -or ($b[0] -eq 172 -and $b[1] -ge 16 -and $b[1] -le 31) -or ($b[0] -eq 192 -and $b[1] -eq 168) -or ($b[0] -eq 100 -and $b[1] -ge 64 -and $b[1] -le 127) -or ($b[0] -eq 169 -and $b[1] -eq 254))
+}
+$script:PubIpCache = @{ At = [datetime]::MinValue; Ip = '' }
+function Get-PubIpCached {
+    if (((Get-Date) - $script:PubIpCache.At).TotalMinutes -lt 30) { return $script:PubIpCache.Ip }
+    $pub = ''; try { $pub = "$(Invoke-RestMethod 'https://api.ipify.org' -TimeoutSec 6 -UseBasicParsing)".Trim() } catch { }
+    $script:PubIpCache = @{ At = Get-Date; Ip = $pub }; return $pub
 }
 
 # адрес в запросе должен быть IP или именем этого ПК — защита от DNS rebinding
@@ -332,7 +354,8 @@ function Invoke-RemoteRequest($Ctx, $r) {
     $tok = "$($req.Headers['X-Token'])"; if (-not $tok) { $tok = "$($q['t'])" }
     if (-not $tok -and $req.Cookies['vg']) { $tok = "$($req.Cookies['vg'].Value)" }
     $role = ''
-    if ($wc.enabled -and ($req.IsLocal -or ("$($wc.token)".Length -ge 12 -and $tok -ceq "$($wc.token)"))) { $role = 'web' }
+    $noPass = ($wc.requirePassword -eq $false -and (Test-PrivateIp $req.RemoteEndPoint.Address))
+    if ($wc.enabled -and ($req.IsLocal -or $noPass -or (Test-WebPass $wc $tok))) { $role = 'web' }
     elseif ((Test-RemoteOn $r) -and $tok -and $tok -ceq "$($r.token)") { $role = 'diag' }
 
     # страница веб-интерфейса доступна всем (в ней нет данных — их отдаёт /api после входа)
@@ -345,9 +368,9 @@ function Invoke-RemoteRequest($Ctx, $r) {
         $b = Read-RBody $req
         $ban = $script:RBad[$ip]
         if ($ban -and $ban.Until -gt (Get-Date)) { Send-RJson $Ctx @{ ok = $false; error = 'слишком много попыток, подождите 15 минут' } 403; return }
-        if ($wc.enabled -and $b -and "$($wc.token)".Length -ge 12 -and "$($b.password)" -ceq "$($wc.token)") {
+        if ($wc.enabled -and $b -and "$($wc.token)".Length -ge 6 -and "$($b.password)" -ceq "$($wc.token)") {
             $script:RBad.Remove($ip)
-            $Ctx.Response.Headers.Add('Set-Cookie', "vg=$($wc.token); Path=/; Max-Age=2592000; HttpOnly; SameSite=Strict")
+            $Ctx.Response.Headers.Add('Set-Cookie', "vg=$(Get-WebCookie $wc.token); Path=/; Max-Age=2592000; HttpOnly; SameSite=Strict")
             Write-Log "Веб-интерфейс: вход с $ip"
             Send-RJson $Ctx @{ ok = $true }; return
         }
@@ -356,7 +379,7 @@ function Invoke-RemoteRequest($Ctx, $r) {
         $script:RBad[$ip] = $ban
         Send-RJson $Ctx @{ ok = $false; error = 'неверный пароль' } 401; return
     }
-    if ($path -eq '/api/whoami') { Send-RJson $Ctx @{ role = $role; local = [bool]$req.IsLocal; version = $AgentVersion }; return }
+    if ($path -eq '/api/whoami') { Send-RJson $Ctx @{ role = $role; local = [bool]$req.IsLocal; version = $AgentVersion; password = ($wc.requirePassword -ne $false) }; return }
 
     if (-not $role) {
         $ban = $script:RBad[$ip]
@@ -369,7 +392,7 @@ function Invoke-RemoteRequest($Ctx, $r) {
         Send-RResponse $Ctx 401 'нужен вход: пароль веб-интерфейса или токен диагностики (X-Token или ?t=)'; return
     }
     # изменения — только POST с заголовком X-VG (чужая страница в браузере так отправить не сможет)
-    $isApiWrite = $path -like '/api/*' -and $path -notin '/api/status', '/api/logs', '/api/wg/clients', '/api/wg/conf', '/api/wg/qr', '/api/whoami'
+    $isApiWrite = $path -like '/api/*' -and $path -notin '/api/status', '/api/logs', '/api/wg/clients', '/api/wg/conf', '/api/wg/qr', '/api/whoami', '/api/remote', '/api/websettings'
     if ($isApiWrite -and ($req.HttpMethod -ne 'POST' -or -not $req.Headers['X-VG'])) { Send-RResponse $Ctx 405 'нужен POST с заголовком X-VG'; return }
 
     $script:RState.requests++; $script:RState.last = "$(Get-Date -Format 'dd.MM HH:mm:ss') $ip $path"
@@ -433,6 +456,54 @@ function Invoke-RemoteRequest($Ctx, $r) {
             if (-not $c) { Send-RJson $Ctx @{ ok = $false; error = 'клиент не найден' } 404; return }
             try { $n = Remove-WgClient $c.PublicKey; Write-Log "Веб-интерфейс: удалён клиент WireGuard «$n» ($ip)"; Send-RJson $Ctx @{ ok = $true; name = "$n" } }
             catch { Send-RJson $Ctx @{ ok = $false; error = $_.Exception.Message } 500 }
+        }
+        '/api/remote' {
+            if (-not (& $webOnly)) { return }
+            if ($req.HttpMethod -eq 'POST') {
+                if (-not $req.Headers['X-VG']) { Send-RResponse $Ctx 405 'нужен заголовок X-VG'; return }
+                $b = Read-RBody $req
+                if ($b.enable) {
+                    $hours = [Math]::Min(168, [Math]::Max(1, [int]$b.hours))
+                    $tk = New-Object byte[] 20; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($tk)
+                    Set-ConfigValue 'remote.token' (-join ($tk | ForEach-Object { $_.ToString('x2') }))
+                    Set-ConfigValue 'remote.until' ((Get-Date).AddHours($hours).ToString('o'))
+                    Set-ConfigValue 'remote.allowFrom' $(if ("$($b.allowFrom)" -eq 'local') { 'local' } else { 'any' })
+                    Set-ConfigValue 'remote.allowActions' ([bool]$b.allowActions)
+                    Set-ConfigValue 'remote.enabled' $true
+                    Write-Log "Веб-интерфейс: удалённая диагностика включена на $hours ч ($ip)" 'WARN'
+                } else { Set-ConfigValue 'remote.enabled' $false; Write-Log "Веб-интерфейс: удалённая диагностика выключена ($ip)" }
+                $r = Get-RCfg
+                Send-RCmd 'check-now' 'изменение удалённой диагностики'
+            }
+            $rr = Get-RCfg; $on = Test-RemoteOn $rr
+            $ips = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' -and $_.InterfaceAlias -notlike 'MeduzaVPN*' -and $_.InterfaceAlias -notlike 'awg*' } | ForEach-Object { [ordered]@{ ip = $_.IPAddress; alias = $_.InterfaceAlias } })
+            Send-RJson $Ctx ([ordered]@{ enabled = $on; until = $(if ($on) { (Get-RemoteUntil $rr).ToString('o') } else { '' }); token = $(if ($on) { "$($rr.token)" } else { '' })
+                allowFrom = "$($rr.allowFrom)"; allowActions = [bool]$rr.allowActions; port = [int](Get-WCfg).port; ips = $ips
+                publicIp = $(if ($on -and "$($rr.allowFrom)" -ne 'local') { Get-PubIpCached } else { '' }); requests = [int]$script:RState.requests })
+        }
+        '/api/websettings' {
+            if (-not (& $webOnly)) { return }
+            if ($req.HttpMethod -eq 'POST') {
+                if (-not $req.Headers['X-VG']) { Send-RResponse $Ctx 405 'нужен заголовок X-VG'; return }
+                $b = Read-RBody $req
+                if ($b.password) {
+                    $np = "$($b.password)"
+                    if ($np.Length -lt 6 -or $np.Length -gt 64 -or $np -match '\s') { Send-RJson $Ctx @{ ok = $false; error = 'пароль: от 6 до 64 символов, без пробелов' } 400; return }
+                    Set-ConfigValue 'web.token' $np
+                    $Ctx.Response.Headers.Add('Set-Cookie', "vg=$(Get-WebCookie $np); Path=/; Max-Age=2592000; HttpOnly; SameSite=Strict")
+                }
+                if ($null -ne $b.requirePassword) {
+                    if ($b.requirePassword -and "$((Get-WCfg).token)".Length -lt 6) { Send-RJson $Ctx @{ ok = $false; error = 'сначала задайте пароль' } 400; return }
+                    Set-ConfigValue 'web.requirePassword' ([bool]$b.requirePassword)
+                }
+                Write-Log "Веб-интерфейс: изменены настройки входа ($ip): пароль $(if ((Get-WCfg).requirePassword -ne $false) { 'нужен' } else { 'в домашней сети не нужен' })$(if ($b.password) { ', задан новый пароль' })" 'WARN'
+            }
+            $wn = Get-WCfg
+            Send-RJson $Ctx ([ordered]@{ ok = $true; requirePassword = ($wn.requirePassword -ne $false); password = $(if ($req.IsLocal) { "$($wn.token)" } else { '' }); local = [bool]$req.IsLocal; port = [int]$wn.port })
+        }
+        '/api/diag-run' {
+            if (-not (& $webOnly)) { return }
+            Send-RResponse $Ctx 200 (Hide-Secrets (Invoke-PsFile '-Diag' 240))
         }
         # ---------------- удалённая диагностика (и веб)
         '/'        { Send-RResponse $Ctx 200 (Get-RIndex $r) }

@@ -29,6 +29,7 @@ $ZState = @{
     healthAt = [datetime]::MinValue; healthOk = 0; healthTotal = 0; healthFails = 0
     fallbackUntil = [datetime]::MinValue; winwsPid = 0; runningStrategy = ''; lastError = ''
     healthChecks = @(); videoHost = ''; videoHostAt = [datetime]::MinValue
+    releases = @(); releasesAt = ''
 }
 
 # в режиме «без VPN» zapret включён всегда (это и есть способ открыть YouTube/Discord)
@@ -77,8 +78,10 @@ function Get-ZapretLocalVersion {
 
 function Test-ZapretInstalled { Test-Path (Join-Path (Get-ZapretDir) 'bin\winws.exe') }
 
-function Get-ZapretRelease {
-    $r = Invoke-RestMethod "https://api.github.com/repos/$ZapretRepo/releases/latest" -Headers @{ 'User-Agent' = 'VpnGuard' } -TimeoutSec 30 -UseBasicParsing
+# релиз: последний или конкретная версия (тег, например 1.10.2)
+function Get-ZapretRelease([string]$Version = '') {
+    $url = $(if ($Version) { "https://api.github.com/repos/$ZapretRepo/releases/tags/$Version" } else { "https://api.github.com/repos/$ZapretRepo/releases/latest" })
+    $r = Invoke-RestMethod $url -Headers @{ 'User-Agent' = 'VpnGuard' } -TimeoutSec 30 -UseBasicParsing
     $asset = $r.assets | Where-Object { $_.name -like '*.zip' } | Select-Object -First 1
     if (-not $asset) { throw 'в релизе нет .zip' }
     [pscustomobject]@{ Version = "$($r.tag_name)".TrimStart('v'); Url = $asset.browser_download_url; Name = $asset.name; Size = $asset.size }
@@ -143,10 +146,37 @@ function Install-Zapret($Release) {
     return $wasRunning
 }
 
+# список версий для выбора (кэш 12 ч)
+function Get-ZapretReleases([switch]$Force) {
+    $at = [datetime]::MinValue; try { $at = [datetime]$ZState.releasesAt } catch { }
+    if (-not $Force -and @($ZState.releases).Count -and ((Get-Date) - $at).TotalHours -lt 12) { return @($ZState.releases) }
+    try {
+        $list = Invoke-RestMethod "https://api.github.com/repos/$ZapretRepo/releases?per_page=20" -Headers @{ 'User-Agent' = 'VpnGuard' } -TimeoutSec 30 -UseBasicParsing
+        $ZState.releases = @(@($list) | Where-Object { -not $_.draft -and @($_.assets | Where-Object { $_.name -like '*.zip' }).Count } | ForEach-Object { [ordered]@{ v = "$($_.tag_name)".TrimStart('v'); tag = "$($_.tag_name)"; date = ([datetime]$_.published_at).ToString('dd.MM.yyyy'); pre = [bool]$_.prerelease } })
+        $ZState.releasesAt = (Get-Date).ToString('o')
+        Save-ZState
+    } catch { Write-Log "zapret: не удалось получить список версий: $($_.Exception.Message)" 'WARN' }
+    return @($ZState.releases)
+}
+
 function Invoke-ZapretUpdate([switch]$Force) {
     $z = Get-ZCfg
     $installed = Test-ZapretInstalled
     $sinceCheck = ((Get-Date) - $ZState.lastUpdateCheck).TotalMinutes
+    # выбрана конкретная версия — ставим именно её и не обновляем
+    $pin = "$($z.version)".Trim()
+    if ($pin) {
+        $local = Get-ZapretLocalVersion
+        if ($installed -and $local -and "$local".TrimStart('v') -eq $pin.TrimStart('v')) { $ZState.version = $local; return }   # строкой: 1.9.9c и 1.9.9d — разные
+        if (-not $Force -and $sinceCheck -lt 10) { return }
+        $ZState.lastUpdateCheck = Get-Date
+        $tag = $(($ZState.releases | Where-Object { "$($_.v)" -eq $pin.TrimStart('v') } | Select-Object -First 1).tag); if (-not $tag) { $tag = $pin }
+        try { $rel = Get-ZapretRelease $tag } catch { $ZState.lastError = "версия $pin не найдена на GitHub: $($_.Exception.Message)"; Write-Log "zapret: $($ZState.lastError)" 'ERROR'; Save-ZState; return }
+        Write-Log "zapret: ставлю выбранную версию $($rel.Version) (установлена: $(if ($local) { $local } else { 'нет' }))" 'WARN'
+        try { [void](Install-Zapret $rel); $ZState.lastError = '' } catch { $ZState.lastError = "установка: $($_.Exception.Message)"; Write-Log "zapret: ошибка установки: $($_.Exception.Message)" 'ERROR' }
+        Save-ZState
+        return
+    }
     if (-not $Force) {
         if ($installed) {
             if (-not $z.autoUpdate) { return }
@@ -623,6 +653,7 @@ function Invoke-ZapretWatch {
     $z = Get-ZCfg
     if (-not $z) { return }
     $finished = Receive-ZapretTest
+    try { [void](Get-ZapretReleases) } catch { }        # список версий для выбора — раз в 12 ч
     if (Get-ZapretTestRunner) { return }                 # идёт подбор — winws и маршруты не трогаем
 
     # ставим/обновляем, если включён; если выключен, но уже установлен — только обновляем
@@ -794,6 +825,7 @@ function Get-ZapretSnapshot {
         @('Включён', $(if ($z.enabled) { 'да' } else { 'нет' })),
         @('Версия', $(if ($ver) { "$ver" } else { 'не установлен' })),
         @('На GitHub', $(if ($ZState.remoteVersion) { "$($ZState.remoteVersion)" } else { '—' })),
+        @('Выбранная версия', $(if ($z.version) { "$($z.version) — закреплена, не обновляется" } else { 'последняя (обновляется сама)' })),
         @('Проверка обновлений', $(if ($ZState.lastUpdateCheck) { "$($ZState.lastUpdateCheck)" } else { '—' })),
         @('Стратегия', $(if ($strategy) { $strategy + $(if ($z.strategy) { ' (выбрана вручную)' } else { ' (подобрана)' }) } else { '—' })),
         @('Запущена', $(if ($winws) { "$($ZState.runningStrategy) · winws PID $($ZState.winwsPid)" } else { 'winws не запущен' })),
@@ -814,6 +846,8 @@ function Get-ZapretSnapshot {
         checks = @($ZState.healthChecks | Where-Object { $_ })
         checkedAt = $(if ($ZState.healthAt -ne [datetime]::MinValue) { $ZState.healthAt.ToString('HH:mm') } else { '' })
         videoCheck = ($z.videoCheck -ne $false)
+        version = "$ver"; pinned = "$($z.version)"; latest = "$($ZState.remoteVersion)"
+        versions = @(@($ZState.releases) | Where-Object { $_ } | ForEach-Object { [ordered]@{ v = "$($_.v)"; date = "$($_.date)"; pre = [bool]$_.pre } })
         conns = $conns
         dir = "$(Get-ZapretDir)"
         progress =$(if ($t) { [ordered]@{ index = $t.index; total = $t.total; current = "$($t.current)" } } else { $null })

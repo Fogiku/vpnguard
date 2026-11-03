@@ -1082,7 +1082,7 @@ $pages = @{}
 $navButtons = @{}
 $script:CurPage = ''
 $PageTitles = @{
-    home = 'Главная'; meduza = 'MeduzaVPN — приложение'; ultra = 'Туннель'; wg = 'WS4W — WireGuard-сервер wg_server'
+    home = 'Главная'; meduza = 'MeduzaVPN — приложение'; ultra = 'Туннель'; wg = 'WireGuard'
     ics = 'Раздача интернета (ICS): туннель → wg_server'; zapret = 'zapret-discord-youtube'; traffic = 'Трафик'
     log = 'Журнал'; settings = 'Настройки'; diag = 'Диагностика'; amnezia = 'AmneziaWG — альтернатива MeduzaVPN'; software = 'Компоненты — установка и обновление'
 }
@@ -1116,7 +1116,7 @@ function Show-Page([string]$Name) {
 
 $NavItems = @(
     @('home', 'Главная', ''), @('ultra', 'Туннель', 'ultra'), @('meduza', 'MeduzaVPN', 'meduza'), @('amnezia', 'AmneziaWG', 'amnezia'),
-    @('wg', 'WS4W · wg_server', 'wg'), @('ics', 'Раздача ICS', 'ics'), @('zapret', 'zapret', 'zapret'), @('traffic', 'Трафик', ''), @('-'),
+    @('wg', 'WireGuard', 'wg'), @('ics', 'Раздача ICS', 'ics'), @('zapret', 'zapret', 'zapret'), @('traffic', 'Трафик', ''), @('-'),
     @('software', 'Компоненты', ''), @('log', 'Журнал', ''), @('settings', 'Настройки', ''), @('diag', 'Диагностика', '')
 )
 foreach ($it in $NavItems) {
@@ -1266,7 +1266,7 @@ function Update-ModeUi {
 # плитки компонентов (клик — вкладка компонента)
 $Tiles = @{}
 $script:TileTitles = @{}
-$TileDefs = @(@('ultra', 'Туннель'), @('meduza', 'MeduzaVPN'), @('amnezia', 'AmneziaWG'), @('wg', 'wg_server'), @('ics', 'Раздача ICS'), @('zapret', 'zapret'))
+$TileDefs = @(@('ultra', 'Туннель'), @('meduza', 'MeduzaVPN'), @('amnezia', 'AmneziaWG'), @('wg', 'WireGuard'), @('ics', 'Раздача ICS'), @('zapret', 'zapret'))
 $tileRow = New-Row 116 $TileDefs.Count
 for ($i = 0; $i -lt $TileDefs.Count; $i++) {
     $key = $TileDefs[$i][0]
@@ -1949,7 +1949,7 @@ $cbLevel.DropDownStyle = 'DropDownList'; $cbLevel.Width = 220; $cbLevel.BackColo
 $cbLevel.SelectedIndex = 0
 $cbComp = New-Object Windows.Forms.ComboBox
 $cbComp.DropDownStyle = 'DropDownList'; $cbComp.Width = 170; $cbComp.BackColor = $Clr.Input; $cbComp.ForeColor = $Clr.Text; $cbComp.FlatStyle = 'Flat'; $cbComp.Margin = '0,4,10,0'
-[void]$cbComp.Items.AddRange(@('Все компоненты', 'MeduzaVPN', 'Туннель', 'wg_server', 'Раздача ICS', 'zapret', 'AmneziaWG'))
+[void]$cbComp.Items.AddRange(@('Все компоненты', 'MeduzaVPN', 'Туннель', 'WireGuard', 'Раздача ICS', 'zapret', 'AmneziaWG'))
 $cbComp.SelectedIndex = 0
 $tbFind = New-Object Windows.Forms.TextBox
 $tbFind.Width = 180; $tbFind.BackColor = $Clr.Input; $tbFind.ForeColor = $Clr.Text; $tbFind.BorderStyle = 'FixedSingle'; $tbFind.Margin = '0,5,10,0'
@@ -2120,13 +2120,17 @@ Add-Section 'Раздача интернета'
 Add-Setting 'sharing.enabled'                     'Управлять раздачей ICS'            'bool' 'туннель → wg_server'
 Add-Section 'zapret-discord-youtube'
 Add-Setting 'zapret.strategy'                     'Стратегия'                         'combo' '(авто) — подбирать автоматически'
-Add-Setting 'zapret.autoUpdate'                   'Автообновление zapret'             'bool' 'последний релиз с GitHub'
+Add-Setting 'zapret.version'                      'Версия zapret'                     'text' 'пусто — последняя; например 1.10.2 — поставится и не будет обновляться'
+Add-Setting 'zapret.autoUpdate'                   'Автообновление zapret'             'bool' 'последний релиз с GitHub (если версия не выбрана)'
 Add-Setting 'zapret.updateCheckHours'             'Проверять обновления каждые, ч'   'num'  '' 1 168
 Add-Setting 'zapret.retestHours'                  'Переподбирать стратегию каждые, ч' 'num'  'и сразу — если сайты перестали открываться' 1 720
 Add-Setting 'zapret.healthCheckMin'               'Проверять сайты каждые, мин'       'num'  '' 2 240
 Add-Setting 'zapret.videoCheck'                   'Проверять видео YouTube'           'bool' 'видеосервер googlevideo и загрузку страницы целиком'
 Add-Setting 'zapret.gameFilter'                   'Игровой фильтр'                    'combo' 'disabled — выключен (как в service.bat)'
 $SetCtl['zapret.gameFilter'].Items.AddRange(@('disabled', 'all', 'tcp', 'udp'))
+Add-Section 'Веб-интерфейс'
+Add-Setting 'web.requirePassword'                 'Пароль с других устройств'         'bool' 'выключено — без пароля из домашней сети и от клиентов wg_server'
+Add-Setting 'web.token'                           'Пароль'                            'text' 'от 6 символов; пусто — создастся сам'
 Add-Section 'Обновление приложения'
 Add-Setting 'update.repo'                         'Репозиторий GitHub'                'text' 'владелец/имя, например ivan/vpnguard; пусто — не обновлять'
 Add-Setting 'update.branch'                       'Ветка'                             'text' 'main'
@@ -2174,7 +2178,7 @@ $Fallback = @{
     'meduza.autoUpdate' = $true; 'meduza.updateCheckHours' = 6; 'meduza.probeHosts' = @('1.1.1.1:443', '8.8.8.8:443', '9.9.9.9:443')
     'meduza.probeFailuresBeforeReconnect' = 3; 'meduza.startupGraceSec' = 60; 'meduza.maxRestartsPer30Min' = 5
     'ws4w.interfaceName' = 'wg_server'; 'ws4w.serviceName' = 'WireGuardTunnel$wg_server'; 'sharing.enabled' = $true; 'ws4w.autoCreateServer' = $true; 'vpn.mode' = 'meduza'; 'vpn.stopInactive' = $true; 'vpn.primary' = 'meduza'; 'vpn.dualHot' = $true; 'vpn.failoverChecks' = 2; 'vpn.failbackMin' = 5
-    'meduza.autoProtocol' = $true; 'update.repo' = 'Fogiku/vpnguard'; 'update.branch' = 'main'; 'update.auto' = $true; 'update.checkHours' = 3; 'meduza.protocolReturnMin' = 60; 'zapret.videoCheck' = $true; 'amnezia.splitDefaultRoute' = $true; 'software.checkHours' = 12
+    'meduza.autoProtocol' = $true; 'update.repo' = 'Fogiku/vpnguard'; 'web.requirePassword' = $true; 'zapret.version' = ''; 'update.branch' = 'main'; 'update.auto' = $true; 'update.checkHours' = 3; 'meduza.protocolReturnMin' = 60; 'zapret.videoCheck' = $true; 'amnezia.splitDefaultRoute' = $true; 'software.checkHours' = 12
     'zapret.strategy' = ''; 'zapret.autoUpdate' = $true; 'zapret.updateCheckHours' = 12; 'zapret.retestHours' = 24
     'zapret.healthCheckMin' = 10; 'zapret.gameFilter' = 'disabled'
 }
@@ -2329,13 +2333,13 @@ $webBox.Controls.AddRange(@($webLbl, $webInfo,
     (New-Btn 'Скопировать адрес и пароль' { $wcf = Get-WebCfgUi; $ips = @(Get-LocalIps | ForEach-Object { "http://$($_.Ip):$($wcf.port)/  (сеть «$($_.Alias)»)" }); [Windows.Forms.Clipboard]::SetText((@('VpnGuard — веб-интерфейс') + $ips + @("Пароль: $($wcf.token)")) -join "`r`n"); Set-Footer 'Адрес и пароль веб-интерфейса скопированы' })))
 $webSpacer = New-Object Windows.Forms.Panel; $webSpacer.Dock = 'Top'; $webSpacer.Height = 12; $webSpacer.BackColor = $Clr.Bg
 function Get-WebCfgUi {
-    $d = @{ enabled = $true; port = 8765; token = '' }
+    $d = @{ enabled = $true; port = 8765; token = ''; requirePassword = $true }
     try { $o = Read-ConfigObject; if ($o.PSObject.Properties['web']) { foreach ($pp in $o.web.PSObject.Properties) { $d[$pp.Name] = $pp.Value } } } catch { }
     return $d
 }
 function Update-WebUi {
     $wcf = Get-WebCfgUi
-    Set-Prop $webInfo Text $(if (-not $wcf.enabled) { 'выключен (web.enabled в config.json)' } else { "http://localhost:$($wcf.port)/ · с телефона и других устройств сети — по адресу этого ПК, пароль: $(if ($wcf.token) { $wcf.token } else { 'появится, когда агент запустит сервер' })" })
+    Set-Prop $webInfo Text $(if (-not $wcf.enabled) { 'выключен (web.enabled в config.json)' } else { "http://localhost:$($wcf.port)/ · с телефона и других устройств сети — по адресу этого ПК, $(if ($wcf.requirePassword -eq $false) { 'без пароля' } elseif ($wcf.token) { "пароль: $($wcf.token)" } else { 'пароль появится, когда агент запустит сервер' })" })
 }
 $script:PubIp = ''
 

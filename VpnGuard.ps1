@@ -34,7 +34,7 @@ param(
     [string]$ConfigPath = ''
 )
 
-$AgentVersion = '2.4'
+$AgentVersion = '2.5'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -135,6 +135,7 @@ function Get-DefaultConfig { @{
         dir               = ''          # пусто = <папка VpnGuard>\zapret
         autoUpdate        = $true
         updateCheckHours  = 12
+        version           = ''          # пусто = последняя; иначе конкретная версия (например 1.10.2) — ставится и не обновляется
         strategy          = ''          # пусто = подбирать автоматически; иначе имя .bat без расширения
         retestHours       = 24          # переподбирать раз в N часов
         healthCheckMin    = 10          # проверять, что сайты открываются, раз в N минут
@@ -1706,6 +1707,7 @@ function Invoke-Commands {
             'dual-switch'    { if ((Get-VpnMode) -eq 'dual') { $to = Get-OtherKind (Get-DualActive); if (Test-KindOk $to) { Switch-DualActive $to 'вручную из окна' } else { Write-Log "Два туннеля: $($ModeNames[$to]) сейчас не пропускает трафик — не переключаю" 'WARN' } } }
             'meduza-proto-reset' { if ($State.mzProtoOverride) { $State.mzReturnAt = [datetime]::MinValue; Invoke-MeduzaProtoReturn } }
             'zapret-check'   { $ZState.healthAt = [datetime]::MinValue }
+            'zapret-releases' { [void](Get-ZapretReleases -Force) }
             'app-check'      { Invoke-AppUpdateCheck }
             'app-update'     { Invoke-AppUpdateCheck -Install }
             'restart-meduza' { $State.restarts.Clear(); Restart-Meduza 'по команде из монитора' }

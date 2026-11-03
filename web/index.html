@@ -95,13 +95,14 @@ canvas { width: 100%; height: 190px; display: block; }
     <a href="#ultra" data-p="ultra">Туннель <span class="dot" data-d="ultra"></span></a>
     <a href="#meduza" data-p="meduza">MeduzaVPN <span class="dot" data-d="meduza"></span></a>
     <a href="#amnezia" data-p="amnezia">AmneziaWG <span class="dot" data-d="amnezia"></span></a>
-    <a href="#wg" data-p="wg">WS4W · wg_server <span class="dot" data-d="wg"></span></a>
+    <a href="#wg" data-p="wg">WireGuard <span class="dot" data-d="wg"></span></a>
     <a href="#ics" data-p="ics">Раздача ICS <span class="dot" data-d="ics"></span></a>
     <a href="#zapret" data-p="zapret">zapret <span class="dot" data-d="zapret"></span></a>
     <a href="#traffic" data-p="traffic">Трафик</a>
     <hr>
     <a href="#system" data-p="system">Компоненты и обновление</a>
     <a href="#logs" data-p="logs">Журнал</a>
+    <a href="#diag" data-p="diag">Диагностика</a>
   </nav>
   <main>
     <header>
@@ -120,7 +121,7 @@ canvas { width: 100%; height: 190px; display: block; }
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 let S = null, page = 'home', wgList = null, logCache = '', timer = null;
-const NAMES = { home: 'Главная', ultra: 'Туннель', meduza: 'MeduzaVPN', amnezia: 'AmneziaWG', wg: 'WS4W — WireGuard-сервер wg_server', ics: 'Раздача интернета (ICS)', zapret: 'zapret-discord-youtube', traffic: 'Трафик', system: 'Компоненты и обновление', logs: 'Журнал' };
+const NAMES = { home: 'Главная', ultra: 'Туннель', meduza: 'MeduzaVPN', amnezia: 'AmneziaWG', wg: 'WireGuard', ics: 'Раздача интернета (ICS)', zapret: 'zapret-discord-youtube', traffic: 'Трафик', system: 'Компоненты и обновление', logs: 'Журнал', diag: 'Диагностика и доступ' };
 const HKEY = { meduza: 'm', ultra: 'u', wg: 'w', ics: 'i', zapret: 'z', amnezia: 'a' };
 const MODES = [['meduza', 'MeduzaVPN'], ['amnezia', 'AmneziaWG'], ['dual', 'Два туннеля (с переключением)'], ['zapret', 'Без VPN — только zapret']];
 const LV = { 0: 'работает', 1: 'предупреждение', 2: 'сбой', '-1': 'нет данных / выключено' };
@@ -151,7 +152,7 @@ async function load() {
 // ---------------------------------------------------------------- вход
 function showLogin() {
   clearInterval(timer);
-  document.body.innerHTML = `<div class="card login"><h1>VpnGuard</h1><p class="muted">Вход с другого устройства. Пароль — в окне VpnGuard: Диагностика → «Веб-интерфейс».</p>
+  document.body.innerHTML = `<div class="card login"><h1>VpnGuard</h1><p class="muted">Вход с другого устройства. Пароль — в окне VpnGuard (вкладка «Диагностика» → «Веб-интерфейс») или в веб-интерфейсе на самом ПК (вкладка «Диагностика»).</p>
   <div class="row"><input type="password" id="pw" placeholder="пароль" style="flex:1" autofocus><button class="p" id="go">Войти</button></div><p class="err" id="lerr"></p></div>`;
   const go = async () => {
     const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: $('#pw').value }) });
@@ -223,7 +224,7 @@ function head() {
 // ---------------------------------------------------------------- страницы
 const P = {};
 P.home = () => {
-  const keys = [['ultra', 'Туннель'], ['meduza', 'MeduzaVPN'], ['amnezia', 'AmneziaWG'], ['wg', 'wg_server'], ['ics', 'Раздача ICS'], ['zapret', 'zapret']];
+  const keys = [['ultra', 'Туннель'], ['meduza', 'MeduzaVPN'], ['amnezia', 'AmneziaWG'], ['wg', 'WireGuard'], ['ics', 'Раздача ICS'], ['zapret', 'zapret']];
   let worst = -1; const probs = [];
   for (const [k, n] of keys) { const l = lvl(comp(k)); if (l > worst) worst = l; if (l >= 1) probs.push(n + ': ' + comp(k).state); }
   const ht = { 0: 'Всё работает', 1: 'Есть предупреждения', 2: 'Есть сбои' }[worst] || 'Нет данных';
@@ -247,6 +248,11 @@ P.home = () => {
   <div class="sec">Последние предупреждения и ошибки</div><pre id="events" class="muted">загрузка…</pre>`;
 };
 P.home.after = async () => { try { const t = await api('/api/logs?minutes=720&lines=3000'); const l = t.split('\n').filter(s => /\[(WARN|ERROR)\]/.test(s)).slice(-15).reverse(); $('#events').textContent = l.join('\n') || 'за 12 часов — ничего'; } catch (e) { } };
+async function setZVer() {
+  const v = $('#zver').value;
+  if (!confirm(v ? `Установить zapret ${v} и закрепить эту версию?` : 'Вернуться к последней версии zapret (обновляется сама)?')) return;
+  try { await api('/api/config', { key: 'zapret.version', value: v }); await api('/api/cmd', { c: 'zapret-update' }); toast('Агент установит ' + (v ? 'zapret ' + v : 'последнюю версию') + ' — 10–30 секунд'); setTimeout(load, 4000); } catch (e) { toast(e.message, true); }
+}
 function setMode(m) {
   const msg = { meduza: 'Переключиться на MeduzaVPN?', amnezia: 'Переключиться на AmneziaWG? MeduzaVPN будет отключён.', dual: 'Включить режим «два туннеля»? Оба VPN будут подняты, при сбое трафик переключится на второй.', zapret: 'Отключить VPN? ПК и клиенты wg_server пойдут в интернет напрямую, YouTube/Discord — через zapret.' }[m];
   if (confirm(msg)) setCfg('vpn.mode', m, 'режим'); else render();
@@ -310,7 +316,9 @@ P.zapret = () => {
   const bad = c => (c || []).filter(x => !x.ok).map(x => esc(x.n) + ' — ' + esc(x.why)).join('; ');
   return compHead('zapret', (mode !== 'zapret' ? btn(z.enabled ? 'Выключить zapret' : 'Включить zapret', z.enabled ? "cmd('zapret-off','выключение zapret')" : "cmd('zapret-on','включение zapret')", !z.enabled) : '') + btn('Подобрать стратегию', "cmd('zapret-test','подбор стратегии','Подбор займёт 2–4 минуты. Запустить?')") + btn('Обновить zapret', "cmd('zapret-update','обновление zapret')")) +
     (z.progress ? `<div class="card c1">Идёт подбор: стратегия ${z.progress.index} из ${z.progress.total} · ${esc(z.progress.current)}</div>` : '') +
-    `<div class="sec">Стратегия</div><div class="card"><div class="row"><select id="strat" style="max-width:100%">${opts}</select>${btn('Применить', "setCfg('zapret.strategy', $('#strat').value, 'стратегия zapret')", true)}${btn('Проверить сайты сейчас', "cmd('zapret-check','проверка сайтов')")}</div>
+    `<div class="sec">Версия zapret</div><div class="card"><div class="row"><select id="zver">${['<option value="">последняя — обновляется сама' + (z.latest ? ' (' + esc(z.latest) + ')' : '') + '</option>'].concat((z.versions || []).map(v => `<option value="${esc(v.v)}"${v.v === z.pinned ? ' selected' : ''}>${esc(v.v)} · ${esc(v.date)}${v.pre ? ' · предварительная' : ''}</option>`)).join('')}${z.pinned && !(z.versions || []).some(v => v.v === z.pinned) ? `<option value="${esc(z.pinned)}" selected>${esc(z.pinned)}</option>` : ''}</select>${btn('Установить', 'setZVer()', true)}${btn('Обновить список', "cmd('zapret-releases','список версий zapret')")}</div>
+      <p class="muted">Установлена: ${esc(z.version || 'нет')}${z.pinned ? ' · выбранная версия закреплена и сама не обновляется' : ''}. После смены версии агент подберёт стратегию заново (если стратегия не выбрана вручную). Свои списки сохраняются.</p></div>
+    <div class="sec">Стратегия</div><div class="card"><div class="row"><select id="strat" style="max-width:100%">${opts}</select>${btn('Применить', "setCfg('zapret.strategy', $('#strat').value, 'стратегия zapret')", true)}${btn('Проверить сайты сейчас', "cmd('zapret-check','проверка сайтов')")}</div>
       <p class="muted">${z.manual ? 'Выбрана вручную: ' + esc(z.manual) : z.current ? 'Подобрана автоматически: ' + esc(z.current) : 'Стратегия ещё не выбрана.'}</p></div>
     <div class="sec">Проверка сайтов сейчас${z.checkedAt ? ' · ' + esc(z.checkedAt) : ''}</div><div class="card">${ch.length ? `<table><tr><th>Что проверяется</th><th class="hide-m">Адрес</th><th>Результат</th><th>Время</th></tr>${ch.map(c => `<tr><td><span class="dot l${c.ok ? 0 : 2}"></span> ${esc(c.n)}</td><td class="hide-m muted">${esc(c.h)}</td><td class="c${c.ok ? 0 : 2}">${c.ok ? 'открывается' : esc(c.why)}</td><td>${c.ms >= 0 ? c.ms + ' мс' : '—'}</td></tr>`).join('')}</table>` : '<p class="muted">Проверки ещё не было.</p>'}</div>
     <div class="sec">Результаты подбора</div><div class="card">${res.length ? `<table><tr><th>Стратегия</th><th>Открылось</th><th class="hide-m">Не прошли</th><th></th></tr>${res.map(r => `<tr class="${r.name === z.current ? 'cur' : ''}"><td>${esc(r.name)}</td><td><div class="row" style="flex-wrap:nowrap"><div class="bar"><i class="l${r.ok >= r.total ? 0 : r.ok ? 1 : 2}" style="width:${100 * r.ok / Math.max(1, r.total)}%"></i></div>${r.ok}/${r.total}</div></td><td class="hide-m ${r.error || bad(r.checks) ? 'c2' : 'c0'}" style="font-size:12px">${r.error ? esc(r.error) : bad(r.checks) || (r.checks && r.checks.length ? 'всё открылось' : '')}</td><td>${r.name !== '(без zapret)' && r.name !== z.manual ? btn('Выбрать', `setCfg('zapret.strategy','${esc(r.name)}','стратегия zapret')`) : ''}</td></tr>`).join('')}</table>` : '<p class="muted">Подбора ещё не было.</p>'}</div>` +
@@ -331,6 +339,52 @@ P.system = () => {
       <div class="row" style="margin-top:10px">${btn('Установить всё нужное', "cmd('install-missing','установка недостающих','Установить всё, что нужно для текущего режима?')")}${btn('Проверить версии', "cmd('software-check','проверка версий')")}</div></div>
     <div class="sec">Удалённая диагностика</div><div class="card"><p class="muted">${rm.enabled ? 'Включена до ' + new Date(rm.until).toLocaleString() + ` · запросов: ${rm.requests}` : 'Выключена. Включается в окне VpnGuard на этом ПК (вкладка «Диагностика»).'}</p></div>`;
 };
+let diagText = '';
+P.diag = () => `<div class="sec">Вход в веб-интерфейс</div><div class="card" id="webset"><p class="muted">загрузка…</p></div>
+  <div class="sec">Удалённая диагностика</div><div class="card" id="remote"><p class="muted">загрузка…</p></div>
+  <div class="sec">Отчёт «Диагностика»</div><div class="card"><div class="row">${btn('Собрать отчёт', 'runDiag()', true)}${btn('Скопировать', "navigator.clipboard.writeText(diagText).then(()=>toast('Скопировано'))")}${btn('Скачать', "dlText('vpnguard-diag.txt', diagText)")}<span class="sub" id="dstate"></span></div><pre id="dtext" style="max-height:60vh;overflow:auto;margin-top:10px">${esc(diagText || 'Нажмите «Собрать отчёт» (до минуты). Ключей и паролей в отчёте нет.')}</pre></div>`;
+P.diag.after = async () => { await loadWebSet(); await loadRemote(); };
+async function loadWebSet() {
+  let w; try { w = await api('/api/websettings'); } catch (e) { $('#webset').innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
+  $('#webset').innerHTML = `<p>Адрес: <b>http://localhost:${w.port}/</b> на этом ПК; с других устройств — по адресу ПК в домашней сети или через wg_server.</p>
+    <label class="row" style="gap:8px"><input type="checkbox" id="reqpw" ${w.requirePassword ? 'checked' : ''} onchange="setReqPw(this.checked)"> Требовать пароль с других устройств</label>
+    <p class="muted">${w.requirePassword ? 'С этого ПК пароль не нужен никогда.' : 'Пароль не нужен из домашней сети и от клиентов wg_server. Из интернета (если открыта удалённая диагностика «откуда угодно») пароль нужен всегда.'}</p>
+    ${w.local && w.password ? `<p>Текущий пароль: <code>${esc(w.password)}</code></p>` : ''}
+    <div class="row"><input type="password" id="newpw" placeholder="новый пароль (6–64 символа)" autocomplete="new-password">${btn('Сохранить пароль', 'setPw()')}</div>`;
+}
+async function setReqPw(on) {
+  if (!on && !confirm('Отключить пароль? Веб-интерфейсом смогут управлять все устройства домашней сети и клиенты wg_server.')) { loadWebSet(); return; }
+  try { await api('/api/websettings', { requirePassword: on }); toast(on ? 'Пароль снова нужен' : 'Пароль в домашней сети не нужен'); } catch (e) { toast(e.message, true); }
+  loadWebSet();
+}
+async function setPw() {
+  const v = $('#newpw').value;
+  try { await api('/api/websettings', { password: v }); toast('Пароль изменён — на других устройствах нужно войти заново'); } catch (e) { toast(e.message, true); }
+  loadWebSet();
+}
+async function loadRemote() {
+  let r; try { r = await api('/api/remote'); } catch (e) { $('#remote').innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
+  const addrs = [].concat(r.publicIp ? [`http://${r.publicIp}:${r.port}/  (через интернет — нужен проброс TCP ${r.port} на роутере)`] : [], (r.ips || []).map(a => `http://${a.ip}:${r.port}/  (сеть «${a.alias}»)`));
+  const conn = r.enabled ? ['VpnGuard — удалённая диагностика (до ' + new Date(r.until).toLocaleString() + ')'].concat(addrs, ['Токен: ' + r.token, `Пример: curl -H "X-Token: ${r.token}" http://АДРЕС:${r.port}/bundle`]).join('\n') : '';
+  $('#remote').innerHTML = r.enabled
+    ? `<p><span class="dot l0"></span> <b>Включена</b> до ${esc(new Date(r.until).toLocaleString())} · ${r.allowFrom === 'local' ? 'только домашняя сеть и wg_server' : 'откуда угодно'} · тесты и переподключения ${r.allowActions ? 'разрешены' : 'запрещены'} · запросов: ${r.requests}</p>
+       <pre id="conn">${esc(conn)}</pre><div class="row">${btn('Скопировать данные для подключения', "navigator.clipboard.writeText($('#conn').textContent).then(()=>toast('Скопировано — отправьте вместе с сообщением'))", true)}${btn('Выключить', 'setRemote(false)')}</div>`
+    : `<p class="muted">Выключена. По адресу ПК и токену можно будет читать состояние, журналы, сеть и запускать проверки. Ключи скрыты, выключается сама по таймеру.</p>
+       <div class="row"><select id="rhours"><option value="2">на 2 ч</option><option value="8">на 8 ч</option><option value="24" selected>на 24 ч</option><option value="72">на 72 ч</option></select>
+       <select id="rfrom"><option value="local">только домашняя сеть и wg_server</option><option value="any">откуда угодно (через интернет)</option></select>
+       <label class="row" style="gap:6px"><input type="checkbox" id="ract"> разрешить тесты и переподключения</label>${btn('Включить', 'setRemote(true)', true)}</div>`;
+}
+async function setRemote(on) {
+  const b = on ? { enable: true, hours: +$('#rhours').value, allowFrom: $('#rfrom').value, allowActions: $('#ract').checked } : { enable: false };
+  if (on && b.allowFrom === 'any' && !confirm('Открыть доступ из интернета? Соединение не шифруется; нужен проброс порта на роутере.')) return;
+  try { await api('/api/remote', b); toast(on ? 'Удалённая диагностика включена' : 'Удалённая диагностика выключена'); } catch (e) { toast(e.message, true); }
+  setTimeout(loadRemote, 1500);
+}
+async function runDiag() {
+  $('#dstate').textContent = 'собираю… (до минуты)'; const t0 = Date.now();
+  try { diagText = await api('/api/diag-run', {}); $('#dtext').textContent = diagText; $('#dstate').textContent = `готово за ${Math.round((Date.now() - t0) / 1000)} с`; } catch (e) { $('#dstate').textContent = e.message; }
+}
+function dlText(fn, text) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' })); a.download = fn; a.click(); }
 P.logs = () => `<div class="card row"><select id="lmin" onchange="loadLog()"><option value="60">за 1 час</option><option value="360">за 6 часов</option><option value="1440" selected>за сутки</option><option value="4320">за 3 дня</option></select>
   <select id="llev" onchange="showLog()"><option value="">все</option><option value="WARN|ERROR">предупреждения и ошибки</option><option value="ERROR">только ошибки</option></select>
   <input type="text" id="lq" placeholder="поиск" oninput="showLog()">${btn('Обновить', 'loadLog()')}</div><textarea class="log" id="log" readonly></textarea>`;
@@ -343,7 +397,7 @@ function render(force) {
   if (!S) return;
   // во время ввода (выбор в списке, поиск) не перерисовывать
   const ae = document.activeElement; if (!force && ae && ['SELECT', 'INPUT', 'TEXTAREA'].includes(ae.tagName) && page !== 'home') return;
-  if (page === 'logs' && $('#log') && !force) return;
+  if ((page === 'logs' && $('#log') || page === 'diag' && $('#remote')) && !force) return;
   $('#page').innerHTML = (P[page] || P.home)();
   for (const cv of document.querySelectorAll('canvas[data-chart]')) drawChart(cv, cv.dataset.chart);
   if (P[page] && P[page].after) P[page].after();
