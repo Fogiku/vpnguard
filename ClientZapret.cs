@@ -45,7 +45,7 @@ namespace VpnGuard
         static TcpListener CzRelay;
         const int CzRelayPort = 34010;
         static uint CzWgIp, CzEthIp; static int CzWgIdx, CzEthIdx; static string CzSig = "", CzError = "";
-        static long CzPkts, CzPass, CzTcpConns, CzUdpPkts, CzBytes, CzErrors, CzTcpUp, CzTcpDown, CzUdpDown, CzUdpSendFail, CzQuicDrop, CzNetRw, CzNetMiss, CzNetBig, CzNetSendFail, CzRelayNoFlow, CzConnFail, CzFwdBig, CzFwdMax, CzNetMax, CzMssClamped; static int CzActive, CzConnLogged, CzSynLogged;
+        static long CzPkts, CzPass, CzTcpConns, CzUdpPkts, CzBytes, CzErrors, CzTcpUp, CzTcpDown, CzUdpDown, CzUdpSendFail, CzQuicDrop, CzNetRw, CzNetMiss, CzNetBig, CzNetSendFail, CzRelayNoFlow, CzConnFail, CzFwdBig, CzFwdMax, CzNetMax, CzMssClamped; static int CzActive, CzConnLogged, CzSynLogged, CzTraceLeft = 400; static readonly HashSet<ulong> CzTraced = new HashSet<ulong>();
         static HashSet<uint> CzHosts = new HashSet<uint>(); static List<uint[]> CzNets = new List<uint[]>(); static string CzSetKey = "";
         static DateTime CzFwAt = DateTime.MinValue, CzCleanAt = DateTime.MinValue; static string CzFwSig = "";
 
@@ -199,7 +199,8 @@ namespace VpnGuard
                 ulong key = ((ulong)src << 16) | (uint)sport;
                 lock (CzLock) { CzTcpFlow f; if (!CzTcp.TryGetValue(key, out f) || f.Dst != dst || f.DPort != dport) { f = new CzTcpFlow { Dst = dst, DPort = dport }; CzTcp[key] = f; } f.Last = DateTime.Now; }
                 // SYN: уменьшить MSS клиента — ответы ретранслятора не должны быть больше MTU туннеля клиента (часто 1280)
-                if ((p[ihl + 13] & 0x02) != 0) CzClampMss(p, ihl, n, src, sport);
+                if ((p[ihl + 13] & 0x02) != 0) { CzClampMss(p, ihl, n, src, sport); lock (CzTraced) if (CzTraced.Count < 3 && dport == 443) CzTraced.Add(key); }
+                CzTrace(key, "клиент→", p, ihl, n);
                 // к ретранслятору на ПК: как будто клиент подключился к адресу ПК в сети wg_server
                 PutIp(p, 16, CzWgIp); p[ihl + 2] = (byte)(CzRelayPort >> 8); p[ihl + 3] = (byte)(CzRelayPort & 0xFF);
                 var a = new WdAddr { Flags = WdLayerNetwork, IfIdx = (uint)CzWgIdx, SubIfIdx = 0 };     // входящий на wg_server
@@ -226,6 +227,16 @@ namespace VpnGuard
                 return true;
             }
             return false;
+        }
+        // трассировка пакетов первых соединений (флаги, seq/ack, длина данных) — для поиска поломок
+        static void CzTrace(ulong key, string dir, byte[] p, int ihl, int n)
+        {
+            bool on; lock (CzTraced) on = CzTraced.Contains(key) && CzTraceLeft > 0; if (!on) return;
+            if (Interlocked.Decrement(ref CzTraceLeft) < 0) return;
+            int f = p[ihl + 13], doff = (p[ihl + 12] >> 4) * 4, dl = n - ihl - doff;
+            string fl = ((f & 2) != 0 ? "S" : "") + ((f & 16) != 0 ? "A" : "") + ((f & 8) != 0 ? "P" : "") + ((f & 1) != 0 ? "F" : "") + ((f & 4) != 0 ? "R" : "");
+            uint seq = IpH(p, ihl + 4), ack = IpH(p, ihl + 8); int win = (p[ihl + 14] << 8) | p[ihl + 15];
+            Log("трасса " + IpS((uint)(key >> 16)) + ":" + (key & 0xFFFF) + " " + dir + " " + fl + " seq=" + seq + " ack=" + ack + " len=" + dl + " win=" + win + " ip=" + n + " id=" + ((p[4] << 8) | p[5]) + " ttl=" + p[8], "INFO");
         }
         static void CzClampMss(byte[] p, int ihl, int n, uint src, int sport)
         {
@@ -274,6 +285,7 @@ namespace VpnGuard
                         PutIp(pkt, 12, f.Dst); pkt[ihl] = (byte)(f.DPort >> 8); pkt[ihl + 1] = (byte)f.DPort;
                         WinDivertHelperCalcChecksums(pkt, len, ref addr, 0);
                         Interlocked.Increment(ref CzNetRw); if (len > 1500) Interlocked.Increment(ref CzNetBig);
+                        CzTrace(((ulong)dst << 16) | (uint)dport, "→клиенту", pkt, ihl, (int)len);
                         if (len > Interlocked.Read(ref CzNetMax)) Interlocked.Exchange(ref CzNetMax, len);
                     } else Interlocked.Increment(ref CzNetMiss);
                 } catch { Interlocked.Increment(ref CzErrors); }
