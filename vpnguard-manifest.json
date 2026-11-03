@@ -1,8 +1,8 @@
 {
-    "version":  "3.0.1",
-    "build":  "20261103-1605",
-    "notes":  "переход с веб-сервера PowerShell на C# без перезагрузки",
-    "date":  "2026-11-03T16:05:30.8677624+03:00",
+    "version":  "3.0.2",
+    "build":  "20261103-1607",
+    "notes":  "автоматический переход веб-сервера с PowerShell на C#; VpnGuardWeb в списке процессов диагностики",
+    "date":  "2026-11-03T16:07:58.1335374+03:00",
     "files":  [
                   {
                       "path":  "Amnezia.ps1",
@@ -36,8 +36,8 @@
                   },
                   {
                       "path":  "Remote.ps1",
-                      "sha256":  "b2ee90c04c1cc2d7d5e0b1e92ddfd3a479d7a9ee55b141a6f047d8912d5b5784",
-                      "size":  53775
+                      "sha256":  "f3a059804a29a64ae1c0ac386651112b355cb972bc8f4a33ef0e41f497ef1225",
+                      "size":  54245
                   },
                   {
                       "path":  "RemoteDiag.ps1",
@@ -71,7 +71,7 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "065921683dba27b0759dd6d17731634975c3c7e0de4b6bcd0cedd45d121cad48",
+                      "sha256":  "59771bba2daca081f734ea7db1d6609963b340fc056610ad346be8eacd02c012",
                       "size":  132484
                   },
                   {

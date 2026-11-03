@@ -168,6 +168,9 @@ function Invoke-RemoteWatch {
     if ($wc.enabled -and $wc.requirePassword -ne $false -and "$($wc.token)".Length -lt 6) { Set-ConfigValue 'web.token' (New-WebToken); Write-Log 'Веб-интерфейс: создан пароль для входа с других устройств (виден в окне и в config.json, web.token)' }
     $r.port = [int](Get-WCfg).port
     Sync-RemoteFirewall $r
+    # работает прежний сервер на PowerShell, а можно на C# — переключить (освободит ~150 МБ)
+    $cur = Get-RemoteProc
+    if ($cur -and $cur.ProcessName -like 'powershell*' -and "$((Get-WCfg).engine)" -ne 'powershell' -and (Build-WebExe)) { Write-Log 'Веб-сервер: перехожу с PowerShell на C#'; Stop-Process -Id $cur.Id -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1 }
     if (-not (Get-RemoteProc)) {
         $eng = Start-WebServer
         Write-Log "Веб-сервер VpnGuard ($eng): запускаю на порту $($r.port)$(if (Test-RemoteOn $r) { " · удалённая диагностика до $((Get-RemoteUntil $r).ToString('dd.MM HH:mm'))" })" 'WARN'
@@ -238,7 +241,7 @@ function Get-RSystem {
         "PowerShell: $($PSVersionTable.PSVersion) · .NET: $([Environment]::Version) · память свободно $([int]($os.FreePhysicalMemory / 1024)) из $([int]($os.TotalVisibleMemorySize / 1024)) МБ"
         "Агент VpnGuard: $AgentVersion · папка $Root"
         '===== процессы'
-        Get-Process | Where-Object { $_.ProcessName -match 'medusa|meduza|winws|wireguard|amnezia|awg|ws4w|WgServer|powershell' } |
+        Get-Process | Where-Object { $_.ProcessName -match 'medusa|meduza|winws|wireguard|amnezia|awg|ws4w|WgServer|powershell|VpnGuardWeb' } |
             Format-Table Id, ProcessName, @{ n = 'CPU,с'; e = { [int]$_.CPU } }, @{ n = 'МБ'; e = { [int]($_.WorkingSet64 / 1MB) } }, StartTime, Responding -AutoSize
         '===== службы'
         Get-Service | Where-Object { $_.Name -match 'WireGuard|AmneziaWG|SharedAccess|zapret|WinDivert|iphlpsvc|Dnscache|BFE|mpssvc|MeduzaVPN' } | Format-Table Name, Status, StartType, DisplayName -AutoSize
