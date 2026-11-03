@@ -29,7 +29,7 @@ $ZState = @{
     healthAt = [datetime]::MinValue; healthOk = 0; healthTotal = 0; healthFails = 0
     fallbackUntil = [datetime]::MinValue; winwsPid = 0; runningStrategy = ''; lastError = ''
     healthChecks = @(); videoHost = ''; videoHostAt = [datetime]::MinValue; videoHostVia = ''; ytJs = ''; ytJsAt = ''; ggc = @(); ggcAt = ''
-    releases = @(); releasesAt = ''
+    releases = @(); releasesAt = ''; videoRetestAt = ''
 }
 
 # в режиме «без VPN» zapret включён всегда (это и есть способ открыть YouTube/Discord)
@@ -815,10 +815,18 @@ function Invoke-ZapretWatch {
                 Write-Log ("zapret: не прошли проверку: {0}" -f (($bad | ForEach-Object { "$($_.Label) — $($_.Why)" }) -join '; ')) $(if ($ZState.healthOk -lt $minOk) { 'WARN' } else { 'INFO' })
             } elseif (-not $bad.Count -and $script:ZBadSig) { Write-Log 'zapret: все проверки снова проходят' }
             $script:ZBadSig = $badSig
-            if ($ZState.healthOk -lt $minOk) {
+            # видео YouTube не грузится или медленное — тоже повод переподобрать (не чаще раза в 6 ч)
+            $vAt = [datetime]::MinValue; try { if ($ZState.videoRetestAt) { $vAt = [datetime]$ZState.videoRetestAt } } catch { }
+            $videoBad = @($bad | Where-Object { $_.Url -in 'ytspeed', 'ytvideo' }).Count -and ((Get-Date) - $vAt).TotalHours -ge 6
+            if ($ZState.healthOk -lt $minOk -or $videoBad) {
                 $ZState.healthFails++
-                Write-Log ("zapret: открылось {0}/{1} сайтов" -f $ZState.healthOk, $r.Count) 'WARN'
-                if ($ZState.healthFails -ge 2 -and -not $z.strategy) { $ZState.healthFails = 0; Start-ZapretTest 'стратегия перестала работать' }
+                if ($ZState.healthOk -lt $minOk) { Write-Log ("zapret: открылось {0}/{1} сайтов" -f $ZState.healthOk, $r.Count) 'WARN' }
+                else { Write-Log "zapret: видео YouTube с этой стратегией не идёт или медленное ($($ZState.healthFails)/2)" 'WARN' }
+                if ($ZState.healthFails -ge 2 -and -not $z.strategy) {
+                    $ZState.healthFails = 0
+                    if ($ZState.healthOk -ge $minOk) { $ZState.videoRetestAt = (Get-Date).ToString('o') }
+                    Start-ZapretTest $(if ($ZState.healthOk -lt $minOk) { 'стратегия перестала работать' } else { 'видео YouTube медленное или не грузится' })
+                }
             } else { $ZState.healthFails = 0 }
         }
     }

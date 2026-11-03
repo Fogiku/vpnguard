@@ -724,10 +724,17 @@ namespace VpnGuard
                     if (bad.Count > 0 && (sig != ZBadSig || ok < minOk)) Log("zapret: не прошли проверку: " + string.Join("; ", bad.Select(x => x.Label + " — " + x.Why)), ok < minOk ? "WARN" : "INFO");
                     else if (bad.Count == 0 && ZBadSig.Length > 0) Log("zapret: все проверки снова проходят", "INFO");
                     ZBadSig = sig;
-                    if (ok < minOk) {
+                    // видео YouTube не грузится или медленное — сайт может открываться, а смотреть нельзя: тоже повод переподобрать
+                    // (не чаще раза в 6 ч — если медленно со всеми стратегиями, не прерывать YouTube постоянно)
+                    bool videoBad = bad.Any(x => x.Url == "ytspeed" || x.Url == "ytvideo") && (DateTime.Now - ZD("videoRetestAt")).TotalHours >= 6;
+                    if (ok < minOk || videoBad) {
                         Z["healthFails"] = ZN("healthFails") + 1;
-                        Log("zapret: открылось " + ok + "/" + r.Count + " сайтов", "WARN");
-                        if (ZN("healthFails") >= 2 && manual.Length == 0) { Z["healthFails"] = 0; ZStartTest("стратегия перестала работать"); }
+                        Log(ok < minOk ? "zapret: открылось " + ok + "/" + r.Count + " сайтов" : "zapret: видео YouTube с этой стратегией не идёт или медленное (" + ZN("healthFails") + "/2)", "WARN");
+                        if (ZN("healthFails") >= 2 && manual.Length == 0) {
+                            Z["healthFails"] = 0;
+                            if (ok >= minOk) ZSetD("videoRetestAt", DateTime.Now);
+                            ZStartTest(ok < minOk ? "стратегия перестала работать" : "видео YouTube медленное или не грузится");
+                        }
                     } else Z["healthFails"] = 0;
                 }
             }
