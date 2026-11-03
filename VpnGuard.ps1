@@ -37,7 +37,7 @@ param(
     [string]$ConfigPath = ''
 )
 
-$AgentVersion = '3.5.1'
+$AgentVersion = '3.6'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -90,9 +90,7 @@ function Get-DefaultConfig { @{
         endpoint      = ''                         # адрес для клиентов (IP или имя[:порт]); пусто = из клиентов WS4W или внешний IP
         clientDns     = ''                         # DNS в конфиге клиента; пусто = как у клиентов WS4W или адрес сервера
         autoCreateServer = $true                   # нет ни конфига, ни службы wg_server — создать сервер самому
-        clientZapret     = $false                  # zapret и для клиентов: свой DNS + прокси на ПК (только агент на C#)
-        clientDnsIp      = ''                      # адрес DNS для клиентов, если порт 53 основного адреса занят; пусто = <сеть>.53
-        clientDnsUpstream = @('8.8.8.8', '8.8.4.4')  # куда пересылать остальные запросы клиентов (через VPN)
+        clientZapret     = $false                  # zapret и для клиентов: их трафик к адресам zapret агент пускает через zapret ПК (только агент на C#)
         newServerAddress = '10.253.0.1/24'
         newServerPort    = 51820
     }

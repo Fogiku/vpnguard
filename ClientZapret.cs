@@ -1,18 +1,19 @@
-// VpnGuard — агент на C#: zapret для клиентов WG-Server (ws4w.clientZapret).
-// winws обрабатывает только трафик самого ПК — транзитный (клиентов wg_server) он не видит. Поэтому:
-//   1) свой DNS на адресе ПК в сети wg_server: имена из списков zapret (YouTube, Discord, свои) → адрес ПК, остальное —
-//      пересылается обычным DNS-серверам (через VPN, как и весь прочий трафик клиентов);
-//   2) прокси на том же адресе (TCP 443/80): читает имя сайта (SNI / Host), сам соединяется с сайтом и пересылает байты
-//      как есть, без расшифровки. Соединение — с самого ПК, поэтому его обрабатывает winws и оно идёт мимо VPN по маршрутам zapret.
-// UDP (QUIC) не проксируется: YouTube сам переходит на TCP. Голос Discord (UDP на адреса без DNS) остаётся в VPN.
+﻿// VpnGuard — агент на C#: zapret и для клиентов WG-Server (ws4w.clientZapret), разделение по IP, прозрачно.
+// winws обрабатывает только трафик, который начинается на самом ПК. Трафик клиентов wg_server к адресам из маршрутов zapret
+// (YouTube, Discord, видеосерверы провайдера, свои списки) Windows и так отправляет через физический адаптер — мимо VPN.
+// Агент перехватывает эти транзитные пакеты (WinDivert, тот же драйвер, что у zapret) и делает их «своими»:
+//   TCP — заворачивает на свой ретранслятор на ПК (адрес ПК в сети wg_server : 34010), тот соединяется с тем же адресом
+//         и портом уже от имени ПК → это соединение обрабатывает winws; ответы клиенту уходят с исходного адреса сайта;
+//   UDP (QUIC и др.) — отправляет от ПК сам и возвращает ответы клиенту пакетами с адреса сайта.
+// Всё остальное у клиентов — как раньше, через VPN. Ничего настраивать на устройствах не нужно.
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
-using System.Text;
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Threading;
 
@@ -20,279 +21,271 @@ namespace VpnGuard
 {
     public static partial class Agent
     {
-        static Socket CzUdp; static TcpListener CzTcpDns, CzTls, CzHttp;
-        static string CzIp = "", CzError = "", CzMode = "";
-        static long CzQueries, CzSpoofed, CzConns, CzBytes; static int CzActive;
-        static HashSet<string> CzDomains = new HashSet<string>(StringComparer.OrdinalIgnoreCase), CzExclude = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        static string CzListSig = ""; static DateTime CzFwAt = DateTime.MinValue; static string CzFwSig = "";
-        static readonly Dictionary<string, Tuple<IPAddress, DateTime>> CzResolveCache = new Dictionary<string, Tuple<IPAddress, DateTime>>(StringComparer.OrdinalIgnoreCase);
-        static readonly string[] CzBuiltin = { "youtube.com", "youtu.be", "googlevideo.com", "ytimg.com", "ggpht.com", "youtube-nocookie.com", "youtubei.googleapis.com", "yt3.ggpht.com",
-            "discord.com", "discord.gg", "discordapp.com", "discordapp.net", "discord.media", "discordcdn.com", "discord.dev", "discord.new", "discord.gift", "discordstatus.com", "dis.gd" };
+        // ---------------------------------------------------------------- WinDivert 2.2
+        [StructLayout(LayoutKind.Explicit, Size = 80)]
+        struct WdAddr { [FieldOffset(0)] public long Timestamp; [FieldOffset(8)] public uint Flags; [FieldOffset(12)] public uint Reserved2; [FieldOffset(16)] public uint IfIdx; [FieldOffset(20)] public uint SubIfIdx; }
+        const int WdLayerNetwork = 0, WdLayerForward = 1;
+        const uint WdOutbound = 1u << 17;
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr LoadLibrary(string path);
+        [DllImport("WinDivert.dll", CharSet = CharSet.Ansi, SetLastError = true)] static extern IntPtr WinDivertOpen(string filter, int layer, short priority, ulong flags);
+        [DllImport("WinDivert.dll", SetLastError = true)] static extern bool WinDivertRecv(IntPtr h, byte[] pkt, uint len, out uint recvLen, ref WdAddr addr);
+        [DllImport("WinDivert.dll", SetLastError = true)] static extern bool WinDivertSend(IntPtr h, byte[] pkt, uint len, out uint sendLen, ref WdAddr addr);
+        [DllImport("WinDivert.dll")] static extern bool WinDivertHelperCalcChecksums(byte[] pkt, uint len, ref WdAddr addr, ulong flags);
+        [DllImport("WinDivert.dll")] static extern bool WinDivertClose(IntPtr h);
+        static readonly IntPtr WdInvalid = new IntPtr(-1);
+        static bool WdLoaded;
+
+        // ---------------------------------------------------------------- состояние
+        class CzTcpFlow { public uint Dst; public int DPort; public DateTime Last; }
+        class CzUdpFlow { public uint Client, Dst; public int CPort, DPort; public Socket Sock; public DateTime Last; }
+        static readonly object CzLock = new object();
+        static readonly Dictionary<ulong, CzTcpFlow> CzTcp = new Dictionary<ulong, CzTcpFlow>();
+        static readonly Dictionary<string, CzUdpFlow> CzUdp = new Dictionary<string, CzUdpFlow>();
+        static IntPtr CzFwd = WdInvalid, CzNet = WdInvalid;
+        static TcpListener CzRelay;
+        const int CzRelayPort = 34010;
+        static uint CzWgIp, CzEthIp; static int CzWgIdx, CzEthIdx; static string CzSig = "", CzError = "";
+        static long CzPkts, CzPass, CzTcpConns, CzUdpPkts, CzBytes, CzErrors; static int CzActive;
+        static HashSet<uint> CzHosts = new HashSet<uint>(); static List<uint[]> CzNets = new List<uint[]>(); static string CzSetKey = "";
+        static DateTime CzFwAt = DateTime.MinValue, CzCleanAt = DateTime.MinValue; static string CzFwSig = "";
 
         static bool CzWanted() { return CfgBool("ws4w.clientZapret", false); }
-        // подменять имена — только пока zapret действительно работает (иначе всё — как обычно, через VPN)
-        static bool CzSpoofOn() { return ZOn() && ZWinws() != null && ZTestRunner() == null; }
-        static string[] CzUpstreams() { return CfgList("ws4w.clientDnsUpstream", new[] { "8.8.8.8", "8.8.4.4" }); }
+        static uint IpH(byte[] b, int o) { return ((uint)b[o] << 24) | ((uint)b[o + 1] << 16) | ((uint)b[o + 2] << 8) | b[o + 3]; }
+        static void PutIp(byte[] b, int o, uint v) { b[o] = (byte)(v >> 24); b[o + 1] = (byte)(v >> 16); b[o + 2] = (byte)(v >> 8); b[o + 3] = (byte)v; }
+        static uint IpH(string s) { var b = IPAddress.Parse(s).GetAddressBytes(); return IpH(b, 0); }
+        static string IpS(uint v) { return (v >> 24) + "." + ((v >> 16) & 255) + "." + ((v >> 8) & 255) + "." + (v & 255); }
+        static int IfIndexOf(string name) { var n = Nic(name); try { return n == null ? 0 : n.GetIPProperties().GetIPv4Properties().Index; } catch { return 0; } }
 
         static void ClientZapretWatch()
         {
-            if (!CzWanted()) { if (CzUdp != null) { CzStop(); Log("zapret для клиентов WG-Server: выключен", "INFO"); } return; }
-            string wgIp = Ipv4(WgIf());
-            if (wgIp == null) { if (CzUdp != null) CzStop(); CzError = "адаптер " + WgIf() + " без адреса"; return; }
-            CzLoadDomains();
-            if (CzUdp == null || (CzMode == "main" && CzIp != wgIp)) {
+            string why = null;
+            if (!CzWanted()) why = "off";
+            else if (ZDirect()) why = "в режиме «без VPN» клиенты и так идут напрямую — нужен режим с VPN";
+            else if (ZRoutes().Count == 0) why = "zapret не включён (нет маршрутов мимо VPN)";
+            string wgIp = Ipv4(WgIf()); var phys = why == null ? ZPhys() : null;
+            if (why == null && wgIp == null) why = "адаптер " + WgIf() + " без адреса";
+            if (why == null && phys == null) why = "нет физического выхода в интернет";
+            string dll = Path.Combine(ZDir(), "bin", "WinDivert.dll");
+            if (why == null && !File.Exists(dll)) why = "нет " + dll + " (zapret не установлен?)";
+            if (why != null) {
+                if (CzFwd != WdInvalid) { CzStop(); Log("zapret для клиентов WG-Server: остановлен" + (why == "off" ? "" : " — " + why), "INFO"); }
+                CzError = why == "off" ? "" : why; return;
+            }
+            CzUpdateSet();
+            string sig = wgIp + "|" + IfIndexOf(WgIf()) + "|" + phys.IfIndex + "|" + phys.Ip;
+            if (CzFwd == WdInvalid || sig != CzSig) {
                 CzStop();
-                try { CzStart(wgIp); CzError = ""; }
+                try { CzStart(dll, wgIp, phys); CzSig = sig; CzError = ""; }
                 catch (Exception e) { CzError = e.Message; Log("zapret для клиентов WG-Server: " + e.Message, "ERROR"); CzStop(); return; }
             }
-            CzFirewall();
+            CzFirewall(wgIp);
+            if ((DateTime.Now - CzCleanAt).TotalSeconds >= 30) { CzCleanAt = DateTime.Now; CzCleanup(); }
         }
 
-        // адрес: основной адрес ПК в сети wg_server; если порт 53 там занят (DNS-прокси раздачи Windows) — второй адрес (.53)
-        static void CzStart(string wgIp)
+        static void CzStart(string dll, string wgIp, ZPath phys)
         {
-            string ip = wgIp; string mode = "main";
-            Socket udp = CzBindUdp(ip);
-            if (udp == null) {
-                var alt = CfgStr("ws4w.clientDnsIp", "");
-                if (alt.Length == 0) alt = Regex.Replace(wgIp, @"\.\d+$", ".53");
-                if (Ipv4All(WgIf()).IndexOf(alt) < 0) {
-                    var r = Exe("netsh.exe", "interface ipv4 add address \"" + WgIf() + "\" " + alt + " 255.255.255.0 store=active", 20);
-                    Log("zapret для клиентов WG-Server: порт 53 на " + wgIp + " занят (DNS раздачи Windows) — добавляю адрес " + alt + " на " + WgIf() + (r.Code != 0 ? " (netsh: " + (r.Out + " " + r.Err).Trim() + ")" : ""), "WARN");
-                    Thread.Sleep(2500);
-                }
-                ip = alt; mode = "alt"; udp = CzBindUdp(ip);
-                if (udp == null) throw new Exception("не удалось занять UDP 53 ни на " + wgIp + ", ни на " + alt);
-            }
-            var a = IPAddress.Parse(ip);
-            var tdns = new TcpListener(a, 53); var tls = new TcpListener(a, 443); var http = new TcpListener(a, 80);
-            foreach (var l in new[] { tdns, tls, http }) { l.ExclusiveAddressUse = true; }
-            try { tls.Start(256); http.Start(64); } catch (Exception e) { try { udp.Close(); } catch { } try { tls.Stop(); } catch { } throw new Exception("порт 443/80 на " + ip + " занят: " + e.Message); }
-            try { tdns.Start(32); } catch { tdns = null; }
-            CzUdp = udp; CzTcpDns = tdns; CzTls = tls; CzHttp = http; CzIp = ip; CzMode = mode;
-            new Thread(CzUdpLoop) { IsBackground = true, Name = "cz-dns" }.Start(udp);
-            if (tdns != null) new Thread(CzAcceptLoop) { IsBackground = true, Name = "cz-dns-tcp" }.Start(Tuple.Create(tdns, "dns"));
-            new Thread(CzAcceptLoop) { IsBackground = true, Name = "cz-tls" }.Start(Tuple.Create(tls, "tls"));
-            new Thread(CzAcceptLoop) { IsBackground = true, Name = "cz-http" }.Start(Tuple.Create(http, "http"));
-            Log("zapret для клиентов WG-Server: DNS и прокси на " + ip + " (у клиентов в конфиге должен быть DNS = " + ip + "; доменов zapret: " + CzDomains.Count + ")", "WARN");
-        }
-        static Socket CzBindUdp(string ip)
-        {
-            // сначала монопольно; не вышло (кто-то слушает 0.0.0.0:53) — обычная привязка к конкретному адресу: она главнее «всех адресов»
-            foreach (bool excl in new[] { true, false }) {
-                var s = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-                try { s.ExclusiveAddressUse = excl; s.Bind(new IPEndPoint(IPAddress.Parse(ip), 53)); return s; } catch { s.Close(); }
-            }
-            return null;
-        }
-        static List<string> Ipv4All(string name)
-        {
-            var l = new List<string>(); var n = Nic(name); if (n == null) return l;
-            try { foreach (var u in n.GetIPProperties().UnicastAddresses) if (u.Address.AddressFamily == AddressFamily.InterNetwork) l.Add(u.Address.ToString()); } catch { }
-            return l;
+            if (!WdLoaded) { if (LoadLibrary(dll) == IntPtr.Zero) throw new Exception("не загрузился " + dll + " (код " + Marshal.GetLastWin32Error() + ")"); WdLoaded = true; }
+            CzWgIp = IpH(wgIp); CzEthIp = IpH(phys.Ip); CzWgIdx = IfIndexOf(WgIf()); CzEthIdx = phys.IfIndex;
+            string sub = Regex.Replace(wgIp, @"\.\d+$", "");
+            // транзит: от клиентов wg_server через физический адаптер (туда Windows и шлёт адреса zapret)
+            string ff = "ip and (tcp or udp) and ifIdx == " + CzEthIdx + " and ip.SrcAddr >= " + sub + ".0 and ip.SrcAddr <= " + sub + ".255 and ip.SrcAddr != " + wgIp;
+            // ответы ретранслятора клиентам: исходящие с адреса ПК в сети wg_server и порта ретранслятора
+            string nf = "outbound and ip and tcp and ip.SrcAddr == " + wgIp + " and tcp.SrcPort == " + CzRelayPort;
+            var relay = new TcpListener(IPAddress.Parse(wgIp), CzRelayPort) { ExclusiveAddressUse = true };
+            try { relay.Start(256); } catch (Exception e) { throw new Exception("порт " + CzRelayPort + " на " + wgIp + " занят: " + e.Message); }
+            var hf = WinDivertOpen(ff, WdLayerForward, 0, 0);
+            if (hf == WdInvalid) { relay.Stop(); throw new Exception("WinDivert (транзит) не открылся, код " + Marshal.GetLastWin32Error()); }
+            var hn = WinDivertOpen(nf, WdLayerNetwork, 0, 0);
+            if (hn == WdInvalid) { WinDivertClose(hf); relay.Stop(); throw new Exception("WinDivert (ответы) не открылся, код " + Marshal.GetLastWin32Error()); }
+            CzFwd = hf; CzNet = hn; CzRelay = relay;
+            new Thread(() => CzFwdLoop(hf)) { IsBackground = true, Name = "cz-fwd" }.Start();
+            new Thread(() => CzNetLoop(hn)) { IsBackground = true, Name = "cz-net" }.Start();
+            new Thread(() => CzAcceptLoop(relay)) { IsBackground = true, Name = "cz-relay" }.Start();
+            Log("zapret для клиентов WG-Server: включён — трафик клиентов к адресам zapret (" + ZRoutes().Count + " маршрутов) идёт через zapret этого ПК, остальное — через VPN (" + phys.Alias + ", ретранслятор " + wgIp + ":" + CzRelayPort + ")", "WARN");
         }
         static void CzStop()
         {
-            try { if (CzUdp != null) CzUdp.Close(); } catch { }
-            foreach (var l in new[] { CzTcpDns, CzTls, CzHttp }) { try { if (l != null) l.Stop(); } catch { } }
-            CzUdp = null; CzTcpDns = null; CzTls = null; CzHttp = null;
-            if (CzMode == "alt" && CzIp.Length > 0) Exe("netsh.exe", "interface ipv4 delete address \"" + WgIf() + "\" " + CzIp, 20);
-            CzIp = ""; CzMode = "";
+            var f = CzFwd; var n = CzNet; CzFwd = WdInvalid; CzNet = WdInvalid;
+            try { if (f != WdInvalid) WinDivertClose(f); } catch { }
+            try { if (n != WdInvalid) WinDivertClose(n); } catch { }
+            try { if (CzRelay != null) CzRelay.Stop(); } catch { }
+            CzRelay = null; CzSig = "";
+            lock (CzLock) { foreach (var u in CzUdp.Values) { try { u.Sock.Close(); } catch { } } CzUdp.Clear(); CzTcp.Clear(); }
         }
-        static void CzFirewall()
+        static void CzFirewall(string wgIp)
         {
-            string wgIp = Ipv4(WgIf()) ?? ""; string sub = Regex.Replace(wgIp, @"\.\d+$", ".0/24");
-            string sig = CzIp + "|" + sub;
+            string sub = Regex.Replace(wgIp, @"\.\d+$", ".0/24"), sig = wgIp + "|" + sub;
             if (sig == CzFwSig && (DateTime.Now - CzFwAt).TotalMinutes < 30) return;
             CzFwAt = DateTime.Now;
             const string name = "VpnGuard WG-Server zapret";
             bool have = Exe("netsh.exe", "advfirewall firewall show rule name=\"" + name + "\"", 15).Code == 0;
             if (have && sig == CzFwSig) return;
             if (have) Exe("netsh.exe", "advfirewall firewall delete rule name=\"" + name + "\"", 15);
-            Exe("netsh.exe", "advfirewall firewall add rule name=\"" + name + "\" dir=in action=allow protocol=TCP localip=" + CzIp + " localport=53,80,443 remoteip=" + sub, 15);
-            Exe("netsh.exe", "advfirewall firewall add rule name=\"" + name + "\" dir=in action=allow protocol=UDP localip=" + CzIp + " localport=53 remoteip=" + sub, 15);
+            Exe("netsh.exe", "advfirewall firewall add rule name=\"" + name + "\" dir=in action=allow protocol=TCP localip=" + wgIp + " localport=" + CzRelayPort + " remoteip=" + sub, 15);
             CzFwSig = sig;
         }
-
-        // домены: списки zapret (те же, по которым winws решает, что обрабатывать) + YouTube/Discord + маршрутные домены
-        static void CzLoadDomains()
+        // адреса zapret — те же, что в маршрутах мимо VPN
+        static void CzUpdateSet()
         {
-            var lists = Path.Combine(ZDir(), "lists");
-            var inc = new[] { "list-general.txt", "list-google.txt", "list-general-user.txt" }.Select(f => Path.Combine(lists, f)).ToList();
-            var exc = new[] { "list-exclude.txt", "list-exclude-user.txt" }.Select(f => Path.Combine(lists, f)).ToList();
-            var sig = string.Join("|", inc.Concat(exc).Select(f => File.Exists(f) ? File.GetLastWriteTimeUtc(f).Ticks.ToString() : "-")) + "|" + string.Join(",", CfgList("zapret.routeDomains", ZDefDomains));
-            if (sig == CzListSig) return;
-            var d = new HashSet<string>(CzBuiltin, StringComparer.OrdinalIgnoreCase); var x = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var r in CfgList("zapret.routeDomains", ZDefDomains)) if (r.Trim().Length > 0) d.Add(r.Trim().TrimStart('^').TrimEnd('.'));
-            Action<string, HashSet<string>> read = (f, set) => {
-                if (!File.Exists(f)) return;
-                try { foreach (var raw in File.ReadAllLines(f)) { var l = raw.Trim().TrimStart('^').TrimEnd('.'); if (l.Length > 0 && !l.StartsWith("#") && l != "domain.example.abc" && l.IndexOf('/') < 0 && Regex.IsMatch(l, @"[a-zA-Z]")) set.Add(l); } } catch { }
-            };
-            foreach (var f in inc) read(f, d); foreach (var f in exc) read(f, x);
-            CzDomains = d; CzExclude = x; CzListSig = sig;
+            var routes = ZRoutes(); var key = routes.Count + "|" + ZS("lastRouteRefresh");
+            if (key == CzSetKey) return;
+            var hosts = new HashSet<uint>(); var nets = new List<uint[]>();
+            foreach (var r in routes) {
+                var pp = JS(r, "p").Split('/'); IPAddress ip; int len;
+                if (pp.Length != 2 || !IPAddress.TryParse(pp[0], out ip) || !int.TryParse(pp[1], out len)) continue;
+                uint v = IpH(ip.GetAddressBytes(), 0);
+                if (len >= 32) hosts.Add(v); else { uint m = len == 0 ? 0 : 0xFFFFFFFFu << (32 - len); nets.Add(new[] { v & m, m }); }
+            }
+            CzHosts = hosts; CzNets = nets; CzSetKey = key;
         }
-        static bool CzMatch(string host)
+        static bool CzInSet(uint v)
         {
-            if (string.IsNullOrEmpty(host)) return false;
-            host = host.TrimEnd('.');
-            var doms = CzDomains; var ex = CzExclude;
-            for (string h = host; h.Length > 0; ) {
-                if (ex.Contains(h)) return false;
-                if (doms.Contains(h)) return true;
-                int i = h.IndexOf('.'); if (i < 0) break; h = h.Substring(i + 1);
+            if (CzHosts.Contains(v)) return true;
+            foreach (var n in CzNets) if ((v & n[1]) == n[0]) return true;
+            return false;
+        }
+        static void CzCleanup()
+        {
+            var now = DateTime.Now;
+            lock (CzLock) {
+                foreach (var k in CzTcp.Where(x => (now - x.Value.Last).TotalMinutes > 10).Select(x => x.Key).ToList()) CzTcp.Remove(k);
+                foreach (var k in CzUdp.Where(x => (now - x.Value.Last).TotalSeconds > 120).Select(x => x.Key).ToList()) { try { CzUdp[k].Sock.Close(); } catch { } CzUdp.Remove(k); }
+            }
+        }
+
+        // ---------------------------------------------------------------- перехват транзита клиентов
+        static void CzFwdLoop(IntPtr h)
+        {
+            var pkt = new byte[65535]; var addr = new WdAddr(); uint len;
+            while (true) {
+                if (!WinDivertRecv(h, pkt, (uint)pkt.Length, out len, ref addr)) { if (CzFwd != h) return; Interlocked.Increment(ref CzErrors); Thread.Sleep(5); continue; }
+                Interlocked.Increment(ref CzPkts);
+                try { if (CzHandleFwd(h, pkt, (int)len, ref addr)) continue; } catch { Interlocked.Increment(ref CzErrors); }
+                uint sl; WinDivertSend(h, pkt, len, out sl, ref addr);          // не наше — пропустить как было
+                Interlocked.Increment(ref CzPass);
+            }
+        }
+        // true — пакет обработан (не пропускать дальше как есть)
+        static bool CzHandleFwd(IntPtr h, byte[] p, int n, ref WdAddr addr)
+        {
+            if (n < 20 || (p[0] >> 4) != 4) return false;
+            int ihl = (p[0] & 15) * 4, proto = p[9];
+            if (n < ihl + 8) return false;
+            uint src = IpH(p, 12), dst = IpH(p, 16);
+            if (!CzInSet(dst)) return false;
+            int sport = (p[ihl] << 8) | p[ihl + 1], dport = (p[ihl + 2] << 8) | p[ihl + 3];
+            if (proto == 6) {
+                ulong key = ((ulong)src << 16) | (uint)sport;
+                lock (CzLock) { CzTcpFlow f; if (!CzTcp.TryGetValue(key, out f) || f.Dst != dst || f.DPort != dport) { f = new CzTcpFlow { Dst = dst, DPort = dport }; CzTcp[key] = f; } f.Last = DateTime.Now; }
+                // к ретранслятору на ПК: как будто клиент подключился к адресу ПК в сети wg_server
+                PutIp(p, 16, CzWgIp); p[ihl + 2] = (byte)(CzRelayPort >> 8); p[ihl + 3] = (byte)(CzRelayPort & 0xFF);
+                var a = new WdAddr { Flags = WdLayerNetwork, IfIdx = (uint)CzWgIdx, SubIfIdx = 0 };     // входящий на wg_server
+                WinDivertHelperCalcChecksums(p, (uint)n, ref a, 0);
+                uint sl; var nh = CzNet; if (nh != WdInvalid) WinDivertSend(nh, p, (uint)n, out sl, ref a);
+                return true;
+            }
+            if (proto == 17) {
+                int ulen = n - ihl - 8; if (ulen < 0) return true;
+                string key = src + ":" + sport + ">" + dst + ":" + dport; CzUdpFlow f;
+                lock (CzLock) {
+                    if (!CzUdp.TryGetValue(key, out f)) {
+                        var s = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+                        s.Connect(new IPEndPoint(IPAddress.Parse(IpS(dst)), dport));
+                        f = new CzUdpFlow { Client = src, CPort = sport, Dst = dst, DPort = dport, Sock = s };
+                        CzUdp[key] = f; var ff = f;
+                        new Thread(() => CzUdpRecv(ff)) { IsBackground = true }.Start();
+                    }
+                    f.Last = DateTime.Now;
+                }
+                try { f.Sock.Send(p, ihl + 8, ulen, SocketFlags.None); Interlocked.Increment(ref CzUdpPkts); Interlocked.Add(ref CzBytes, ulen); } catch { Interlocked.Increment(ref CzErrors); }
+                return true;
             }
             return false;
         }
-
-        // ---------------------------------------------------------------- DNS
-        static void CzUdpLoop(object o)
+        // ответы сайта по UDP → клиенту, пакетом с адреса и порта сайта
+        static void CzUdpRecv(CzUdpFlow f)
         {
-            var s = (Socket)o; var buf = new byte[4096];
+            var buf = new byte[65535];
             while (true) {
-                EndPoint from = new IPEndPoint(IPAddress.Any, 0); int n;
-                try { n = s.ReceiveFrom(buf, ref from); } catch (ObjectDisposedException) { return; } catch (SocketException e) { if (e.SocketErrorCode == SocketError.ConnectionReset) continue; if (CzUdp != s) return; continue; }
-                var q = new byte[n]; Buffer.BlockCopy(buf, 0, q, 0, n); var ep = from;
-                ThreadPool.QueueUserWorkItem(_ => { try { var r = CzAnswer(q); if (r != null) s.SendTo(r, ep); } catch { } });
+                int n; try { n = f.Sock.Receive(buf); } catch (SocketException e) { if (e.SocketErrorCode == SocketError.ConnectionReset) continue; return; } catch { return; }
+                f.Last = DateTime.Now;
+                var p = new byte[28 + n];
+                p[0] = 0x45; p[2] = (byte)(p.Length >> 8); p[3] = (byte)p.Length; p[6] = 0x40; p[8] = 64; p[9] = 17;
+                PutIp(p, 12, f.Dst); PutIp(p, 16, f.Client);
+                p[20] = (byte)(f.DPort >> 8); p[21] = (byte)f.DPort; p[22] = (byte)(f.CPort >> 8); p[23] = (byte)f.CPort; p[24] = (byte)((8 + n) >> 8); p[25] = (byte)(8 + n);
+                Buffer.BlockCopy(buf, 0, p, 28, n);
+                var a = new WdAddr { Flags = WdLayerNetwork | WdOutbound, IfIdx = (uint)CzWgIdx };
+                WinDivertHelperCalcChecksums(p, (uint)p.Length, ref a, 0);
+                uint sl; var nh = CzNet; if (nh == WdInvalid) return; WinDivertSend(nh, p, (uint)p.Length, out sl, ref a);
+                Interlocked.Add(ref CzBytes, n);
             }
         }
-        // ответ на запрос DNS: своё имя → адрес прокси (A), без IPv6 и HTTPS-записей; остальное — переслать дальше
-        static byte[] CzAnswer(byte[] q)
+        // ответы ретранслятора клиенту: адрес и порт ПК → исходный адрес и порт сайта
+        static void CzNetLoop(IntPtr h)
         {
-            Interlocked.Increment(ref CzQueries);
-            if (q.Length < 17) return null;
-            int qd = (q[4] << 8) | q[5]; if (qd != 1 || (q[2] & 0x80) != 0) return CzForward(q);
-            int p = 12; var sb = new StringBuilder();
-            while (p < q.Length && q[p] != 0) { int len = q[p]; if ((len & 0xC0) != 0 || p + 1 + len > q.Length) return CzForward(q); if (sb.Length > 0) sb.Append('.'); sb.Append(Encoding.ASCII.GetString(q, p + 1, len)); p += 1 + len; }
-            if (p + 5 > q.Length) return CzForward(q);
-            int qEnd = p + 5; int type = (q[p + 1] << 8) | q[p + 2];
-            string name = sb.ToString();
-            if (!CzSpoofOn() || !CzMatch(name) || CzIp.Length == 0) return CzForward(q);
-            if (type != 1 && type != 28 && type != 65 && type != 64) return CzForward(q);
-            Interlocked.Increment(ref CzSpoofed);
-            var r = new List<byte>();
-            r.Add(q[0]); r.Add(q[1]); r.Add((byte)(0x80 | (q[2] & 0x01))); r.Add(0x80);     // ответ, RD как в запросе, RA, NOERROR
-            r.AddRange(new byte[] { 0, 1, 0, (byte)(type == 1 ? 1 : 0), 0, 0, 0, 0 });
-            for (int i = 12; i < qEnd; i++) r.Add(q[i]);
-            if (type == 1) { r.AddRange(new byte[] { 0xC0, 0x0C, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4 }); r.AddRange(IPAddress.Parse(CzIp).GetAddressBytes()); }
-            return r.ToArray();
-        }
-        static byte[] CzForward(byte[] q)
-        {
-            foreach (var up in CzUpstreams()) {
-                IPAddress a; if (!IPAddress.TryParse(up, out a)) continue;
-                using (var c = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)) {
-                    try {
-                        c.ReceiveTimeout = 3000; c.Connect(new IPEndPoint(a, 53)); c.Send(q);
-                        var b = new byte[4096]; int n = c.Receive(b);
-                        if (n >= 12 && b[0] == q[0] && b[1] == q[1]) { var r = new byte[n]; Buffer.BlockCopy(b, 0, r, 0, n); return r; }
-                    } catch { }
-                }
+            var pkt = new byte[65535]; var addr = new WdAddr(); uint len;
+            while (true) {
+                if (!WinDivertRecv(h, pkt, (uint)pkt.Length, out len, ref addr)) { if (CzNet != h) return; Thread.Sleep(5); continue; }
+                try {
+                    int ihl = (pkt[0] & 15) * 4; uint dst = IpH(pkt, 16); int dport = (pkt[ihl + 2] << 8) | pkt[ihl + 3];
+                    CzTcpFlow f; lock (CzLock) CzTcp.TryGetValue(((ulong)dst << 16) | (uint)dport, out f);
+                    if (f != null) {
+                        PutIp(pkt, 12, f.Dst); pkt[ihl] = (byte)(f.DPort >> 8); pkt[ihl + 1] = (byte)f.DPort;
+                        WinDivertHelperCalcChecksums(pkt, len, ref addr, 0);
+                    }
+                } catch { Interlocked.Increment(ref CzErrors); }
+                uint sl; WinDivertSend(h, pkt, len, out sl, ref addr);
             }
-            if (q.Length < 12) return null;
-            var f = (byte[])q.Clone(); f[2] = (byte)(0x80 | (q[2] & 0x01)); f[3] = 0x82; return f;       // SERVFAIL
         }
 
-        // ---------------------------------------------------------------- прокси
-        static void CzAcceptLoop(object o)
+        // ---------------------------------------------------------------- ретранслятор TCP: соединение к тому же адресу — уже от ПК (через winws)
+        static void CzAcceptLoop(TcpListener l)
         {
-            var t = (Tuple<TcpListener, string>)o;
             while (true) {
-                TcpClient c;
-                try { c = t.Item1.AcceptTcpClient(); } catch { return; }
-                var kind = t.Item2;
-                new Thread(() => { try { if (kind == "dns") CzDnsTcp(c); else CzProxy(c, kind == "tls"); } catch { } finally { try { c.Close(); } catch { } } }) { IsBackground = true }.Start();
+                TcpClient c; try { c = l.AcceptTcpClient(); } catch { return; }
+                new Thread(() => { try { CzRelayConn(c); } catch { } finally { try { c.Close(); } catch { } } }) { IsBackground = true }.Start();
             }
         }
-        static bool ReadFull(Stream s, byte[] b, int off, int n) { while (n > 0) { int k = s.Read(b, off, n); if (k <= 0) return false; off += k; n -= k; } return true; }
-        static void CzDnsTcp(TcpClient c)
+        static void CzRelayConn(TcpClient c)
         {
-            c.ReceiveTimeout = 10000; var s = c.GetStream(); var h = new byte[2];
-            while (ReadFull(s, h, 0, 2)) {
-                int len = (h[0] << 8) | h[1]; var q = new byte[len]; if (!ReadFull(s, q, 0, len)) return;
-                var r = CzAnswer(q); if (r == null) return;
-                s.Write(new[] { (byte)(r.Length >> 8), (byte)r.Length }, 0, 2); s.Write(r, 0, r.Length);
-            }
-        }
-        static void CzProxy(TcpClient c, bool tls)
-        {
-            c.ReceiveTimeout = 10000; c.NoDelay = true;
-            var cs = c.GetStream(); var buf = new byte[17000]; int have = 0; string host = null;
-            // первые байты: ClientHello (имя сайта — SNI) или заголовки HTTP (Host)
-            while (have < buf.Length) {
-                int k = cs.Read(buf, have, buf.Length - have); if (k <= 0) return; have += k;
-                if (tls) {
-                    if (have >= 5) { if (buf[0] != 0x16) return; int rl = (buf[3] << 8) | buf[4]; if (have >= 5 + rl || have >= buf.Length) { host = SniOf(buf, have); break; } }
-                } else {
-                    var txt = Encoding.ASCII.GetString(buf, 0, have); int e = txt.IndexOf("\r\n\r\n");
-                    if (e >= 0 || have > 8192) { var m = Regex.Match(txt, @"(?im)^Host:\s*([^\s:]+)"); if (m.Success) host = m.Groups[1].Value; break; }
-                }
-            }
-            if (host == null || !CzMatch(host)) return;                 // только домены zapret — не открытый прокси
-            var ip = CzResolve(host); if (ip == null) return;
+            var ep = (IPEndPoint)c.Client.RemoteEndPoint; uint cip = IpH(ep.Address.GetAddressBytes(), 0);
+            CzTcpFlow f; lock (CzLock) CzTcp.TryGetValue(((ulong)cip << 16) | (uint)ep.Port, out f);
+            if (f == null) return;
+            c.NoDelay = true;
             var srv = new TcpClient(AddressFamily.InterNetwork) { NoDelay = true };
             try {
-                var ar = srv.BeginConnect(ip, tls ? 443 : 80, null, null);
-                if (!ar.AsyncWaitHandle.WaitOne(10000)) return; srv.EndConnect(ar);
-                var ss = srv.GetStream(); ss.Write(buf, 0, have);
-                c.ReceiveTimeout = 0; Interlocked.Increment(ref CzConns); Interlocked.Increment(ref CzActive);
-                var up = new Thread(() => { CzPump(cs, ss); try { srv.Client.Shutdown(SocketShutdown.Send); } catch { } }) { IsBackground = true }; up.Start();
-                CzPump(ss, cs); try { c.Client.Shutdown(SocketShutdown.Send); } catch { }
-                up.Join(30000);
+                var ar = srv.BeginConnect(IPAddress.Parse(IpS(f.Dst)), f.DPort, null, null);
+                if (!ar.AsyncWaitHandle.WaitOne(15000)) return; srv.EndConnect(ar);
+                Interlocked.Increment(ref CzTcpConns); Interlocked.Increment(ref CzActive);
+                var cs = c.GetStream(); var ss = srv.GetStream();
+                var up = new Thread(() => { CzPump(cs, ss, f); try { srv.Client.Shutdown(SocketShutdown.Send); } catch { } }) { IsBackground = true }; up.Start();
+                CzPump(ss, cs, f); try { c.Client.Shutdown(SocketShutdown.Send); } catch { }
+                up.Join(60000);
             } catch { }
-            finally { Interlocked.Decrement(ref CzActive); try { srv.Close(); } catch { } }
+            finally { if (Interlocked.Decrement(ref CzActive) < 0) Interlocked.Exchange(ref CzActive, 0); try { srv.Close(); } catch { } }
         }
-        static void CzPump(Stream a, Stream b)
+        static void CzPump(Stream a, Stream b, CzTcpFlow f)
         {
             var bb = new byte[65536];
-            try { int n; while ((n = a.Read(bb, 0, bb.Length)) > 0) { b.Write(bb, 0, n); Interlocked.Add(ref CzBytes, n); } } catch { }
-        }
-        // адрес сайта — как для самого ПК (системный DNS: видеосерверы провайдера и т. п.); не наш и не частный
-        static IPAddress CzResolve(string host)
-        {
-            lock (CzResolveCache) { Tuple<IPAddress, DateTime> t; if (CzResolveCache.TryGetValue(host, out t) && t.Item2 > DateTime.Now) return t.Item1; }
-            IPAddress ip = null;
-            try { ip = Dns.GetHostAddresses(host).FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork && !IsPrivate(a)); } catch { }
-            if (ip != null) lock (CzResolveCache) { if (CzResolveCache.Count > 2000) CzResolveCache.Clear(); CzResolveCache[host] = Tuple.Create(ip, DateTime.Now.AddSeconds(60)); }
-            return ip;
-        }
-        static bool IsPrivate(IPAddress a)
-        {
-            var b = a.GetAddressBytes();
-            return b[0] == 10 || b[0] == 127 || b[0] == 0 || (b[0] == 172 && b[1] >= 16 && b[1] < 32) || (b[0] == 192 && b[1] == 168) || (b[0] == 169 && b[1] == 254) || (b[0] == 100 && b[1] >= 64 && b[1] < 128);
-        }
-        // имя сайта из TLS ClientHello (расширение server_name)
-        static string SniOf(byte[] b, int n)
-        {
-            try {
-                int p = 5; if (p + 4 > n || b[p] != 1) return null; p += 4;      // заголовок рукопожатия
-                p += 2 + 32; if (p >= n) return null;                             // версия, random
-                p += 1 + b[p]; if (p + 2 > n) return null;                        // session id
-                p += 2 + ((b[p] << 8) | b[p + 1]); if (p >= n) return null;       // шифры
-                p += 1 + b[p]; if (p + 2 > n) return null;                        // сжатие
-                int end = Math.Min(n, p + 2 + ((b[p] << 8) | b[p + 1])); p += 2;
-                while (p + 4 <= end) {
-                    int et = (b[p] << 8) | b[p + 1], el = (b[p + 2] << 8) | b[p + 3]; p += 4;
-                    if (et == 0 && p + 5 <= end) { int nl = (b[p + 3] << 8) | b[p + 4]; if (b[p + 2] == 0 && p + 5 + nl <= end) return Encoding.ASCII.GetString(b, p + 5, nl); return null; }
-                    p += el;
-                }
-            } catch { }
-            return null;
+            try { int n; while ((n = a.Read(bb, 0, bb.Length)) > 0) { b.Write(bb, 0, n); Interlocked.Add(ref CzBytes, n); f.Last = DateTime.Now; } } catch { }
         }
 
         // ---------------------------------------------------------------- состояние
         static Dictionary<string, object> CzSnapshot()
         {
-            bool on = CzWanted();
-            return new Dictionary<string, object> { { "enabled", on }, { "running", CzUdp != null }, { "spoof", on && CzSpoofOn() }, { "dns", CzIp }, { "alt", CzMode == "alt" },
-                { "error", CzError }, { "queries", Interlocked.Read(ref CzQueries) }, { "spoofed", Interlocked.Read(ref CzSpoofed) }, { "conns", Interlocked.Read(ref CzConns) },
-                { "active", CzActive }, { "mb", Math.Round(Interlocked.Read(ref CzBytes) / 1048576.0, 1) }, { "domains", CzDomains.Count } };
+            int tcpN, udpN; lock (CzLock) { tcpN = CzTcp.Count; udpN = CzUdp.Count; }
+            return new Dictionary<string, object> { { "enabled", CzWanted() }, { "running", CzFwd != WdInvalid }, { "error", CzError },
+                { "packets", Interlocked.Read(ref CzPkts) }, { "passed", Interlocked.Read(ref CzPass) }, { "tcpConns", Interlocked.Read(ref CzTcpConns) }, { "active", CzActive },
+                { "tcpFlows", tcpN }, { "udpFlows", udpN }, { "udpPackets", Interlocked.Read(ref CzUdpPkts) }, { "mb", Math.Round(Interlocked.Read(ref CzBytes) / 1048576.0, 1) },
+                { "errors", Interlocked.Read(ref CzErrors) }, { "relay", CzFwd != WdInvalid ? IpS(CzWgIp) + ":" + CzRelayPort : "" } };
         }
         static string CzSummary()
         {
-            if (!CzWanted()) return "выключен (в настройках WG-Server)";
-            if (CzUdp == null) return "не работает" + (CzError.Length > 0 ? ": " + CzError : "");
-            return (CzSpoofOn() ? "работает" : "ждёт zapret (пока всё через VPN)") + " · DNS для клиентов " + CzIp + " · соединений " + Interlocked.Read(ref CzConns) + " (сейчас " + CzActive + "), " +
-                Math.Round(Interlocked.Read(ref CzBytes) / 1048576.0, 1) + " МБ · запросов DNS " + Interlocked.Read(ref CzQueries) + ", подменено " + Interlocked.Read(ref CzSpoofed);
+            if (!CzWanted()) return "выключен (вкладка WG-Server)";
+            if (CzFwd == WdInvalid) return "не работает" + (CzError.Length > 0 ? ": " + CzError : "");
+            int tcpN, udpN; lock (CzLock) { tcpN = CzTcp.Count; udpN = CzUdp.Count; }
+            return "работает · TCP-соединений через zapret " + Interlocked.Read(ref CzTcpConns) + " (сейчас " + CzActive + "), UDP-потоков " + udpN + " · " +
+                Math.Round(Interlocked.Read(ref CzBytes) / 1048576.0, 1) + " МБ · перехвачено пакетов " + Interlocked.Read(ref CzPkts) + (Interlocked.Read(ref CzErrors) > 0 ? ", ошибок " + Interlocked.Read(ref CzErrors) : "");
         }
     }
 }

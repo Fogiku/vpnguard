@@ -216,12 +216,6 @@ function Get-WgEndpoint($Info) {
 }
 
 function Get-WgClientDns($Info) {
-    # zapret для клиентов: DNS — адрес, на котором агент держит свой DNS (иначе YouTube/Discord клиента пойдут мимо zapret)
-    if ($W.clientZapret) {
-        try { $st = Get-Content (Join-Path $DataDir 'status.json') -Raw -Encoding UTF8 | ConvertFrom-Json; if ($st.wg.clientZapret.dns) { return "$($st.wg.clientZapret.dns)" } } catch { }
-        if ($W.clientDnsIp) { return "$($W.clientDnsIp)" }
-        return $Info.Ip
-    }
     if ($W.clientDns) { return "$($W.clientDns)" }
     $fp = @(Get-WgClientFiles $Info.Conf) | Where-Object { $_.Dns } | Select-Object -First 1
     if ($fp) { return $fp.Dns }
