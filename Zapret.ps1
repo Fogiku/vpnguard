@@ -28,7 +28,7 @@ $ZState = @{
     routes = @(); lastRouteRefresh = [datetime]::MinValue
     healthAt = [datetime]::MinValue; healthOk = 0; healthTotal = 0; healthFails = 0
     fallbackUntil = [datetime]::MinValue; winwsPid = 0; runningStrategy = ''; lastError = ''
-    healthChecks = @(); videoHost = ''; videoHostAt = [datetime]::MinValue; videoHostVia = ''; ytJs = ''; ytJsAt = ''; ggc = @()
+    healthChecks = @(); videoHost = ''; videoHostAt = [datetime]::MinValue; videoHostVia = ''; ytJs = ''; ytJsAt = ''; ggc = @(); ggcAt = ''
     releases = @(); releasesAt = ''
 }
 
@@ -555,6 +555,7 @@ function Receive-ZapretTest {
     $t | ConvertTo-Json -Depth 8 | Set-Content $ZTestPath -Encoding UTF8
 
     $ZState.lastTest = Get-Date
+    $ZState.ggcAt = ''
     $ZState.results = @($t.results | ForEach-Object { [ordered]@{ name = $_.name; ok = $_.ok; total = $_.total; error = "$($_.error)"; checks = @($_.checks | Where-Object { $_ }) } })
     if ($t.PSObject.Properties['videoHost'] -and $t.videoHost) { $ZState.videoHost = "$($t.videoHost)"; $ZState.videoHostAt = Get-Date; $ZState.videoHostVia = $(if ($t.PSObject.Properties['videoHostVia']) { "$($t.videoHostVia)" } else { '' }) }
     if ($t.error) {
@@ -606,27 +607,37 @@ function Get-ZapretRouteDomains {
 }
 
 # кэш-серверы YouTube у провайдера (rrN---sn-XXXX.googlevideo.com): их адреса — в сети провайдера, не в диапазонах Google.
-# Без маршрута к ним видео в режиме с VPN уходит в туннель и не грузится (кэш отвечает только своим абонентам).
-function Get-ZGgcPrefixes {
-    $vh = "$($ZState.videoHost)"
-    if (-not $vh -or "$($ZState.videoHostVia)" -ne 'direct') { return @($ZState.ggc | Where-Object { $_ }) }
-    $cl = $vh -replace '^rr\d+---', ''
+# Браузер получает их от YouTube, когда страница YouTube идёт мимо VPN (через zapret), — а видео без маршрута уходит
+# в туннель, и кэш провайдера не отвечает чужому (зарубежному) адресу. Узнаём их так же, как браузер: страница ролика
+# напрямую через физический адаптер; все узлы rrN этих кластеров — в маршруты мимо VPN (подсети /24).
+function Update-ZIspVideo([switch]$Force) {
+    $at = [datetime]::MinValue; try { if ($ZState.ggcAt) { $at = [datetime]$ZState.ggcAt } } catch { }
+    if (-not $Force -and ((Get-Date) - $at).TotalMinutes -lt 30) { return }
+    $path = Get-PhysicalPath
+    if (-not $path) { return }
+    $ZState.ggcAt = (Get-Date).ToString('o')
+    $curl = Join-Path $env:windir 'System32\curl.exe'
+    $r = Invoke-Exe $curl ('-s -L --compressed --connect-timeout 4 -m 15 --interface ' + $path.Ip + ' -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0 Safari/537.36" "https://www.youtube.com/watch?v=jNQXAC9IVRw"') 20
+    $cls = @([regex]::Matches("$($r.Out)", 'rr\d{1,2}---(sn-[a-z0-9-]{4,})\.googlevideo\.com') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique)
+    if (-not $cls.Count) { return }
+    $ZState.videoHost = "rr1---$($cls[0]).googlevideo.com"; $ZState.videoHostAt = Get-Date; $ZState.videoHostVia = 'direct'
     $set = New-Object System.Collections.Generic.HashSet[string]
-    foreach ($i in 1..20) {
-        try {
-            Resolve-DnsName -Name "rr$i---$cl" -Type A -DnsOnly -QuickTimeout -ErrorAction Stop | Where-Object { $_.Type -eq 'A' } |
-                ForEach-Object { $o = $_.IPAddress -split '\.'; [void]$set.Add("$($o[0]).$($o[1]).$($o[2]).0/24") }
-        } catch { }
+    foreach ($cl in $cls | Select-Object -First 3) {
+        foreach ($n in 1..20) {
+            try {
+                Resolve-DnsName -Name "rr$n---$cl.googlevideo.com" -Type A -DnsOnly -QuickTimeout -ErrorAction Stop | Where-Object { $_.Type -eq 'A' } |
+                    ForEach-Object { $o = $_.IPAddress -split '\.'; [void]$set.Add("$($o[0]).$($o[1]).$($o[2]).0/24") }
+            } catch { }
+        }
     }
-    $google = @(Get-GoogleRanges)
-    $list = @($set | Where-Object { $_ })
-    if ($list.Count) {
-        $new = @($list | Where-Object { @($ZState.ggc) -notcontains $_ })
-        if ($new.Count) { Write-Log "zapret: видеосерверы YouTube у провайдера ($cl): $($list -join ', ') — пускаю мимо VPN" }
+    $list = @($set | Sort-Object)
+    if ($list.Count -and (($list -join ',') -ne (@($ZState.ggc) -join ','))) {
+        Write-Log "zapret: видеосерверы YouTube у провайдера ($($cls -join ', ')): $($list -join ', ') — пускаю мимо VPN" 'WARN'
         $ZState.ggc = $list
+        $ZState.lastRouteRefresh = [datetime]::MinValue
     }
-    return @($ZState.ggc | Where-Object { $_ })
 }
+function Get-ZGgcPrefixes { @($ZState.ggc | Where-Object { $_ }) }
 
 function Get-ZapretPrefixes {
     $z = Get-ZCfg
@@ -785,6 +796,7 @@ function Invoke-ZapretWatch {
         }
     }
 
+    if (-not (Test-ZDirect) -and (Get-ZCfg).routeIspVideo -ne $false) { try { Update-ZIspVideo } catch { Write-Log "zapret: видеосерверы провайдера: $($_.Exception.Message)" 'WARN' } }
     Sync-ZapretRoutes
 
     # проверка, что сайты открываются
