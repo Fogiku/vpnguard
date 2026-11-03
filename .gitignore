@@ -1,0 +1,6 @@
+config.json
+data/
+zapret/
+bin/
+*.tmp
+*.new
