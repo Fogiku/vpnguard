@@ -307,7 +307,7 @@ function Get-RSystem {
         "PowerShell: $($PSVersionTable.PSVersion) · .NET: $([Environment]::Version) · память свободно $([int]($os.FreePhysicalMemory / 1024)) из $([int]($os.TotalVisibleMemorySize / 1024)) МБ"
         "Агент VpnGuard: $AgentVersion · папка $Root"
         '===== процессы'
-        Get-Process | Where-Object { $_.ProcessName -match 'medusa|meduza|winws|wireguard|amnezia|awg|ws4w|WgServer|powershell|VpnGuardWeb|VpnGuardTray' } |
+        Get-Process | Where-Object { $_.ProcessName -match 'medusa|meduza|winws|wireguard|amnezia|awg|ws4w|WgServer|powershell|VpnGuardWeb|VpnGuardTray|VpnGuardAgent' } |
             Format-Table Id, ProcessName, @{ n = 'CPU,с'; e = { [int]$_.CPU } }, @{ n = 'МБ'; e = { [int]($_.WorkingSet64 / 1MB) } }, StartTime, Responding -AutoSize
         '===== службы'
         Get-Service | Where-Object { $_.Name -match 'WireGuard|AmneziaWG|SharedAccess|zapret|WinDivert|iphlpsvc|Dnscache|BFE|mpssvc|MeduzaVPN' } | Format-Table Name, Status, StartType, DisplayName -AutoSize

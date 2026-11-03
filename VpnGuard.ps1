@@ -29,6 +29,7 @@ param(
     [switch]$Restarted,
     [switch]$ZapretTest,
     [switch]$RemoteServer,
+    [switch]$PsPart,
     [string]$WebTask = '',
     [string]$WebArg = '',
     [ValidateSet('agent', 'remove-agent', 'monitor', 'monitor-logon', 'remove-monitor')]
@@ -36,7 +37,7 @@ param(
     [string]$ConfigPath = ''
 )
 
-$AgentVersion = '3.1.2'
+$AgentVersion = '3.2'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -118,6 +119,9 @@ function Get-DefaultConfig { @{
         auto       = $true       # ставить обновления самому
         checkHours = 3
         token      = ''          # только для закрытого репозитория
+    }
+    agent = @{
+        engine = 'powershell'    # csharp — основной цикл ведёт bin\VpnGuardAgent.exe (Agent.cs); zapret, обновления и веб — по-прежнему PowerShell
     }
     ui = @{
         tray = $true             # значок у часов вместо окна (ярлык VpnGuard открывает его; окно — в меню значка)
@@ -787,6 +791,8 @@ function Invoke-MeduzaUpdate([switch]$Force) {
     }
 
     $State.updating = $true
+    $updFlag = Join-Path $DataDir 'meduza-updating.flag'
+    try { Set-Content $updFlag (Get-Date).ToString('o') -Encoding ASCII } catch { }   # агент на C# не трогает MeduzaVPN, пока идёт установка
     try { Write-StatusSnapshot } catch { }
     try {
         Stop-Meduza
@@ -801,7 +807,7 @@ function Invoke-MeduzaUpdate([switch]$Force) {
         Write-Log "Ошибка обновления: $($_.Exception.Message)" 'ERROR'
     } finally {
         $State.updating = $false
-        Remove-Item $setup -Force -ErrorAction SilentlyContinue
+        Remove-Item $setup, $updFlag -Force -ErrorAction SilentlyContinue
     }
     # установщик мог сам запустить приложение
     Start-Sleep -Seconds 5
@@ -1246,7 +1252,9 @@ function Invoke-Diag([switch]$TryFix) {
     Try-Run {
         $script_ = Join-Path $Root 'VpnGuard.ps1'
         $procs = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
-            Where-Object { $_.CommandLine -match 'VpnGuard\.ps1' -and $_.ProcessId -ne $PID -and $_.CommandLine -notmatch '-(Diag|RemoteServer|ZapretTest)' })
+            Where-Object { $_.CommandLine -match 'VpnGuard\.ps1' -and $_.ProcessId -ne $PID -and $_.CommandLine -notmatch '-(Diag|RemoteServer|ZapretTest|PsPart|WebTask)' })
+        $procs += @(Get-CimInstance Win32_Process -Filter "Name='VpnGuardAgent.exe'")
+        Write-Host "Движок агента: $(if ($Cfg.agent) { $Cfg.agent.engine } else { 'powershell' })"
         if (-not $procs) { Write-Host '!! агент НЕ запущен' }
         foreach ($pr in $procs) {
             $old = $pr.CreationDate -lt (Get-Item $script_).LastWriteTime
@@ -1722,6 +1730,12 @@ function Invoke-Commands {
             'reapply-ics'    { $State.forceIcs = $true }
             'check-update'   { Invoke-MeduzaUpdate -Force }
             'check-now'      { }
+            'wg-create'      {
+                if (-not (Get-Service -Name $W.serviceName -ErrorAction SilentlyContinue) -and -not (Find-WgConf)) {
+                    try { $c = Initialize-WgServer; $State.wgConfPath = $c; Save-State; Write-Log "wg_server: создан новый сервер ($c, адрес $($W.newServerAddress), порт UDP $($W.newServerPort)). Пробросьте этот порт на роутере и добавьте клиентов." 'WARN' }
+                    catch { Write-Log "wg_server: не удалось создать сервер: $($_.Exception.Message)" 'ERROR' }
+                }
+            }
             'zapret-on'      { Set-ZapretEnabled $true }
             'zapret-off'     { Set-ZapretEnabled $false }
             'zapret-test'    { if ($Cfg.zapret.enabled) { Disable-ZapretNow }; Start-ZapretTest 'по команде из окна' }
@@ -2062,6 +2076,114 @@ function Invoke-VpnWatch {
     }
 }
 
+# ---------------------------------------------------------------- агент на C# (agent.engine = 'csharp')
+# Основной цикл (MeduzaVPN, AmneziaWG, wg_server, раздача, трафик, состояние) ведёт bin\VpnGuardAgent.exe из Agent.cs.
+# Он раз в 2 мин (или сразу по команде) запускает этот файл с -PsPart: zapret, обновления, компоненты, веб-сервер, значок.
+
+$CsAgentExe  = Join-Path $BinDir 'VpnGuardAgent.exe'
+$CsAgentSrc  = Join-Path $Root 'Agent.cs'
+$CsStatePath = Join-Path $DataDir 'agent-cs.json'
+$PsStatusPath = Join-Path $DataDir 'status-ps.json'
+$PsPartStatePath = Join-Path $DataDir 'pspart-state.xml'
+
+function Get-CsSig { if (Test-Path $CsAgentSrc) { (Get-FileHash $CsAgentSrc -Algorithm SHA256).Hash } else { '' } }
+function Get-CsState {
+    $s = $null; try { $s = Get-Content $CsStatePath -Raw -Encoding UTF8 | ConvertFrom-Json } catch { }
+    if (-not $s) { $s = [pscustomobject]@{ sig = ''; starts = @(); fallbackSig = '' } }
+    return $s
+}
+function Save-CsState($s) { try { $s | ConvertTo-Json -Depth 4 | Set-Content $CsStatePath -Encoding UTF8 } catch { } }
+
+function Test-CsAgentWanted {
+    if (-not $Cfg.agent -or "$($Cfg.agent.engine)" -ne 'csharp') { return $false }
+    if ((Get-VpnMode) -eq 'dual') { return $false }          # «два туннеля» — пока только агент на PowerShell
+    $sig = Get-CsSig
+    if (-not $sig) { return $false }
+    return "$((Get-CsState).fallbackSig)" -ne $sig            # этот Agent.cs уже падал — остаёмся на PowerShell
+}
+
+function Start-CsAgent {
+    if (Get-Process VpnGuardAgent -ErrorAction SilentlyContinue) { return $true }
+    $sig = Get-CsSig
+    $st = Get-CsState
+    if (-not (Build-CsExe $CsAgentExe @('Agent.cs') 'winexe' @('System.Web.Extensions.dll', 'System.ServiceProcess.dll', 'System.Management.dll', 'System.Core.dll', 'Microsoft.CSharp.dll'))) {
+        Write-Log 'Агент на C# не собрался — работает агент на PowerShell (до обновления Agent.cs)' 'ERROR'
+        $st.fallbackSig = $sig; Save-CsState $st
+        return $false
+    }
+    $starts = @()
+    if ("$($st.sig)" -eq $sig) { foreach ($t in @($st.starts)) { try { if ([datetime]$t -gt (Get-Date).AddMinutes(-30)) { $starts += "$t" } } catch { } } }
+    if ($starts.Count -ge 3) {
+        Write-Log 'Агент на C# трижды завершился за 30 мин — возвращаю агент на PowerShell (до обновления Agent.cs или повторного выбора движка)' 'ERROR'
+        $st.fallbackSig = $sig; Save-CsState $st
+        return $false
+    }
+    $starts += (Get-Date).ToString('o')
+    Save-CsState ([pscustomobject]@{ sig = $sig; starts = $starts; fallbackSig = "$($st.fallbackSig)" })
+    $a = "`"$Root`""
+    if ($ConfigPath -ne (Join-Path $Root 'config.json')) { $a += " `"$ConfigPath`"" }
+    Start-Process -FilePath $CsAgentExe -ArgumentList $a -WorkingDirectory $Root | Out-Null
+    Write-Log "Запущен агент на C# ($(Split-Path $CsAgentExe -Leaf)) — основной цикл теперь ведёт он"
+    return $true
+}
+
+# агент на PowerShell работает, а в настройках выбрали C# — передать работу
+function Test-HandToCs {
+    if (-not (Test-CsAgentWanted)) {
+        # вернулись на PowerShell — следующий выбор C# снова попробует его, даже если он раньше падал
+        if ("$($Cfg.agent.engine)" -ne 'csharp') { $st = Get-CsState; if ($st.fallbackSig) { $st.fallbackSig = ''; Save-CsState $st } }
+        return $false
+    }
+    Write-Log 'Выбран агент на C# — передаю ему работу' 'WARN'
+    $t = Get-ScheduledTask -TaskName $AgentTask -ErrorAction SilentlyContinue
+    if ($t -and $t.State -ne 'Disabled') { Start-Process cmd.exe -WindowStyle Hidden -ArgumentList "/c ping -n 6 127.0.0.1 >nul & schtasks /run /tn `"$AgentTask`"" }
+    else { Start-Process powershell.exe -WindowStyle Hidden -WorkingDirectory $Root -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$SelfPath`" -Restarted" }
+    return $true
+}
+
+# часть PowerShell при агенте на C#: состояние zapret/обновлений/компонентов/веба — в data\status-ps.json (агент C# вставляет его в status.json)
+function Write-PsStatus {
+    $o = [ordered]@{
+        updated  = (Get-Date).ToString('o'); pid = $PID; activity = "$($State.activity)"
+        zapret   = $(try { Get-ZapretSnapshot } catch { [ordered]@{ level = 2; state = 'Ошибка модуля'; details = @("$($_.Exception.Message)"); kv = @(); enabled = $false } })
+        software = $(try { @(Get-SoftwareSnapshot) } catch { @() })
+        remote   = $(try { Get-RemoteSnapshot } catch { $null })
+        app      = $(try { Get-AppSnapshot } catch { $null })
+        meduzaRemoteVersion = "$($State.remoteVersion)"
+        meduzaLastCheck     = Format-When $State.lastUpdateCheck
+    }
+    $tmp = "$PsStatusPath.tmp"
+    $o | ConvertTo-Json -Depth 8 -Compress | Set-Content $tmp -Encoding UTF8
+    Move-Item $tmp $PsStatusPath -Force
+    $State.lastSnapshot = Get-Date
+}
+
+function Invoke-PsPart {
+    $mx = New-Object System.Threading.Mutex($false, 'Global\VpnGuardPs')
+    $got = $false
+    try { $got = $mx.WaitOne(2000) } catch [Threading.AbandonedMutexException] { $got = $true }
+    if (-not $got) { return }                          # предыдущая часть ещё работает
+    # между запусками помнить то, что агент PowerShell держал в памяти
+    if (Test-Path $PsPartStatePath) {
+        try { $p = Import-Clixml $PsPartStatePath; foreach ($k in 'software', 'softwareCheckedAt', 'remoteVersion') { if ($null -ne $p[$k]) { $State[$k] = $p[$k] } } } catch { }
+    }
+    $script:CmdDir = Join-Path $DataDir 'cmd-ps'      # команды, которые агент C# передал сюда
+    if (-not (Test-Path $CmdDir)) { New-Item -ItemType Directory $CmdDir -Force | Out-Null }
+    function Write-StatusSnapshot { Write-PsStatus }  # вместо общего состояния (его пишет агент C#)
+    try {
+        foreach ($step in 'Invoke-Commands', 'Invoke-MeduzaUpdate', 'Invoke-ZapretWatch', 'Invoke-SoftwareCheck', 'Invoke-RemoteWatch', 'Invoke-AppUpdateWatch', 'Invoke-TrayWatch') {
+            try { & $step } catch { Write-Log "$step : $($_.Exception.Message)" 'ERROR' }
+            if (((Get-Date) - $State.lastSnapshot).TotalSeconds -ge 10) { try { Write-PsStatus } catch { } }
+        }
+        $State.activity = ''
+        try { Write-PsStatus } catch { Write-Log "Write-PsStatus : $($_.Exception.Message)" 'ERROR' }
+    } finally {
+        try { @{ software = $State.software; softwareCheckedAt = $State.softwareCheckedAt; remoteVersion = $State.remoteVersion } | Export-Clixml $PsPartStatePath } catch { }
+        try { $mx.ReleaseMutex() } catch { }
+        $mx.Dispose()
+    }
+}
+
 # ---------------------------------------------------------------- main
 
 if ($Status) { Show-Status; return }
@@ -2078,6 +2200,9 @@ if ($RemoteServer) { Invoke-RemoteServer; return }
 if ($WebTask) { Invoke-WebTask $WebTask $WebArg; return }
 if ($CheckUpdate) { Invoke-MeduzaUpdate -Force; return }
 if ($InstallCli)  { Update-MeduzaCli (Get-Release); return }
+if ($PsPart)      { Invoke-PsPart; return }
+# выбран агент на C#: собрать и запустить его (или он уже работает) — этот экземпляр не нужен
+if (-not $Once -and (Test-CsAgentWanted)) { if (Start-CsAgent) { return } }
 
 $mutex = New-Object System.Threading.Mutex($false, 'Global\VpnGuard')
 # после самоперезапуска ждём, пока старый экземпляр освободит мьютекс
@@ -2137,6 +2262,7 @@ try {
     while ($true) {
         Invoke-Tick
         if (Test-SelfUpdated) { break }
+        if (Test-HandToCs) { break }
         if (((Get-Date) - $lastCleanup).TotalHours -ge 24) { Remove-OldLogs; $lastCleanup = Get-Date }
         # спим, но сразу просыпаемся, если монитор прислал команду
         for ($i = 0; $i -lt [int]$Cfg.checkIntervalSec; $i++) {

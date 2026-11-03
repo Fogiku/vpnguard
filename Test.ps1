@@ -232,6 +232,35 @@ else {
     Start-Sleep -Seconds 4; $tp.Refresh()
     if ($tp.HasExited) { Fail "значок завершился сразу (код $($tp.ExitCode))" } else { Ok "собран ($([int]((Get-Item $tray).Length / 1KB)) КБ), запускается и читает состояние"; Stop-Process -Id $tp.Id -Force }
 }
+Write-Host '5в. Агент на C# (сборка и снимок состояния в режимах meduza, amnezia, zapret)'
+$agx = Join-Path $tmp 'VpnGuardAgent.exe'
+$co = & $csc /nologo /target:winexe /optimize+ "/out:$agx" /r:System.Web.Extensions.dll /r:System.ServiceProcess.dll /r:System.Management.dll /r:System.Core.dll /r:Microsoft.CSharp.dll (Join-Path $Root 'Agent.cs') 2>&1
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $agx)) { foreach ($l in @($co) | Where-Object { "$_" -match 'error' } | Select-Object -First 5) { Fail "сборка Agent.cs: $l" } }
+else {
+    $ar = Join-Path $tmp 'agentroot'; New-Item -ItemType Directory (Join-Path $ar 'data\amnezia') -Force | Out-Null
+    "`$AgentVersion = '9.9'" | Set-Content (Join-Path $ar 'VpnGuard.ps1') -Encoding UTF8
+    "[Interface]`r`n# Name = Тест`r`nAddress = 10.8.0.2/32`r`n[Peer]`r`nEndpoint = 1.2.3.4:51820" | Set-Content (Join-Path $ar 'data\amnezia\test1.conf') -Encoding UTF8
+    @{ updated = (Get-Date).ToString('o'); activity = ''; zapret = @{ level = 0; state = 'Работает'; details = @('x'); kv = @(, @('Ключ', 'Значение')); enabled = $true; conns = 3 }; software = @(); meduzaRemoteVersion = '1.2.3' } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $ar 'data\status-ps.json') -Encoding UTF8
+    $bad = @()
+    foreach ($mode in 'meduza', 'amnezia', 'zapret') {
+        $acfg = Join-Path $ar 'config.json'
+        @{ vpn = @{ mode = $mode }; agent = @{ engine = 'csharp' } } | ConvertTo-Json -Depth 4 | Set-Content $acfg -Encoding UTF8
+        $p = Start-Process $agx -ArgumentList "`"$ar`" `"$acfg`" --snapshot" -PassThru -Wait -WindowStyle Hidden
+        if ($p.ExitCode -ne 0) { $bad += "${mode}: код выхода $($p.ExitCode)"; continue }
+        try { $j = Get-Content (Join-Path $ar 'data\status.json') -Raw -Encoding UTF8 | ConvertFrom-Json } catch { $bad += "${mode}: status.json не JSON"; continue }
+        if ($j.engine -ne 'csharp' -or $j.vpn.mode -ne $mode) { $bad += "${mode}: engine/vpn.mode = $($j.engine)/$($j.vpn.mode)" }
+        foreach ($k in 'meduza', 'ultra', 'wg', 'ics', 'zapret', 'amnezia') {
+            $o = $j.$k
+            if ($null -eq $o) { $bad += "$mode/${k}: нет раздела"; continue }
+            if ($null -eq $o.level -or -not "$($o.state)") { $bad += "$mode/${k}: нет level/state" }
+            foreach ($row in @($o.kv)) { if (@($row).Count -ne 2) { $bad += "$mode/${k}: строка kv из $(@($row).Count) элементов" } }
+        }
+        if ($j.zapret.state -ne 'Работает') { $bad += "${mode}: zapret не взят из status-ps.json" }
+        if ($mode -eq 'amnezia' -and (@($j.amnezia.configs).Count -ne 1 -or $j.amnezia.configs[0].title -ne 'Тест')) { $bad += 'amnezia: конфиг не прочитан' }
+        if (@($j.history).Count -lt 1) { $bad += "${mode}: нет истории" }
+    }
+    if ($bad) { $bad | Select-Object -Unique | ForEach-Object { Fail "агент C#: $_" } } else { Ok "собран ($([int]((Get-Item $agx).Length / 1KB)) КБ); снимок состояния в трёх режимах совпадает по форме с агентом PowerShell" }
+}
 Write-Host '6. Окно (отрисовка всех страниц на тестовых данных)'
 $demo = Join-Path $tmp 'demo'; New-Item -ItemType Directory $demo -Force | Out-Null
 $st = [ordered]@{ updated = (Get-Date).ToString('o'); staleAfterSec = 300; agentVersion = 'test'; intervalSec = 30; history = @(); vpn = @{ mode = 'meduza'; name = 'MeduzaVPN' } }

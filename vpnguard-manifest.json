@@ -1,9 +1,14 @@
 {
-    "version":  "3.1.2",
-    "build":  "20261103-1853",
-    "notes":  "значок у часов — в списке процессов диагностики",
-    "date":  "2026-11-03T18:53:47.6637260+03:00",
+    "version":  "3.2",
+    "build":  "20261103-1913",
+    "notes":  "",
+    "date":  "2026-11-03T19:13:57.4758575+03:00",
     "files":  [
+                  {
+                      "path":  "Agent.cs",
+                      "sha256":  "7ba019f0dfc60d09c60c236eb5273a6265a3666c8b98d1d75cbe19d7a8894338",
+                      "size":  94048
+                  },
                   {
                       "path":  "Amnezia.ps1",
                       "sha256":  "228edb39e56c04687449466db2bcf3b183c07847c8d8604c63cb3d622847f1a1",
@@ -36,8 +41,8 @@
                   },
                   {
                       "path":  "Remote.ps1",
-                      "sha256":  "5118a43abb2d3e5101a49127ad4bb8a41de88d33da7a43eda1dd15b33a2a211a",
-                      "size":  59777
+                      "sha256":  "0ac8a205a6733dcc7e31fad4e320d0b24016a38ce9e4efb404d507703e371414",
+                      "size":  59789
                   },
                   {
                       "path":  "RemoteDiag.ps1",
@@ -51,13 +56,13 @@
                   },
                   {
                       "path":  "Test.ps1",
-                      "sha256":  "383da3fdf4415802be4e5509475c8cf55c0e899c5b8d0d7ed8fea66be322afb7",
-                      "size":  23251
+                      "sha256":  "0eb0d459ac2ae8e18ff7e2cf0b1b4d25cf77d7e83a898ec707619244bf679bdb",
+                      "size":  26434
                   },
                   {
                       "path":  "Tray.cs",
-                      "sha256":  "fab4e427c6534e0de259f59646f1a59855a5c8f4ee2fe1847452aeb48497cf1b",
-                      "size":  11783
+                      "sha256":  "cf291206b79149b14a557d7bbb9a97f3186c63ef3f39352e46038cedf6217f82",
+                      "size":  11966
                   },
                   {
                       "path":  "Uninstall.cmd",
@@ -66,8 +71,8 @@
                   },
                   {
                       "path":  "Uninstall.ps1",
-                      "sha256":  "938b2a9a1c9678aa972c6c9b74bf608498b2cda824d641eeaf700c315711dc09",
-                      "size":  2258
+                      "sha256":  "374a0a4ef8f7431b6260f80609c9cbb2f87b3f55d0e2d55a49f9ff8cd5987385",
+                      "size":  2273
                   },
                   {
                       "path":  "Update.ps1",
@@ -76,8 +81,8 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "7ad8a59c9047aeb27439d8031bd1a87bbacb26df3c2be13199ff66b39e09bddd",
-                      "size":  132985
+                      "sha256":  "7942dd1f77905386cc3e6542f668cfbd4ab22c8fe5599808a24533c7fd68b831",
+                      "size":  141940
                   },
                   {
                       "path":  "VpnGuardMonitor.cmd",
@@ -86,13 +91,13 @@
                   },
                   {
                       "path":  "VpnGuardMonitor.ps1",
-                      "sha256":  "70124ad8bddc728630acf5467a62f2c01f5946dbabf99d3214e50b7a22dc1017",
-                      "size":  187687
+                      "sha256":  "020af8071efdbe1df64a8d301e7ab3777fe4bc6d6e5048ebbefcde495d0a7106",
+                      "size":  187704
                   },
                   {
                       "path":  "Web.cs",
-                      "sha256":  "86eebdc97342052fa546703cb31e6bc79e6b57bc68eefe8578b5e52d82a20257",
-                      "size":  54345
+                      "sha256":  "36531fb23b6f8ccce4c24fb6e7166d7e287c4da4770c89c6baca9c17bd52f25d",
+                      "size":  54745
                   },
                   {
                       "path":  "web/index.html",

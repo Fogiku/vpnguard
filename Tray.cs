@@ -90,6 +90,7 @@ namespace VpnGuard
         void RestartAgent()
         {
             var p = Process.Start(new ProcessStartInfo("schtasks.exe", "/end /tn VpnGuard") { CreateNoWindow = true, UseShellExecute = false }); p.WaitForExit(15000);
+            foreach (var a in Process.GetProcessesByName("VpnGuardAgent")) { try { a.Kill(); a.WaitForExit(5000); } catch { } }   // агент на C# живёт вне задачи
             Thread.Sleep(1500);
             Process.Start(new ProcessStartInfo("schtasks.exe", "/run /tn VpnGuard") { CreateNoWindow = true, UseShellExecute = false });
             icon.ShowBalloonTip(2500, "VpnGuard", "Агент перезапускается", ToolTipIcon.None);

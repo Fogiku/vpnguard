@@ -224,7 +224,7 @@ function Receive-Background {
 function Test-AgentAlive {
     if ($script:snap -and $script:snap.agentPid) {
         $p = Get-Process -Id ([int]$script:snap.agentPid) -ErrorAction SilentlyContinue
-        if ($p -and $p.ProcessName -eq 'powershell') { return $true }
+        if ($p -and $p.ProcessName -in 'powershell', 'VpnGuardAgent') { return $true }
     }
     return [bool]($script:taskInfo -and @($script:taskInfo.AgentPids).Count -gt 0)
 }

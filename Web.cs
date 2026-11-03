@@ -55,6 +55,7 @@ namespace VpnGuard
         static readonly string[][] Settings = {
             new[]{"checkIntervalSec","Общее","Интервал проверки, сек","int:10:600","как часто агент проверяет всё","30"},
             new[]{"logRetentionDays","Общее","Хранить журналы, дней","int:1:365","","14"},
+            new[]{"agent.engine","Общее","Движок агента","enum:powershell|csharp","csharp — основной цикл на C# (быстрее, меньше памяти; zapret и обновления — по-прежнему PowerShell; «два туннеля» — только powershell). Упадёт трижды — сам вернётся на powershell","powershell"},
             new[]{"vpn.mode","Режим","Режим работы","enum:meduza|amnezia|dual|zapret","meduza · amnezia · dual (два туннеля) · zapret (без VPN)","meduza"},
             new[]{"vpn.primary","Режим","Два туннеля: основной","enum:meduza|amnezia","через какой идёт трафик, пока он работает","meduza"},
             new[]{"vpn.dualHot","Режим","Два туннеля: резерв всегда поднят","bool","выключено — резерв поднимается только при сбое","true"},
