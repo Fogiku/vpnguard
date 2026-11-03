@@ -1,8 +1,8 @@
 {
-    "version":  "2.7",
-    "build":  "20261103-1524",
-    "notes":  "zapret: включать метки времени TCP перед запуском (как service.bat) — без них ALT13 и др. стратегии с fooling=ts сбрасываются провайдером",
-    "date":  "2026-11-03T15:24:53.6597709+03:00",
+    "version":  "2.7.1",
+    "build":  "20261103-1532",
+    "notes":  "удалённая проверка: DNS видеосервера YouTube через разные серверы и маршрут к нему",
+    "date":  "2026-11-03T15:32:27.1049540+03:00",
     "files":  [
                   {
                       "path":  "Amnezia.ps1",
@@ -36,8 +36,8 @@
                   },
                   {
                       "path":  "Remote.ps1",
-                      "sha256":  "7f5d5fd8802667af001f4dcaca354212145845f3dac6ef874f5080892bac1647",
-                      "size":  45859
+                      "sha256":  "8142cb80a7fff32b085c9f4a3b81bfefe3c56f6ebefc7c3186ed04241ba1ba66",
+                      "size":  48189
                   },
                   {
                       "path":  "RemoteDiag.ps1",
@@ -71,8 +71,8 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "1fdfde1d69b51708e2db732e7c569c49ff70bdd02aaaa4a43e9226a3ed0af5eb",
-                      "size":  132220
+                      "sha256":  "d5bd0b5ea0d717efa43133362c6847529a42196d06b8e559e96f12d788cb89b3",
+                      "size":  132222
                   },
                   {
                       "path":  "VpnGuardMonitor.cmd",

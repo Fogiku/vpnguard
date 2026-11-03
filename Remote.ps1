@@ -204,6 +204,29 @@ function Get-RCheck {
             $sw = [Diagnostics.Stopwatch]::StartNew()
             try { $a = @(Resolve-DnsName $d -Type A -DnsOnly -QuickTimeout -ErrorAction Stop | Where-Object { $_.Type -eq 'A' } | ForEach-Object { $_.IPAddress }); "$d → $($a -join ', ') ($($sw.ElapsedMilliseconds) мс)" } catch { "$d → ошибка: $($_.Exception.Message)" }
         }
+        # видеосервер YouTube у провайдера: находится ли его имя системным DNS (через VPN), DNS роутера и 8.8.8.8
+        $vhn = "$($ZState.videoHost)"
+        if ($vhn) {
+            "===== DNS видеосервера $vhn"
+            $gw = $(if ($phys) { "$($phys.Gateway)" } else { '' })
+            foreach ($srv in @(@('системный (как у браузера)', ''), @("роутер $gw", $gw), @('Google 8.8.8.8', '8.8.8.8'), @('Cloudflare 1.1.1.1', '1.1.1.1'))) {
+                if ($srv[0] -like 'роутер*' -and -not $srv[1]) { continue }
+                $sw = [Diagnostics.Stopwatch]::StartNew()
+                try {
+                    $prm = @{ Name = $vhn; Type = 'A'; DnsOnly = $true; QuickTimeout = $true; ErrorAction = 'Stop' }; if ($srv[1]) { $prm.Server = $srv[1] }
+                    $a = @(Resolve-DnsName @prm | Where-Object { $_.Type -eq 'A' } | ForEach-Object { $_.IPAddress })
+                    '  {0,-28} → {1} ({2} мс)' -f $srv[0], $(if ($a) { $a -join ', ' } else { 'нет A-записей' }), $sw.ElapsedMilliseconds
+                } catch { '  {0,-28} → ошибка: {1} ({2} мс)' -f $srv[0], $_.Exception.Message, $sw.ElapsedMilliseconds }
+            }
+            'Какие DNS-серверы у адаптеров:'
+            Get-DnsClientServerAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.ServerAddresses } | ForEach-Object { '  {0,-28} {1}' -f $_.InterfaceAlias, ($_.ServerAddresses -join ', ') }
+            foreach ($ip in @(try { Resolve-DnsName $vhn -Type A -DnsOnly -QuickTimeout -Server $(if ($gw) { $gw } else { '8.8.8.8' }) -ErrorAction Stop | Where-Object { $_.Type -eq 'A' } | ForEach-Object { $_.IPAddress } } catch { }) | Select-Object -First 1) {
+                $rt = Find-NetRoute -RemoteIPAddress $ip -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceAlias } | Select-Object -Last 1
+                "  маршрут к $ip → $($rt.InterfaceAlias) (через $($rt.NextHop))"
+                $ok = $(if ($phys) { Test-TcpVia $phys.Ip "${ip}:443" 3000 } else { $false })
+                "  TCP 443 к $ip напрямую (Ethernet): $(if ($ok) { 'соединяется' } else { 'НЕ соединяется' })"
+            }
+        }
         $fmt = { param($list) foreach ($r in $list) { '  {0,-30} {1,-4} {2,-40} {3,6} мс {4,6} КБ  {5}' -f $r.Label, $(if ($r.Ok) { 'OK' } else { 'НЕТ' }), $r.Host, $r.Ms, $r.Kb, $r.Why } }
         if ($phys) { '===== сайты напрямую (мимо VPN, как их видит zapret)'; & $fmt @(Test-ZapretTargets $phys.Ip @(Get-ZTargets) 5) }
         $tun = Get-ActiveTunnel
