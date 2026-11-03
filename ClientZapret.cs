@@ -45,7 +45,7 @@ namespace VpnGuard
         static TcpListener CzRelay;
         const int CzRelayPort = 34010;
         static uint CzWgIp, CzEthIp; static int CzWgIdx, CzEthIdx; static string CzSig = "", CzError = "";
-        static long CzPkts, CzPass, CzTcpConns, CzUdpPkts, CzBytes, CzErrors, CzTcpUp, CzTcpDown, CzUdpDown, CzUdpSendFail, CzQuicDrop, CzNetRw, CzNetMiss, CzNetBig, CzNetSendFail, CzRelayNoFlow, CzConnFail, CzFwdBig, CzFwdMax, CzNetMax; static int CzActive, CzConnLogged;
+        static long CzPkts, CzPass, CzTcpConns, CzUdpPkts, CzBytes, CzErrors, CzTcpUp, CzTcpDown, CzUdpDown, CzUdpSendFail, CzQuicDrop, CzNetRw, CzNetMiss, CzNetBig, CzNetSendFail, CzRelayNoFlow, CzConnFail, CzFwdBig, CzFwdMax, CzNetMax, CzMssClamped; static int CzActive, CzConnLogged, CzSynLogged;
         static HashSet<uint> CzHosts = new HashSet<uint>(); static List<uint[]> CzNets = new List<uint[]>(); static string CzSetKey = "";
         static DateTime CzFwAt = DateTime.MinValue, CzCleanAt = DateTime.MinValue; static string CzFwSig = "";
 
@@ -198,6 +198,8 @@ namespace VpnGuard
                 if (n > Interlocked.Read(ref CzFwdMax)) Interlocked.Exchange(ref CzFwdMax, n);
                 ulong key = ((ulong)src << 16) | (uint)sport;
                 lock (CzLock) { CzTcpFlow f; if (!CzTcp.TryGetValue(key, out f) || f.Dst != dst || f.DPort != dport) { f = new CzTcpFlow { Dst = dst, DPort = dport }; CzTcp[key] = f; } f.Last = DateTime.Now; }
+                // SYN: уменьшить MSS клиента — ответы ретранслятора не должны быть больше MTU туннеля клиента (часто 1280)
+                if ((p[ihl + 13] & 0x02) != 0) CzClampMss(p, ihl, n, src, sport);
                 // к ретранслятору на ПК: как будто клиент подключился к адресу ПК в сети wg_server
                 PutIp(p, 16, CzWgIp); p[ihl + 2] = (byte)(CzRelayPort >> 8); p[ihl + 3] = (byte)(CzRelayPort & 0xFF);
                 var a = new WdAddr { Flags = WdLayerNetwork, IfIdx = (uint)CzWgIdx, SubIfIdx = 0 };     // входящий на wg_server
@@ -224,6 +226,21 @@ namespace VpnGuard
                 return true;
             }
             return false;
+        }
+        static void CzClampMss(byte[] p, int ihl, int n, uint src, int sport)
+        {
+            int max = Math.Max(536, CfgInt("ws4w.clientMss", 1200));
+            int doff = (p[ihl + 12] >> 4) * 4, o = ihl + 20, end = Math.Min(n, ihl + doff); int seen = -1;
+            while (o < end) {
+                int kind = p[o]; if (kind == 0) break; if (kind == 1) { o++; continue; }
+                if (o + 1 >= end) break; int l = p[o + 1]; if (l < 2 || o + l > end) break;
+                if (kind == 2 && l == 4) {
+                    seen = (p[o + 2] << 8) | p[o + 3];
+                    if (seen > max) { p[o + 2] = (byte)(max >> 8); p[o + 3] = (byte)(max & 0xFF); Interlocked.Increment(ref CzMssClamped); }
+                }
+                o += l;
+            }
+            if (Interlocked.Increment(ref CzSynLogged) <= 10) Log("zapret для клиентов: SYN от " + IpS(src) + ":" + sport + ", MSS клиента " + (seen < 0 ? "нет" : seen.ToString()) + (seen > max ? " → " + max : ""), "INFO");
         }
         // ответы сайта по UDP → клиенту, пакетом с адреса и порта сайта
         static void CzUdpRecv(CzUdpFlow f)
@@ -285,12 +302,12 @@ namespace VpnGuard
                 try { srv.EndConnect(ar); } catch { Interlocked.Increment(ref CzConnFail); return; }
                 Interlocked.Increment(ref CzTcpConns); Interlocked.Increment(ref CzActive);
                 var cs = c.GetStream(); var ss = srv.GetStream();
-                long[] cnt = new long[2]; var t0 = DateTime.Now;
-                var up = new Thread(() => { cnt[0] = CzPump(cs, ss, f, true); try { srv.Client.Shutdown(SocketShutdown.Send); } catch { } }) { IsBackground = true }; up.Start();
-                cnt[1] = CzPump(ss, cs, f, false); try { c.Client.Shutdown(SocketShutdown.Send); } catch { }
+                long[] cnt = new long[2]; var t0 = DateTime.Now; string first = null;
+                var up = new Thread(() => { cnt[0] = CzPump(cs, ss, f, true); lock (cnt) if (first == null) first = "клиент"; try { srv.Client.Shutdown(SocketShutdown.Send); } catch { } }) { IsBackground = true }; up.Start();
+                cnt[1] = CzPump(ss, cs, f, false); lock (cnt) if (first == null) first = "сайт"; try { c.Client.Shutdown(SocketShutdown.Send); } catch { }
                 up.Join(60000);
                 if (Interlocked.Increment(ref CzConnLogged) <= 40)
-                    Log("zapret для клиентов: " + ep.Address + ":" + ep.Port + " → " + IpS(f.Dst) + ":" + f.DPort + " · к сайту " + cnt[0] + " Б, к клиенту " + cnt[1] + " Б, " + Math.Round((DateTime.Now - t0).TotalSeconds, 1) + " с", "INFO");
+                    Log("zapret для клиентов: " + ep.Address + ":" + ep.Port + " → " + IpS(f.Dst) + ":" + f.DPort + " · к сайту " + cnt[0] + " Б, к клиенту " + cnt[1] + " Б, " + Math.Round((DateTime.Now - t0).TotalSeconds, 1) + " с, первым закрыл " + first, "INFO");
             } catch { }
             finally { if (Interlocked.Decrement(ref CzActive) < 0) Interlocked.Exchange(ref CzActive, 0); try { srv.Close(); } catch { } }
         }
@@ -314,7 +331,7 @@ namespace VpnGuard
                 { "udpSendFail", Interlocked.Read(ref CzUdpSendFail) }, { "quicDropped", Interlocked.Read(ref CzQuicDrop) }, { "netRewritten", Interlocked.Read(ref CzNetRw) },
                 { "netNoFlow", Interlocked.Read(ref CzNetMiss) }, { "netBig", Interlocked.Read(ref CzNetBig) }, { "netSendFail", Interlocked.Read(ref CzNetSendFail) },
                 { "relayNoFlow", Interlocked.Read(ref CzRelayNoFlow) }, { "connFail", Interlocked.Read(ref CzConnFail) },
-                { "fwdBig", Interlocked.Read(ref CzFwdBig) }, { "fwdMax", Interlocked.Read(ref CzFwdMax) }, { "netMax", Interlocked.Read(ref CzNetMax) } };
+                { "mssClamped", Interlocked.Read(ref CzMssClamped) }, { "fwdBig", Interlocked.Read(ref CzFwdBig) }, { "fwdMax", Interlocked.Read(ref CzFwdMax) }, { "netMax", Interlocked.Read(ref CzNetMax) } };
         }
         static Dictionary<string, object> CzProbeCopy() { lock (CzProbeStat) return CzProbeStat.ToDictionary(x => x.Key, x => (object)x.Value); }
         static string CzSummary()
