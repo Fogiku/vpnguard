@@ -87,8 +87,8 @@ namespace VpnGuard
             if (!WdLoaded) { if (LoadLibrary(dll) == IntPtr.Zero) throw new Exception("не загрузился " + dll + " (код " + Marshal.GetLastWin32Error() + ")"); WdLoaded = true; }
             CzWgIp = IpH(wgIp); CzEthIp = IpH(phys.Ip); CzWgIdx = IfIndexOf(WgIf()); CzEthIdx = phys.IfIndex;
             string sub = Regex.Replace(wgIp, @"\.\d+$", "");
-            // транзит: от клиентов wg_server через физический адаптер (туда Windows и шлёт адреса zapret)
-            string ff = "ip and (tcp or udp) and ifIdx == " + CzEthIdx + " and ip.SrcAddr >= " + sub + ".0 and ip.SrcAddr <= " + sub + ".255 and ip.SrcAddr != " + wgIp;
+            // транзит от клиентов wg_server (раздача Windows шлёт его в туннель VPN); адреса zapret отбираются в коде, остальное — как было
+            string ff = "ip and (tcp or udp) and ip.SrcAddr >= " + sub + ".0 and ip.SrcAddr <= " + sub + ".255 and ip.SrcAddr != " + wgIp + " and (ip.DstAddr < " + sub + ".0 or ip.DstAddr > " + sub + ".255)";
             // ответы ретранслятора клиентам: исходящие с адреса ПК в сети wg_server и порта ретранслятора
             string nf = "outbound and ip and tcp and ip.SrcAddr == " + wgIp + " and tcp.SrcPort == " + CzRelayPort;
             var relay = new TcpListener(IPAddress.Parse(wgIp), CzRelayPort) { ExclusiveAddressUse = true };
@@ -98,9 +98,6 @@ namespace VpnGuard
             var hn = WinDivertOpen(nf, WdLayerNetwork, 0, 0);
             if (hn == WdInvalid) { WinDivertClose(hf); relay.Stop(); throw new Exception("WinDivert (ответы) не открылся, код " + Marshal.GetLastWin32Error()); }
             CzFwd = hf; CzNet = hn; CzRelay = relay;
-            // диагностика (только наблюдение, WINDIVERT_FLAG_SNIFF): что видно на транзите и что приходит от клиентов на wg_server
-            CzProbe("ip and ip.SrcAddr >= " + sub + ".0 and ip.SrcAddr <= " + sub + ".255 and ip.SrcAddr != " + wgIp, WdLayerForward, "fwd");
-            CzProbe("inbound and ip and ifIdx == " + CzWgIdx + " and ip.SrcAddr >= " + sub + ".0 and ip.SrcAddr <= " + sub + ".255", WdLayerNetwork, "in");
             new Thread(() => CzFwdLoop(hf)) { IsBackground = true, Name = "cz-fwd" }.Start();
             new Thread(() => CzNetLoop(hn)) { IsBackground = true, Name = "cz-net" }.Start();
             new Thread(() => CzAcceptLoop(relay)) { IsBackground = true, Name = "cz-relay" }.Start();
