@@ -749,7 +749,7 @@ namespace VpnGuard
                 bool ispCache = host != null && CzIsVideoHost(host) && !CzIsGoogle(f.Dst) && CzGoogle.Lo.Length > 0;
                 var rb = new byte[32768]; int rn = 0; string fail = null; var cands = new List<uint> { f.Dst }; uint used = f.Dst; string altNote = "";
                 KeyValuePair<uint, DateTime> rm;
-                if (host != null && CzFamily(host) != null && CzRemap.TryGetValue(f.Dst, out rm) && rm.Value > DateTime.UtcNow) cands.Insert(0, rm.Key);   // этот адрес недавно молчал — сразу на рабочий
+                if (host != null && CzFamily(host) != null && CzRemap.TryGetValue(f.Dst, out rm) && rm.Value > DateTime.UtcNow) cands[0] = rm.Key;   // исходный известен как мёртвый: запасной, а при его сбое — другой из DNS   // этот адрес недавно молчал — сразу на рабочий
                 for (int ai = 0; ai < cands.Count && ai < 2; ai++) {
                     uint dip = cands[ai]; fail = null; rn = 0;
                     if (srv != null) { try { srv.Close(); } catch { } srv = null; }
