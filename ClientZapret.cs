@@ -477,7 +477,7 @@ namespace VpnGuard
         // Конфиг сервера не меняется (его ведёт и WS4W): отключённый клиент просто убирается из работающего туннеля
         // («wg set … peer … remove») и возвращается из конфига, когда его включат. После перезапуска туннеля агент снова уберёт его.
         class WcPeer { public string Key, Ip, Psk, Allowed; public int Keepalive; }
-        static DateTime WcAt = DateTime.MinValue; static string WcErr = "";
+        static DateTime WcAt = DateTime.MinValue; static string WcErr = ""; static readonly Dictionary<string, int> WcTries = new Dictionary<string, int>();
         static string WgExe() { return Path.Combine(Path.GetDirectoryName(CfgStr("ws4w.wireguardExe", @"C:\Program Files\WireGuard\wireguard.exe")), "wg.exe"); }
         static HashSet<string> WcOff() { return new HashSet<string>(CfgList("ws4w.clientOff", new string[0]).Select(x => x.Trim())); }
         static List<WcPeer> WgConfPeers()
@@ -510,8 +510,13 @@ namespace VpnGuard
                 if (off.Contains(p.Ip) && live.Contains(p.Key)) {
                     var x = Exe(wg, "set " + WgIf() + " peer " + p.Key + " remove", 10);
                     if (x.Code == 0) Log("WG-Server: клиент «" + nm + "» (" + p.Ip + ") отключён", "WARN"); else err = "не удалось отключить " + p.Ip + ": " + x.Err.Trim();
-                } else if (!off.Contains(p.Ip) && !live.Contains(p.Key)) {
-                    // включили обратно (или убрали вручную) — вернуть из конфига
+                } else if (live.Contains(p.Key)) WcTries.Remove(p.Key);
+                else if (!off.Contains(p.Ip)) {
+                    // включили обратно (или убрали вручную) — вернуть из конфига. Туннель может такого клиента не принимать
+                    // (например, ключ совпадает с ключом сервера) — тогда после двух попыток больше не пытаться
+                    int tries; WcTries.TryGetValue(p.Key, out tries);
+                    if (tries >= 2) { if (tries == 2) { WcTries[p.Key] = 3; Log("WG-Server: туннель не принимает клиента «" + nm + "» (" + p.Ip + ") из конфига: после добавления он снова пропадает. Больше не пытаюсь — проверьте клиента в WS4W или пересоздайте его", "WARN"); } continue; }
+                    WcTries[p.Key] = tries + 1;
                     string tmp = null;
                     try {
                         string a = "set " + WgIf() + " peer " + p.Key + " allowed-ips " + (p.Allowed ?? p.Ip + "/32");
