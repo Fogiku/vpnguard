@@ -98,8 +98,12 @@ namespace VpnGuard
             var hn = WinDivertOpen(nf, WdLayerNetwork, 0, 0);
             if (hn == WdInvalid) { WinDivertClose(hf); relay.Stop(); throw new Exception("WinDivert (ответы) не открылся, код " + Marshal.GetLastWin32Error()); }
             CzFwd = hf; CzNet = hn; CzRelay = relay;
-            CzRstProbe("tcp and ip.DstAddr >= " + sub + ".0 and ip.DstAddr <= " + sub + ".255 and ip.DstAddr != " + wgIp, WdLayerForward, "транзит");
-            CzRstProbe("tcp and ip.DstAddr >= " + sub + ".0 and ip.DstAddr <= " + sub + ".255 and ip.DstAddr != " + wgIp + " and ip.SrcAddr != " + wgIp, WdLayerNetwork, "сеть");
+            // NAT раздачи Windows успевает переслать копию пакетов клиента к настоящему серверу (мимо перехвата) — его ответы (SYN-ACK, RST)
+            // приходят клиенту вперемешку с ответами ретранслятора и рвут соединение. Ответы адресов zapret клиенту — только через ретранслятор.
+            string bf = "ip and (tcp or udp) and ip.DstAddr >= " + sub + ".0 and ip.DstAddr <= " + sub + ".255 and ip.DstAddr != " + wgIp;
+            var hb = WinDivertOpen(bf, WdLayerForward, 0, 0);
+            if (hb == WdInvalid) Log("zapret для клиентов: фильтр ответов не открылся, код " + Marshal.GetLastWin32Error() + " — соединения могут рваться", "ERROR");
+            else { CzBlk = hb; new Thread(() => CzBlkLoop(hb)) { IsBackground = true, Name = "cz-blk" }.Start(); }
             new Thread(() => CzFwdLoop(hf)) { IsBackground = true, Name = "cz-fwd" }.Start();
             new Thread(() => CzNetLoop(hn)) { IsBackground = true, Name = "cz-net" }.Start();
             new Thread(() => CzAcceptLoop(relay)) { IsBackground = true, Name = "cz-relay" }.Start();
@@ -107,6 +111,18 @@ namespace VpnGuard
         }
         static readonly List<IntPtr> CzProbes = new List<IntPtr>();
         static readonly Dictionary<string, long> CzProbeStat = new Dictionary<string, long>();
+        static IntPtr CzBlk = WdInvalid; static long CzLeakDrop;
+        static void CzBlkLoop(IntPtr h)
+        {
+            var p = new byte[65535]; var a = new WdAddr(); uint n;
+            while (true) {
+                if (!WinDivertRecv(h, p, (uint)p.Length, out n, ref a)) { if (CzBlk != h) return; Thread.Sleep(5); continue; }
+                bool drop = false;
+                try { if (n >= 20 && (p[0] >> 4) == 4 && CzInSet(IpH(p, 12))) drop = true; } catch { }
+                if (drop) { Interlocked.Increment(ref CzLeakDrop); continue; }
+                uint sl; WinDivertSend(h, p, n, out sl, ref a);
+            }
+        }
         // все TCP к клиентам не от ретранслятора: кто шлёт клиенту RST / SYN-ACK мимо нас
         static int CzRstLogged;
         static void CzRstProbe(string filter, int layer, string name)
@@ -149,6 +165,7 @@ namespace VpnGuard
         static void CzStop()
         {
             lock (CzProbes) { foreach (var ph in CzProbes) { try { WinDivertClose(ph); } catch { } } CzProbes.Clear(); }
+            var bk = CzBlk; CzBlk = WdInvalid; try { if (bk != WdInvalid) WinDivertClose(bk); } catch { }
             var f = CzFwd; var n = CzNet; CzFwd = WdInvalid; CzNet = WdInvalid;
             try { if (f != WdInvalid) WinDivertClose(f); } catch { }
             try { if (n != WdInvalid) WinDivertClose(n); } catch { }
@@ -414,7 +431,7 @@ namespace VpnGuard
                 { "udpSendFail", Interlocked.Read(ref CzUdpSendFail) }, { "quicDropped", Interlocked.Read(ref CzQuicDrop) }, { "netRewritten", Interlocked.Read(ref CzNetRw) },
                 { "netNoFlow", Interlocked.Read(ref CzNetMiss) }, { "netBig", Interlocked.Read(ref CzNetBig) }, { "netSendFail", Interlocked.Read(ref CzNetSendFail) },
                 { "relayNoFlow", Interlocked.Read(ref CzRelayNoFlow) }, { "connFail", Interlocked.Read(ref CzConnFail) },
-                { "mssClamped", Interlocked.Read(ref CzMssClamped) }, { "dropBadSum", Interlocked.Read(ref CzDropSum) }, { "dropMd5", Interlocked.Read(ref CzDropMd5) },
+                { "leakDropped", Interlocked.Read(ref CzLeakDrop) }, { "mssClamped", Interlocked.Read(ref CzMssClamped) }, { "dropBadSum", Interlocked.Read(ref CzDropSum) }, { "dropMd5", Interlocked.Read(ref CzDropMd5) },
                 { "dropTtl", Interlocked.Read(ref CzDropTtl) }, { "dropTs", Interlocked.Read(ref CzDropTs) }, { "dropNoAck", Interlocked.Read(ref CzDropNoAck) }, { "fwdBig", Interlocked.Read(ref CzFwdBig) }, { "fwdMax", Interlocked.Read(ref CzFwdMax) }, { "netMax", Interlocked.Read(ref CzNetMax) } };
         }
         static Dictionary<string, object> CzProbeCopy() { lock (CzProbeStat) return CzProbeStat.ToDictionary(x => x.Key, x => (object)x.Value); }
