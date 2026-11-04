@@ -188,7 +188,22 @@ namespace VpnGuard
             string bf = "ip and (tcp or udp) and ip.DstAddr >= " + sub + ".0 and ip.DstAddr <= " + sub + ".255 and ip.DstAddr != " + wgIp;
             var relay = new TcpListener(IPAddress.Parse(wgIp), CzRelayPort);          // без эксклюзивного порта: иначе после перезапуска агента порт занят, пока не истекут соединения прежнего (TIME_WAIT)
             NoInherit(relay);
-            try { relay.Start(256); } catch (Exception e) { throw new Exception("порт " + CzRelayPort + " на " + wgIp + " занят: " + e.Message); }
+            try { relay.Start(256); }
+            catch (Exception e) {
+                // порт держит копия сокета, унаследованная процессом от прежнего агента (до 3.14.1): winws или веб-сервер — перезапустить его
+                string who = "";
+                try {
+                    var m = Regex.Match(Exe("netstat.exe", "-ano -p TCP", 15).Out, @"(?m)^\s*TCP\s+" + Regex.Escape(wgIp) + ":" + CzRelayPort + @"\s+\S+\s+\S+\s+(\d+)\s*$");
+                    if (m.Success) {
+                        var p = System.Diagnostics.Process.GetProcessById(int.Parse(m.Groups[1].Value)); who = p.ProcessName + " (PID " + p.Id + ")";
+                        if (p.Id != System.Diagnostics.Process.GetCurrentProcess().Id && (p.ProcessName == "winws" || p.ProcessName == "VpnGuardWeb")) {
+                            Log("zapret для клиентов: порт " + CzRelayPort + " держит " + who + " (копия сокета от прежнего агента) — перезапускаю его", "WARN");
+                            p.Kill(); p.WaitForExit(5000);             // winws поднимет наблюдение за zapret, веб-сервер — часть PowerShell
+                        }
+                    }
+                } catch { }
+                throw new Exception("порт " + CzRelayPort + " на " + wgIp + " занят" + (who.Length > 0 ? " (" + who + ")" : "") + ": " + e.Message);
+            }
             var hf = WinDivertOpen(ff, WdLayerForward, 0, 0);
             if (hf == WdInvalid) { relay.Stop(); throw new Exception("WinDivert (транзит) не открылся, код " + Marshal.GetLastWin32Error()); }
             var hn = WinDivertOpen(nf, WdLayerNetwork, 0, 0);
