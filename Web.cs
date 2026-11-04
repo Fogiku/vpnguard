@@ -55,8 +55,7 @@ namespace VpnGuard
         static readonly string[][] Settings = {
             new[]{"checkIntervalSec","Общее","Интервал проверки, сек","int:10:600","как часто агент проверяет всё","30"},
             new[]{"logRetentionDays","Общее","Хранить журналы, дней","int:1:365","","14"},
-            new[]{"agent.engine","Общее","Движок агента","enum:powershell|csharp","csharp — основной цикл на C# (быстрее, меньше памяти; zapret и обновления — по-прежнему PowerShell). Упадёт трижды — сам вернётся на powershell","powershell"},
-            new[]{"agent.psPartMin","Общее","Агент C#: обновления и компоненты, мин","int:5:240","как часто запускать часть PowerShell (по командам — сразу)","30"},
+            new[]{"agent.psPartMin","Общее","Часть PowerShell: обновления и компоненты, мин","int:5:240","как часто запускать часть PowerShell (по командам — сразу)","30"},
             new[]{"amnezia.adapterPattern","Режим","AmneziaVPN: адаптер туннеля (шаблон)","text:^[\\w \\-\\.\\|\\(\\)]{1,120}$","часть имени или описания адаптера; разные протоколы — разные адаптеры","amnezia|tun2socks|TAP-Windows Adapter V9"},
             new[]{"vpn.mode","Режим","Режим работы","enum:meduza|amnezia|dual|zapret","meduza · amnezia (AmneziaVPN) · dual (два туннеля) · zapret (без VPN)","meduza"},
             new[]{"vpn.primary","Режим","Два туннеля: основной","enum:meduza|amnezia","через какой идёт трафик, пока он работает","meduza"},

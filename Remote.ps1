@@ -1,18 +1,10 @@
-﻿# VpnGuard — HTTP-сервер (процесс «VpnGuard.ps1 -RemoteServer», агент держит его запущенным):
+﻿# VpnGuard — веб-сервер (bin\VpnGuardWeb.exe из Web.cs; часть PowerShell держит его запущенным) и задачи для него (-WebTask):
 #   • веб-интерфейс (web\index.html + /api/…) — с этого ПК без пароля, из домашней сети и от клиентов wg_server — по паролю web.token;
 #   • удалённая диагностика — включается из окна на N часов (remote.*), доступ по одноразовому токену remote.token.
 # Ключи и токены в ответах диагностики маскируются; конфиги клиентов WireGuard отдаются только веб-интерфейсу.
 
 $RemoteStatePath = Join-Path $DataDir 'remote-state.json'
 $RemoteRule      = 'VpnGuard remote diagnostics'
-
-# команды агенту, которые можно отправить удалённо. $true — прерывают интернет клиентам (нужно remote.allowActions)
-$RemoteCmds = [ordered]@{
-    'check-now' = $false; 'zapret-check' = $false; 'meduza-catalog' = $false; 'software-check' = $false; 'app-check' = $false; 'app-update' = $false
-    'reconnect' = $true; 'reconnect-meduza' = $true; 'reconnect-awg' = $true; 'restart-wg' = $true; 'reapply-ics' = $true
-    'zapret-test' = $true; 'zapret-reload' = $true; 'meduza-test' = $true; 'dual-switch' = $true
-    'meduza-proto-reset' = $true; 'restart-meduza' = $true
-}
 
 function Get-RCfg {
     $d = @{ enabled = $false; until = ''; token = ''; port = 8765; allowFrom = 'any'; allowActions = $false }
@@ -107,41 +99,13 @@ function Invoke-TrayWatch {
     }
 }
 
-$script:WebBuildFailSig = ''
-function Build-WebExe {
-    $src = @('Web.cs', 'Qr.cs' | ForEach-Object { Join-Path $Root $_ })
-    if (@($src | Where-Object { -not (Test-Path $_) }).Count) { return $false }
-    $sig = (@($src | ForEach-Object { (Get-FileHash $_ -Algorithm SHA256).Hash }) -join '|')
-    $sigFile = "$WebExe.sig"
-    if ((Test-Path $WebExe) -and (Test-Path $sigFile) -and "$(Get-Content $sigFile -Raw -ErrorAction SilentlyContinue)".Trim() -eq $sig) { return $true }
-    if ($script:WebBuildFailSig -eq $sig) { return $false }          # уже не собралось — не пытаться на каждой проверке
-    $csc = Get-Csc
-    if (-not $csc) { Write-Log 'Веб-сервер: нет компилятора .NET (csc.exe) — работаю на PowerShell' 'WARN'; $script:WebBuildFailSig = $sig; return $false }
-    $old = Get-RemoteProc
-    if ($old -and $old.ProcessName -eq 'VpnGuardWeb') { Stop-Process -Id $old.Id -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500 }
-    $tmp = "$WebExe.new"
-    Remove-Item $tmp -Force -ErrorAction SilentlyContinue
-    $r = Invoke-Exe $csc ("/nologo /target:exe /optimize+ /out:`"$tmp`" /r:System.Web.Extensions.dll /r:System.Drawing.dll `"$($src[0])`" `"$($src[1])`"") 180
-    if ($r.Code -ne 0 -or -not (Test-Path $tmp)) {
-        $script:WebBuildFailSig = $sig
-        Write-Log "Веб-сервер: сборка на C# не удалась (код $($r.Code)): $((("$($r.Out) $($r.Err)" -split "`n") | Where-Object { $_ -match 'error' } | Select-Object -First 3) -join ' | ') — работаю на PowerShell" 'ERROR'
-        return $false
-    }
-    Move-Item $tmp $WebExe -Force
-    Set-Content $sigFile $sig -Encoding ASCII
-    Write-Log "Веб-сервер: собран на C# ($([int]((Get-Item $WebExe).Length / 1KB)) КБ)"
-    return $true
-}
+# веб-сервер на C# (Web.cs + Qr.cs → bin\VpnGuardWeb.exe)
+function Build-WebExe { Build-CsExe $WebExe @('Web.cs', 'Qr.cs') 'exe' @('System.Web.Extensions.dll', 'System.Drawing.dll') }
 function Start-WebServer {
-    $useCs = "$((Get-WCfg).engine)" -ne 'powershell'
-    if ($useCs -and (Build-WebExe)) {
-        $a = "`"$Root`""; if ($ConfigPath -ne (Join-Path $Root 'config.json')) { $a += " `"$ConfigPath`"" }
-        Start-Process $WebExe -ArgumentList $a -WindowStyle Hidden -WorkingDirectory $Root | Out-Null
-        return 'C#'
-    }
-    Start-Process powershell.exe -WindowStyle Hidden -WorkingDirectory $Root `
-        -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $Root 'VpnGuard.ps1')`" -RemoteServer" | Out-Null
-    return 'PowerShell'
+    if (-not (Build-WebExe)) { return '' }
+    $a = "`"$Root`""; if ($ConfigPath -ne (Join-Path $Root 'config.json')) { $a += " `"$ConfigPath`"" }
+    Start-Process $WebExe -ArgumentList $a -WindowStyle Hidden -WorkingDirectory $Root | Out-Null
+    return 'C#'
 }
 
 # ---------------------------------------------------------------- задачи для сервера на C# (VpnGuard.ps1 -WebTask имя [-WebArg base64])
@@ -223,12 +187,12 @@ function Invoke-RemoteWatch {
     if ($wc.enabled -and $wc.requirePassword -ne $false -and "$($wc.token)".Length -lt 6) { Set-ConfigValue 'web.token' (New-WebToken); Write-Log 'Веб-интерфейс: создан пароль для входа с других устройств (виден в окне и в config.json, web.token)' }
     $r.port = [int](Get-WCfg).port
     Sync-RemoteFirewall $r
-    # работает прежний сервер на PowerShell, а можно на C# — переключить (освободит ~150 МБ)
+    # прежний сервер на PowerShell (до 3.10) — заменить сервером на C#
     $cur = Get-RemoteProc
-    if ($cur -and $cur.ProcessName -like 'powershell*' -and "$((Get-WCfg).engine)" -ne 'powershell' -and (Build-WebExe)) { Write-Log 'Веб-сервер: перехожу с PowerShell на C#'; Stop-Process -Id $cur.Id -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1 }
+    if ($cur -and $cur.ProcessName -like 'powershell*' -and (Build-WebExe)) { Write-Log 'Веб-сервер: перехожу с PowerShell на C#'; Stop-Process -Id $cur.Id -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1 }
     if (-not (Get-RemoteProc)) {
-        $eng = Start-WebServer
-        Write-Log "Веб-сервер VpnGuard ($eng): запускаю на порту $($r.port)$(if (Test-RemoteOn $r) { " · удалённая диагностика до $((Get-RemoteUntil $r).ToString('dd.MM HH:mm'))" })" 'WARN'
+        if (Start-WebServer) { Write-Log "Веб-сервер VpnGuard: запускаю на порту $($r.port)$(if (Test-RemoteOn $r) { " · удалённая диагностика до $((Get-RemoteUntil $r).ToString('dd.MM HH:mm'))" })" 'WARN' }
+        else { Write-Log 'Веб-сервер VpnGuard не собрался (Web.cs) — веб-интерфейс и удалённая диагностика недоступны' 'ERROR' }
     }
 }
 function Get-RemoteSnapshot {
@@ -245,17 +209,6 @@ function Get-RemoteSnapshot {
 # ---------------------------------------------------------------- сервер (процесс VpnGuard.ps1 -RemoteServer)
 function Invoke-Captured([scriptblock]$Sb) {
     try { (& $Sb 2>&1 | Out-String -Width 260) } catch { "ошибка: $($_.Exception.Message)`n" }
-}
-function Invoke-PsFile([string]$ArgLine, [int]$TimeoutSec = 240) {
-    $psi = New-Object Diagnostics.ProcessStartInfo 'powershell.exe'
-    $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $Root 'VpnGuard.ps1')`" $ArgLine"
-    $psi.UseShellExecute = $false; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true; $psi.CreateNoWindow = $true
-    $psi.StandardOutputEncoding = [Text.Encoding]::UTF8; $psi.StandardErrorEncoding = [Text.Encoding]::UTF8
-    $p = [Diagnostics.Process]::Start($psi)
-    $o = $p.StandardOutput.ReadToEndAsync(); $e = $p.StandardError.ReadToEndAsync()
-    if (-not $p.WaitForExit($TimeoutSec * 1000)) { try { $p.Kill() } catch { }; return "таймаут $TimeoutSec с`n" + $o.Result }
-    $t = $o.Result; if ($e.Result.Trim()) { $t += "`n===== stderr =====`n" + $e.Result }
-    return $t
 }
 
 function Get-RLogs([int]$Days = 2, [int]$Minutes = 0, [int]$MaxLines = 5000) {
@@ -400,352 +353,10 @@ function Get-RFiles {
     return (Hide-Secrets ($o | ConvertTo-Json -Depth 8))
 }
 
-function Get-RIndex($r) {
-    @"
-VpnGuard $AgentVersion — удалённая диагностика (включена до $((Get-RemoteUntil $r).ToString('dd.MM.yyyy HH:mm')))
-Токен — заголовок X-Token или параметр ?t=…
 
-GET /status              состояние агента (status.json)
-GET /check               живые проверки: туннели, внешний IP, DNS, сайты напрямую и через туннель, клиенты wg_server
-GET /diag                полный отчёт «Диагностика» (до 3 мин)
-GET /net                 сеть: ipconfig, маршруты, метрики, DNS, брандмауэр
-GET /system              Windows, процессы, службы, задачи, журналы событий
-GET /logs?days=2         журнал агента (можно minutes=30, lines=5000)
-GET /files               config.json, state, zapret-state, результаты подбора, список data
-GET /bundle              всё сразу (кроме /diag; добавьте ?diag=1)
-GET /cmd?c=…             команда агенту: $(($RemoteCmds.Keys | Where-Object { -not $RemoteCmds[$_] }) -join ', ')
-                         $(if ($r.allowActions) { 'разрешены и прерывающие: ' + (($RemoteCmds.Keys | Where-Object { $RemoteCmds[$_] }) -join ', ') } else { 'прерывающие интернет (тесты протоколов/стратегий, переподключение) — выключены в окне' })
-"@
-}
-
-function Send-RResponse($Ctx, [int]$Code, [string]$Body, [string]$Type = 'text/plain; charset=utf-8') {
-    Send-RBytes $Ctx $Code ([Text.Encoding]::UTF8.GetBytes($Body)) $Type
-}
-function Send-RBytes($Ctx, [int]$Code, [byte[]]$Bytes, [string]$Type) {
-    $Ctx.Response.StatusCode = $Code; $Ctx.Response.ContentType = $Type
-    $Ctx.Response.Headers['Cache-Control'] = 'no-store'
-    $Ctx.Response.Headers['X-Content-Type-Options'] = 'nosniff'
-    $Ctx.Response.Headers['X-Frame-Options'] = 'DENY'
-    try { $Ctx.Response.OutputStream.Write($Bytes, 0, $Bytes.Length) } catch { }
-    try { $Ctx.Response.Close() } catch { }
-}
-function Send-RJson($Ctx, $Obj, [int]$Code = 200) { Send-RResponse $Ctx $Code ($Obj | ConvertTo-Json -Depth 8 -Compress) 'application/json; charset=utf-8' }
-
-# команды веб-интерфейса — то же, что кнопки окна
-$WebCmds = @('check-now', 'reconnect', 'reconnect-meduza', 'reconnect-awg', 'restart-meduza', 'restart-wg', 'reapply-ics', 'check-update',
-    'zapret-on', 'zapret-off', 'zapret-test', 'zapret-update', 'zapret-reload', 'zapret-check', 'meduza-test', 'meduza-catalog', 'meduza-proto-reset',
-    'software-check', 'install-missing', 'app-check', 'app-update', 'dual-switch', 'zapret-releases')
-# настройки, которые можно менять из веб-интерфейса, с проверкой значения
-$WebCfgKeys = [ordered]@{
-    'vpn.mode'         = '^(meduza|amnezia|dual|zapret)$'
-    'vpn.primary'      = '^(meduza|amnezia)$'
-    'zapret.strategy'  = '^[\w \(\)\-\.]{0,60}$'
-    'meduza.serviceId' = '^[\w \-\.\(\)]{0,100}$'
-    'meduza.protocol'  = '^[a-z0-9\-]{1,40}$'
-    'amnezia.active'   = '^[a-z0-9_=+.\-]{1,32}$'
-    'update.auto'      = 'bool'
-    'zapret.videoCheck' = 'bool'
-    'zapret.version'   = '^[\w\.\-]{0,30}$'
-}
-
-# вход: пароль в заголовке/параметре — как есть, в cookie — хэш пароля (смена пароля сбрасывает все входы)
-function Get-WebCookie([string]$Pass) { $h = [Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes("vpnguard|$Pass")); -join ($h | ForEach-Object { $_.ToString('x2') }) }
-function Test-WebPass($Wc, [string]$Tok) {
-    $pw = "$($Wc.token)"; if ($pw.Length -lt 6 -or -not $Tok) { return $false }
-    return ($Tok -ceq $pw -or $Tok -ceq (Get-WebCookie $pw))
-}
-# частные сети: 10/8, 172.16/12, 192.168/16, 100.64/10 (CGNAT), link-local, localhost — вход без пароля разрешён только отсюда
-function Test-PrivateIp($Addr) {
-    if ($Addr.IsIPv4MappedToIPv6) { $Addr = $Addr.MapToIPv4() }
-    if ([Net.IPAddress]::IsLoopback($Addr)) { return $true }
-    if ($Addr.AddressFamily -ne 'InterNetwork') { return ($Addr.IsIPv6LinkLocal -or $Addr.IsIPv6SiteLocal) }
-    $b = $Addr.GetAddressBytes()
-    return (($b[0] -eq 10) -or ($b[0] -eq 172 -and $b[1] -ge 16 -and $b[1] -le 31) -or ($b[0] -eq 192 -and $b[1] -eq 168) -or ($b[0] -eq 100 -and $b[1] -ge 64 -and $b[1] -le 127) -or ($b[0] -eq 169 -and $b[1] -eq 254))
-}
-$script:PubIpCache = @{ At = [datetime]::MinValue; Ip = '' }
-function Get-PubIpCached {
-    if (((Get-Date) - $script:PubIpCache.At).TotalMinutes -lt 30) { return $script:PubIpCache.Ip }
-    $pub = ''; try { $pub = "$(Invoke-RestMethod 'https://api.ipify.org' -TimeoutSec 6 -UseBasicParsing)".Trim() } catch { }
-    $script:PubIpCache = @{ At = Get-Date; Ip = $pub }; return $pub
-}
-
-# адрес в запросе должен быть IP или именем этого ПК — защита от DNS rebinding
-function Test-RHost($Req) {
-    $h = "$($Req.Url.Host)".ToLower()
-    if ($h -eq 'localhost' -or $h -eq "$env:COMPUTERNAME".ToLower()) { return $true }
-    $ip = $null; return [Net.IPAddress]::TryParse($h.Trim('[', ']'), [ref]$ip)
-}
-function Read-RBody($Req) {
-    if (-not $Req.HasEntityBody) { return $null }
-    $t = (New-Object IO.StreamReader($Req.InputStream, [Text.Encoding]::UTF8)).ReadToEnd()
-    if ($t.Length -gt 65536) { return $null }
-    try { return ($t | ConvertFrom-Json) } catch { return $null }
-}
-$script:QrReady = $false
-function Get-QrPng([string]$Text) {
-    if (-not $script:QrReady) {
-        Add-Type -AssemblyName System.Drawing
-        if (-not ('VpnGuard.Qr' -as [type])) { Add-Type -TypeDefinition (Get-Content (Join-Path $Root 'Qr.cs') -Raw -Encoding UTF8) }
-        $script:QrReady = $true
-    }
-    $mt = [VpnGuard.Qr]::Encode($Text, 1, 0, -1)
-    $n = $mt.GetLength(0); $q = 4; $px = 8
-    $bmp = New-Object Drawing.Bitmap (($n + 2 * $q) * $px), (($n + 2 * $q) * $px)
-    $g = [Drawing.Graphics]::FromImage($bmp); $g.Clear([Drawing.Color]::White)
-    for ($y = 0; $y -lt $n; $y++) { for ($x = 0; $x -lt $n; $x++) { if ($mt[$y, $x]) { $g.FillRectangle([Drawing.Brushes]::Black, ($x + $q) * $px, ($y + $q) * $px, $px, $px) } } }
-    $g.Dispose()
-    $ms = New-Object IO.MemoryStream; $bmp.Save($ms, [Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
-    return $ms.ToArray()
-}
 function Get-RWgClient([string]$Ip) {
     $l = Get-WgClients
     @($l.Clients) | Where-Object { "$($_.Ip)" -eq $Ip } | Select-Object -First 1
 }
-function Send-RCmd([string]$C, [string]$From) {
-    Set-Content -Path (Join-Path $CmdDir ('{0}.cmd' -f [DateTime]::UtcNow.Ticks)) -Value $C -Encoding ASCII
-    Write-Log "Веб-интерфейс: команда агенту '$C' ($From)"
-}
 
-function Invoke-RemoteRequest($Ctx, $r) {
-    $req = $Ctx.Request
-    $ip = "$($req.RemoteEndPoint.Address)"
-    $path = $req.Url.AbsolutePath.TrimEnd('/').ToLower(); if (-not $path) { $path = '/' }
-    $q = $req.QueryString
-    $wc = Get-WCfg
-    if (-not (Test-RHost $req)) { Send-RResponse $Ctx 400 'неверный адрес'; return }
 
-    # кто спрашивает: этот ПК — веб без пароля; пароль web.token — веб; токен диагностики — диагностика
-    $tok = "$($req.Headers['X-Token'])"; if (-not $tok) { $tok = "$($q['t'])" }
-    if (-not $tok -and $req.Cookies['vg']) { $tok = "$($req.Cookies['vg'].Value)" }
-    $role = ''
-    $noPass = ($wc.requirePassword -eq $false -and (Test-PrivateIp $req.RemoteEndPoint.Address))
-    if ($wc.enabled -and ($req.IsLocal -or $noPass -or (Test-WebPass $wc $tok))) { $role = 'web' }
-    elseif ((Test-RemoteOn $r) -and $tok -and $tok -ceq "$($r.token)") { $role = 'diag' }
-
-    # страница веб-интерфейса доступна всем (в ней нет данных — их отдаёт /api после входа)
-    if ($path -in '/', '/index.html' -and $wc.enabled -and -not ($role -eq 'diag' -and $req.Headers['X-Token'])) {
-        $f = Join-Path $Root 'web\index.html'
-        if (Test-Path $f) { Send-RBytes $Ctx 200 ([IO.File]::ReadAllBytes($f)) 'text/html; charset=utf-8' } else { Send-RResponse $Ctx 404 'нет файла web\index.html' }
-        return
-    }
-    if ($path -eq '/api/login' -and $req.HttpMethod -eq 'POST') {
-        $b = Read-RBody $req
-        $ban = $script:RBad[$ip]
-        if ($ban -and $ban.Until -gt (Get-Date)) { Send-RJson $Ctx @{ ok = $false; error = 'слишком много попыток, подождите 15 минут' } 403; return }
-        if ($wc.enabled -and $b -and "$($wc.token)".Length -ge 6 -and "$($b.password)" -ceq "$($wc.token)") {
-            $script:RBad.Remove($ip)
-            $Ctx.Response.Headers.Add('Set-Cookie', "vg=$(Get-WebCookie $wc.token); Path=/; Max-Age=2592000; HttpOnly; SameSite=Strict")
-            Write-Log "Веб-интерфейс: вход с $ip"
-            Send-RJson $Ctx @{ ok = $true }; return
-        }
-        if (-not $ban -or ($ban.Until -ne [datetime]::MinValue -and $ban.Until -le (Get-Date))) { $ban = @{ Count = 0; Until = [datetime]::MinValue } }
-        $ban.Count++; if ($ban.Count -ge 10) { $ban.Until = (Get-Date).AddMinutes(15); Write-Log "Веб-интерфейс: $ip — 10 неверных паролей, блокирую на 15 мин" 'WARN' }
-        $script:RBad[$ip] = $ban
-        Send-RJson $Ctx @{ ok = $false; error = 'неверный пароль' } 401; return
-    }
-    if ($path -eq '/api/whoami') { Send-RJson $Ctx @{ role = $role; local = [bool]$req.IsLocal; version = $AgentVersion; password = ($wc.requirePassword -ne $false) }; return }
-
-    if (-not $role) {
-        $ban = $script:RBad[$ip]
-        if ($ban -and $ban.Until -gt (Get-Date)) { Send-RResponse $Ctx 403 'слишком много неверных токенов, подождите 15 минут'; return }
-        if ($tok) {
-            if (-not $ban -or ($ban.Until -ne [datetime]::MinValue -and $ban.Until -le (Get-Date))) { $ban = @{ Count = 0; Until = [datetime]::MinValue } }
-            $ban.Count++; if ($ban.Count -ge 10) { $ban.Until = (Get-Date).AddMinutes(15); Write-Log "Удалённый доступ: $ip — 10 неверных токенов, блокирую на 15 мин" 'WARN' }
-            $script:RBad[$ip] = $ban
-        }
-        Send-RResponse $Ctx 401 'нужен вход: пароль веб-интерфейса или токен диагностики (X-Token или ?t=)'; return
-    }
-    # изменения — только POST с заголовком X-VG (чужая страница в браузере так отправить не сможет)
-    $isApiWrite = $path -like '/api/*' -and $path -notin '/api/status', '/api/logs', '/api/wg/clients', '/api/wg/conf', '/api/wg/qr', '/api/whoami', '/api/remote', '/api/websettings'
-    if ($isApiWrite -and ($req.HttpMethod -ne 'POST' -or -not $req.Headers['X-VG'])) { Send-RResponse $Ctx 405 'нужен POST с заголовком X-VG'; return }
-
-    $script:RState.requests++; $script:RState.last = "$(Get-Date -Format 'dd.MM HH:mm:ss') $ip $path"
-    Save-RState
-    if ($role -eq 'diag' -and $path -ne '/status') { Write-Log "Удалённая диагностика: $ip запросил $path$(if ($q['c']) { " ($($q['c']))" })" }
-    $int = { param($n, $d) $v = 0; if ([int]::TryParse("$($q[$n])", [ref]$v)) { $v } else { $d } }
-    $readStatus = { if (Test-Path $StatusPath) { [IO.File]::ReadAllText($StatusPath, [Text.Encoding]::UTF8) } else { '{}' } }
-    $webOnly = { if ($role -ne 'web') { Send-RResponse $Ctx 403 'только для веб-интерфейса'; return $false }; return $true }
-
-    switch ($path) {
-        # ---------------- веб-интерфейс
-        '/api/status' { Send-RResponse $Ctx 200 (Hide-Secrets (& $readStatus)) 'application/json; charset=utf-8' }
-        '/api/logs'   { Send-RResponse $Ctx 200 (Hide-Secrets (Get-RLogs (& $int 'days' 1) (& $int 'minutes' 0) (& $int 'lines' 3000))) }
-        '/api/cmd' {
-            $b = Read-RBody $req; $c = "$($b.c)"
-            if ($role -eq 'diag') {
-                if (-not $RemoteCmds.Contains($c)) { Send-RJson $Ctx @{ ok = $false; error = "команда '$c' недоступна" } 400; return }
-                if ($RemoteCmds[$c] -and -not $r.allowActions) { Send-RJson $Ctx @{ ok = $false; error = 'прерывающие команды выключены в окне' } 403; return }
-            } elseif ($WebCmds -notcontains $c -and $c -notmatch '^install [a-z]+$') { Send-RJson $Ctx @{ ok = $false; error = "неизвестная команда '$c'" } 400; return }
-            Send-RCmd $c "$role, $ip"
-            Send-RJson $Ctx @{ ok = $true }
-        }
-        '/api/config' {
-            if (-not (& $webOnly)) { return }
-            $b = Read-RBody $req; $k = "$($b.key)"; $v = $b.value
-            if (-not $WebCfgKeys.Contains($k)) { Send-RJson $Ctx @{ ok = $false; error = "настройку '$k' здесь менять нельзя" } 400; return }
-            $rule = $WebCfgKeys[$k]
-            if ($rule -eq 'bool') { $v = [bool]$v } elseif ("$v" -notmatch $rule) { Send-RJson $Ctx @{ ok = $false; error = "недопустимое значение для $k" } 400; return } else { $v = "$v" }
-            Set-ConfigValue $k $v
-            Write-Log "Веб-интерфейс: $k = '$v' ($ip)"
-            Send-RCmd 'check-now' "после изменения $k"
-            Send-RJson $Ctx @{ ok = $true }
-        }
-        '/api/wg/clients' {
-            if (-not (& $webOnly)) { return }
-            try { $l = Get-WgClients; Send-RJson $Ctx @{ ok = $true; endpoint = "$($l.Endpoint)"; clients = @(@($l.Clients) | ForEach-Object { [ordered]@{ name = "$($_.Name)"; ip = "$($_.Ip)"; source = "$($_.Source)"; hasConf = [bool]($_.File -and (Test-Path $_.File)) } }) } }
-            catch { Send-RJson $Ctx @{ ok = $false; error = $_.Exception.Message } 500 }
-        }
-        '/api/wg/conf' {
-            if (-not (& $webOnly)) { return }
-            $c = Get-RWgClient "$($q['ip'])"
-            if (-not $c -or -not $c.File -or -not (Test-Path $c.File)) { Send-RJson $Ctx @{ ok = $false; error = 'конфиг этого клиента на ПК не хранится — удалите и создайте заново' } 404; return }
-            Send-RJson $Ctx @{ ok = $true; name = "$($c.Name)"; text = [IO.File]::ReadAllText($c.File) }
-        }
-        '/api/wg/qr' {
-            if (-not (& $webOnly)) { return }
-            $c = Get-RWgClient "$($q['ip'])"
-            if (-not $c -or -not $c.File -or -not (Test-Path $c.File)) { Send-RResponse $Ctx 404 'нет конфига'; return }
-            Send-RBytes $Ctx 200 (Get-QrPng ([IO.File]::ReadAllText($c.File))) 'image/png'
-        }
-        '/api/wg/add' {
-            if (-not (& $webOnly)) { return }
-            $b = Read-RBody $req; $n = "$($b.name)".Trim()
-            if ($n -notmatch '^[\w\- \.а-яА-ЯёЁ]{1,40}$') { Send-RJson $Ctx @{ ok = $false; error = 'имя: буквы, цифры, пробел, - _ . (до 40)' } 400; return }
-            try { $c = New-WgClient $n; Write-Log "Веб-интерфейс: создан клиент WireGuard «$($c.Name)» $($c.Ip) ($ip)"; Send-RJson $Ctx @{ ok = $true; name = "$($c.Name)"; ip = "$($c.Ip)"; text = "$($c.Text)" } }
-            catch { Send-RJson $Ctx @{ ok = $false; error = $_.Exception.Message } 500 }
-        }
-        '/api/wg/remove' {
-            if (-not (& $webOnly)) { return }
-            $b = Read-RBody $req; $c = Get-RWgClient "$($b.ip)"
-            if (-not $c) { Send-RJson $Ctx @{ ok = $false; error = 'клиент не найден' } 404; return }
-            try { $n = Remove-WgClient $c.PublicKey; Write-Log "Веб-интерфейс: удалён клиент WireGuard «$n» ($ip)"; Send-RJson $Ctx @{ ok = $true; name = "$n" } }
-            catch { Send-RJson $Ctx @{ ok = $false; error = $_.Exception.Message } 500 }
-        }
-        '/api/wg/client-set' {
-            # zapret вкл/выкл и клиент вкл/выкл — списки IP ws4w.clientNoZapret / ws4w.clientOff (применяет агент C#)
-            if (-not (& $webOnly)) { return }
-            $b = Read-RBody $req; $cip = "$($b.ip)".Trim()
-            if ($cip -notmatch '^\d{1,3}(\.\d{1,3}){3}$') { Send-RJson $Ctx @{ ok = $false; error = 'неверный IP клиента' } 400; return }
-            $done = @()
-            foreach ($pair in @(@('zapret', 'clientNoZapret'), @('off', 'clientOff'))) {
-                if ($null -eq $b.($pair[0])) { continue }
-                $val = [bool]$b.($pair[0]); $inList = $(if ($pair[0] -eq 'off') { $val } else { -not $val })
-                $cur = @(@($W.($pair[1])) | Where-Object { "$_".Trim() -and "$_".Trim() -ne $cip } | ForEach-Object { "$_".Trim() })
-                if ($inList) { $cur += $cip }
-                Set-ConfigValue "ws4w.$($pair[1])" ([object[]]$cur)
-                $done += $(if ($pair[0] -eq 'off') { if ($val) { 'отключён' } else { 'включён' } } else { if ($val) { 'zapret вкл' } else { 'zapret выкл' } })
-            }
-            if ($done.Count) { Write-Log "Веб-интерфейс: клиент WG-Server $cip — $($done -join ', ') ($ip)"; Send-RCmd 'check-now' "после изменения клиента $cip" }
-            Send-RJson $Ctx @{ ok = $true }
-        }
-        '/api/remote' {
-            if (-not (& $webOnly)) { return }
-            if ($req.HttpMethod -eq 'POST') {
-                if (-not $req.Headers['X-VG']) { Send-RResponse $Ctx 405 'нужен заголовок X-VG'; return }
-                $b = Read-RBody $req
-                if ($b.enable) {
-                    $hours = [Math]::Min(168, [Math]::Max(1, [int]$b.hours))
-                    $tk = New-Object byte[] 20; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($tk)
-                    Set-ConfigValue 'remote.token' (-join ($tk | ForEach-Object { $_.ToString('x2') }))
-                    Set-ConfigValue 'remote.until' ((Get-Date).AddHours($hours).ToString('o'))
-                    Set-ConfigValue 'remote.allowFrom' $(if ("$($b.allowFrom)" -eq 'local') { 'local' } else { 'any' })
-                    Set-ConfigValue 'remote.allowActions' ([bool]$b.allowActions)
-                    Set-ConfigValue 'remote.enabled' $true
-                    Write-Log "Веб-интерфейс: удалённая диагностика включена на $hours ч ($ip)" 'WARN'
-                } else { Set-ConfigValue 'remote.enabled' $false; Write-Log "Веб-интерфейс: удалённая диагностика выключена ($ip)" }
-                $r = Get-RCfg
-                Send-RCmd 'check-now' 'изменение удалённой диагностики'
-            }
-            $rr = Get-RCfg; $on = Test-RemoteOn $rr
-            $ips = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' -and $_.InterfaceAlias -notlike 'MeduzaVPN*' -and $_.InterfaceAlias -notlike 'awg*' } | ForEach-Object { [ordered]@{ ip = $_.IPAddress; alias = $_.InterfaceAlias } })
-            Send-RJson $Ctx ([ordered]@{ enabled = $on; until = $(if ($on) { (Get-RemoteUntil $rr).ToString('o') } else { '' }); token = $(if ($on) { "$($rr.token)" } else { '' })
-                allowFrom = "$($rr.allowFrom)"; allowActions = [bool]$rr.allowActions; port = [int](Get-WCfg).port; ips = $ips
-                publicIp = $(if ($on -and "$($rr.allowFrom)" -ne 'local') { Get-PubIpCached } else { '' }); requests = [int]$script:RState.requests })
-        }
-        '/api/websettings' {
-            if (-not (& $webOnly)) { return }
-            if ($req.HttpMethod -eq 'POST') {
-                if (-not $req.Headers['X-VG']) { Send-RResponse $Ctx 405 'нужен заголовок X-VG'; return }
-                $b = Read-RBody $req
-                if ($b.password) {
-                    $np = "$($b.password)"
-                    if ($np.Length -lt 6 -or $np.Length -gt 64 -or $np -match '\s') { Send-RJson $Ctx @{ ok = $false; error = 'пароль: от 6 до 64 символов, без пробелов' } 400; return }
-                    Set-ConfigValue 'web.token' $np
-                    $Ctx.Response.Headers.Add('Set-Cookie', "vg=$(Get-WebCookie $np); Path=/; Max-Age=2592000; HttpOnly; SameSite=Strict")
-                }
-                if ($null -ne $b.requirePassword) {
-                    if ($b.requirePassword -and "$((Get-WCfg).token)".Length -lt 6) { Send-RJson $Ctx @{ ok = $false; error = 'сначала задайте пароль' } 400; return }
-                    Set-ConfigValue 'web.requirePassword' ([bool]$b.requirePassword)
-                }
-                Write-Log "Веб-интерфейс: изменены настройки входа ($ip): пароль $(if ((Get-WCfg).requirePassword -ne $false) { 'нужен' } else { 'в домашней сети не нужен' })$(if ($b.password) { ', задан новый пароль' })" 'WARN'
-            }
-            $wn = Get-WCfg
-            Send-RJson $Ctx ([ordered]@{ ok = $true; requirePassword = ($wn.requirePassword -ne $false); password = $(if ($req.IsLocal) { "$($wn.token)" } else { '' }); local = [bool]$req.IsLocal; port = [int]$wn.port })
-        }
-        '/api/diag-run' {
-            if (-not (& $webOnly)) { return }
-            Send-RResponse $Ctx 200 (Hide-Secrets (Invoke-PsFile '-Diag' 240))
-        }
-        # ---------------- удалённая диагностика (и веб)
-        '/'        { Send-RResponse $Ctx 200 (Get-RIndex $r) }
-        '/status'  { Send-RResponse $Ctx 200 (Hide-Secrets (& $readStatus)) 'application/json; charset=utf-8' }
-        '/check'   { Send-RResponse $Ctx 200 (Hide-Secrets (Get-RCheck)) }
-        '/diag'    { Send-RResponse $Ctx 200 (Hide-Secrets (Invoke-PsFile '-Diag' 240)) }
-        '/net'     { Send-RResponse $Ctx 200 (Hide-Secrets (Get-RNet)) }
-        '/system'  { Send-RResponse $Ctx 200 (Hide-Secrets (Get-RSystem)) }
-        '/logs'    { Send-RResponse $Ctx 200 (Hide-Secrets (Get-RLogs (& $int 'days' 2) (& $int 'minutes' 0) (& $int 'lines' 5000))) }
-        '/files'   { Send-RResponse $Ctx 200 (Get-RFiles) 'application/json; charset=utf-8' }
-        '/bundle'  {
-            $sb = New-Object Text.StringBuilder
-            foreach ($part in @(@('СИСТЕМА', { Get-RSystem }), @('ЖИВЫЕ ПРОВЕРКИ', { Get-RCheck }), @('СЕТЬ', { Get-RNet }), @('ФАЙЛЫ И НАСТРОЙКИ', { Get-RFiles }), @('ЖУРНАЛ (2 дня)', { Get-RLogs 2 0 4000 }))) {
-                [void]$sb.AppendLine("`n################ $($part[0]) ################"); [void]$sb.AppendLine((& $part[1]))
-            }
-            if ($q['diag'] -eq '1') { [void]$sb.AppendLine("`n################ ДИАГНОСТИКА ################"); [void]$sb.AppendLine((Invoke-PsFile '-Diag' 240)) }
-            Send-RResponse $Ctx 200 (Hide-Secrets $sb.ToString())
-        }
-        '/cmd' {
-            $c = "$($q['c'])"
-            if (-not $RemoteCmds.Contains($c)) { Send-RResponse $Ctx 400 "неизвестная команда '$c'. Можно: $($RemoteCmds.Keys -join ', ')"; return }
-            if ($RemoteCmds[$c] -and -not $r.allowActions -and $role -ne 'web') { Send-RResponse $Ctx 403 "команда '$c' прерывает интернет клиентам — разрешите такие команды в окне (Диагностика → Удалённая диагностика)"; return }
-            Send-RCmd $c "$role, $ip"
-            Send-RResponse $Ctx 200 "команда '$c' отправлена агенту; результат — в /logs?minutes=10 и /status"
-        }
-        default    { Send-RResponse $Ctx 404 "нет такого адреса. Список: /" }
-    }
-}
-
-function Save-RState { try { $script:RState | ConvertTo-Json -Depth 4 | Set-Content $RemoteStatePath -Encoding UTF8 } catch { } }
-function Test-ServerNeeded($r) { (Get-WCfg).enabled -or (Test-RemoteOn $r) }
-
-function Invoke-RemoteServer {
-    $r = Get-RCfg; $wc = Get-WCfg
-    $port = [int]$wc.port
-    $script:RState = [ordered]@{ pid = $PID; running = $true; started = (Get-Date).ToString('o'); port = $port; requests = 0; last = ''; error = '' }
-    $script:RBad = @{}
-    if (-not (Test-ServerNeeded $r)) { $script:RState.running = $false; $script:RState.error = 'веб-интерфейс и диагностика выключены'; Save-RState; return }
-    $l = New-Object Net.HttpListener
-    $l.Prefixes.Add("http://+:$port/")
-    try { $l.Start() } catch { $script:RState.running = $false; $script:RState.error = "порт ${port}: $($_.Exception.Message)"; Save-RState; Write-Log "Веб-сервер VpnGuard: не удалось открыть порт ${port}: $($_.Exception.Message)" 'ERROR'; return }
-    Save-RState
-    Write-Log "Веб-сервер VpnGuard: слушает TCP $port (PID $PID) — откройте http://localhost:$port/"
-    $stamp = $(try { (Get-Item $ConfigPath).LastWriteTimeUtc } catch { $null })
-    $codeStamp = { (@('Remote.ps1', 'VpnGuard.ps1', 'Zapret.ps1', 'Amnezia.ps1', 'Update.ps1', 'Wg.ps1') | ForEach-Object { $f = Join-Path $Root $_; if (Test-Path $f) { (Get-Item $f).LastWriteTimeUtc.Ticks } }) -join '|' }
-    $code = & $codeStamp
-    try {
-        while ($true) {
-            $task = $l.GetContextAsync()
-            while (-not $task.Wait(2000)) {
-                # перечитать настройки; всё выключили / сменили порт / код обновили — выйти (агент перезапустит новый)
-                $now = $(try { (Get-Item $ConfigPath).LastWriteTimeUtc } catch { $null })
-                if ($now -ne $stamp) { $stamp = $now; try { Import-Config } catch { }; $r = Get-RCfg }
-                if (-not (Test-ServerNeeded $r) -or [int](Get-WCfg).port -ne $port) { return }
-                if ((& $codeStamp) -ne $code) { Write-Log 'Веб-сервер VpnGuard: код обновлён — перезапуск'; return }
-            }
-            $ctx = $task.Result
-            try { Invoke-RemoteRequest $ctx $r } catch { try { Send-RResponse $ctx 500 "ошибка: $($_.Exception.Message)" } catch { } }
-        }
-    } finally {
-        try { $l.Stop(); $l.Close() } catch { }
-        $script:RState.running = $false; Save-RState
-    }
-}

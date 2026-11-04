@@ -3,7 +3,7 @@
 // туннель, трафик, перезапуски), режим «без VPN», wg_server, раздача ICS, трафик, история, состояние для окна/веб/значка.
 // Поручает PowerShell (VpnGuard.ps1 -PsPart, коротко, раз в 2 мин или сразу по команде): zapret, обновления VpnGuard/MeduzaVPN/
 // компонентов, веб-сервер, значок, создание сервера wg_server, остальные команды. Режим «два туннеля» — пока агент на PowerShell.
-// Собирается встроенным компилятором .NET Framework (C# 5), запускается из VpnGuard.ps1, если agent.engine = 'csharp'.
+// Собирается встроенным компилятором .NET Framework (C# 5), запускается из VpnGuard.ps1 (задача «VpnGuard»).
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -89,8 +89,6 @@ namespace VpnGuard
             while (true) {
                 var t0 = DateTime.Now;
                 LoadCfg(false);
-                // вернуть работу агенту на PowerShell: так выбрали в настройках
-                if (CfgStr("agent.engine", "powershell") != "csharp") { Log("Агент C#: выбран агент на PowerShell — передаю работу ему", "WARN"); HandOver(); return; }
                 if (SourceSig() != CodeSig) { Log("Агент C#: код обновлён — перезапуск на новой версии", "INFO"); HandOver(); return; }
                 foreach (var step in new Action[] { Commands, WgWatch, WgClientsWatch, VpnWatch, SharingWatch, ZapretWatch, ClientZapretWatch, PsPartWatch }) {
                     try { step(); } catch (Exception e) { Log("Агент C#: " + step.Method.Name + ": " + e.Message, "ERROR"); }
@@ -250,7 +248,7 @@ namespace VpnGuard
         }
 
         // ---------------------------------------------------------------- команды
-        static readonly string[] OwnCmds = { "check-now", "reconnect", "reconnect-meduza", "reconnect-awg", "restart-meduza", "restart-wg", "reapply-ics", "meduza-test", "meduza-catalog", "meduza-proto-reset",
+        static readonly string[] OwnCmds = { "check-now", "reconnect", "reconnect-meduza", "reconnect-awg", "restart-meduza", "restart-wg", "reapply-ics", "meduza-test", "meduza-catalog", "meduza-proto-reset", "dual-switch",
             "zapret-on", "zapret-off", "zapret-check", "zapret-releases", "zapret-update", "zapret-reload", "zapret-test" };
         static void Commands()
         {
@@ -276,6 +274,9 @@ namespace VpnGuard
                     case "meduza-test": MzProtoTest(); break;
                     case "meduza-catalog": MzCatalog(true); break;
                     case "meduza-proto-reset": if (MzOverride.Length > 0) { MzReturnAt = DateTime.MinValue; MzProtoReturn(); } break;
+                    case "dual-switch":
+                        if (Mode() == "dual") { string to = OtherKind(DualAct()); if (KindOk(to)) DualSwitch(to, "вручную из окна"); else Log("Два туннеля: " + ModeNames[to] + " сейчас не пропускает трафик — не переключаю", "WARN"); }
+                        break;
                     default: try { ZCommand(a); } catch (Exception e) { Log("zapret: " + a + ": " + e.Message, "ERROR"); } break;
                 }
             }
@@ -1030,7 +1031,7 @@ namespace VpnGuard
         // ---------------------------------------------------------------- PowerShell: zapret, обновления, веб-сервер, значок …
         static void QueuePs(string cmd) { try { File.WriteAllText(Path.Combine(CmdPsDir, DateTime.UtcNow.Ticks + ".cmd"), cmd, Encoding.ASCII); } catch { } PsPartAt = DateTime.MinValue; }
         static string WebSig = null;
-        static string WebSignature() { return string.Join("|", new[] { "web.enabled", "web.port", "web.engine", "web.requirePassword", "web.token", "remote.enabled", "remote.until", "remote.allowFrom", "remote.port" }.Select(k => CfgStr(k, ""))); }
+        static string WebSignature() { return string.Join("|", new[] { "web.enabled", "web.port", "web.requirePassword", "web.token", "remote.enabled", "remote.until", "remote.allowFrom", "remote.port" }.Select(k => CfgStr(k, ""))); }
         static string PsNeededNow()
         {
             if (Directory.GetFiles(CmdPsDir, "*.cmd").Length > 0) return "команда";
@@ -1039,7 +1040,7 @@ namespace VpnGuard
             if (remoteEn && !remoteOn) return "время удалённой диагностики вышло";
             if (WebSig != null && WebSignature() != WebSig) return "изменены настройки веб-интерфейса или диагностики";
             bool webRunning = Process.GetProcessesByName("VpnGuardWeb").Length > 0;
-            if ((CfgBool("web.enabled", true) || remoteOn) && !webRunning && CfgStr("web.engine", "auto") != "powershell") return "веб-сервер не работает";
+            if ((CfgBool("web.enabled", true) || remoteOn) && !webRunning) return "веб-сервер не работает";
             return null;
         }
         static void PsPartWatch()

@@ -140,26 +140,6 @@ foreach (`$modName in 'Zapret', 'Wg', 'Amnezia', 'Software', 'Remote', 'Update')
 
 "@
 
-Write-Host '3. Состояние агента во всех режимах'
-$r = Invoke-Child ($loader + @'
-$bad = @()
-foreach ($mode in 'meduza', 'dual', 'amnezia', 'zapret') {
-    $Cfg.vpn.mode = $mode
-    Write-StatusSnapshot
-    $raw = [IO.File]::ReadAllText($StatusPath)
-    if ($raw -match '"value"\s*:\s*\[[^\]]*\]\s*,\s*"Count"') { $bad += "${mode}: массив превратился в {value,Count}" }
-    $j = $raw | ConvertFrom-Json
-    foreach ($k in 'meduza', 'ultra', 'wg', 'ics', 'zapret', 'amnezia') {
-        $o = $j.$k
-        if ($null -eq $o) { $bad += "$mode/${k}: нет раздела"; continue }
-        if ($null -eq $o.level -or -not "$($o.state)") { $bad += "$mode/${k}: нет level/state" }
-        foreach ($row in @($o.kv)) { if (@($row).Count -ne 2) { $bad += "$mode/${k}: строка kv из $(@($row).Count) элементов: $((@($row)) -join ' | ')" } }
-    }
-}
-if ($bad) { $bad | Select-Object -Unique | ForEach-Object { "BAD $_" } } else { 'OK' }
-'@) 180
-if ($r.Out -match '(?m)^OK\s*$') { Ok 'снимок состояния в режимах meduza, dual, amnezia, zapret' } else { foreach ($l in ($r.Out + $r.Err) -split "`n" | Where-Object { $_.Trim() } | Select-Object -First 12) { Fail "снимок: $($l.Trim())" } }
-
 Write-Host '4. Установка обновлений (сверка sha256, проверка кода, отказ при ошибке)'
 $r = Invoke-Child ($loader + @'
 $app = Join-Path $DataDir 'app'; $remote = Join-Path $DataDir 'remote'; New-Item -ItemType Directory $app, $remote -Force | Out-Null
