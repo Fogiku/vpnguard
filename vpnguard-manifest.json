@@ -1,13 +1,13 @@
 {
-    "version":  "3.14.7",
-    "build":  "20261104-1728",
+    "version":  "3.15.0",
+    "build":  "20261104-2140",
     "notes":  "",
-    "date":  "2026-11-04T17:28:01.4228952+03:00",
+    "date":  "2026-11-04T21:40:23.7214328+03:00",
     "files":  [
                   {
                       "path":  "Agent.cs",
-                      "sha256":  "7216c9a06ebf076ac6fb36900e01dfde18c4ed028c178db259c42cab1e9862ec",
-                      "size":  117674
+                      "sha256":  "454427bf9640b6c71b0ac86381b9e22cbabf61890eb60b6cc3548fbb2e1841c7",
+                      "size":  125460
                   },
                   {
                       "path":  "Amnezia.ps1",
@@ -16,8 +16,8 @@
                   },
                   {
                       "path":  "ClientZapret.cs",
-                      "sha256":  "6b329744024c36c48e6d6f491926dd87df4cc42cd5b098ec6a4ece337358fee6",
-                      "size":  72797
+                      "sha256":  "21957af21c0a76e84c2881e28f04c67c4afa8862c977cab28d73bca2c06413ae",
+                      "size":  72812
                   },
                   {
                       "path":  "Install.cmd",
@@ -86,7 +86,7 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "e57447733bbca5fde2fbd8c1a6f5ca1aa15334238f68376776045017ef39d9c0",
+                      "sha256":  "5f6eb251f1267bf128468b1bbba7b68628680e96d83ab0e7c66c65f9871030a1",
                       "size":  82021
                   },
                   {
@@ -106,8 +106,8 @@
                   },
                   {
                       "path":  "web/index.html",
-                      "sha256":  "6af4123c8d4691e34b2ac0d50163ab509977f257c9a3cff489998daea994c2a2",
-                      "size":  81427
+                      "sha256":  "c6478c020b8c494ab6214b7431f2d9c3e1cf9437e7187979b88a34527ec1fc39",
+                      "size":  82023
                   },
                   {
                       "path":  "Wg.ps1",
@@ -116,8 +116,8 @@
                   },
                   {
                       "path":  "Zapret.cs",
-                      "sha256":  "7ba24abffd91827d4d4f42a3cd307ba95d478ae8e417dd55e9eb2c72ea8f0206",
-                      "size":  70640
+                      "sha256":  "659e609f021b8853fa9afd10bcb68cdcf65acdd3cc5e624924074ab5acfd16c3",
+                      "size":  71667
                   },
                   {
                       "path":  "Zapret.ps1",

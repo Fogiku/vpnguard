@@ -87,6 +87,7 @@ namespace VpnGuard
             try { CleanupOldAwg(); } catch (Exception e) { Log("AmneziaVPN: очистка старых туннелей AmneziaWG: " + e.Message, "WARN"); }
             MeduzaStartedAt = DateTime.Now;
             new Thread(LiveLoop) { IsBackground = true, Name = "live" }.Start();
+            new Thread(InetLoop) { IsBackground = true, Name = "inet" }.Start();
             while (true) {
                 var t0 = DateTime.Now;
                 LoadCfg(false);
@@ -248,6 +249,71 @@ namespace VpnGuard
             return "";
         }
 
+        // ---------------------------------------------------------------- интернет вообще: напрямую через физический адаптер (мимо VPN), раз в 5 с
+        // Пропал у провайдера — туннель не трогаем: переподключения, перебор протоколов и перезапуски не помогут,
+        // а после возвращения связи только задержат её на 10–15 минут. Ждём и показываем это в окне и веб-интерфейсе.
+        static volatile int InetState = -1;            // -1 нет данных, 0 есть, 1 нет
+        static string InetWhy = "", InetVia = "", InetGw = ""; static int InetFails, InetDowns; static long InetMs = -1;
+        static DateTime InetSince = DateTime.MinValue, InetLastDown = DateTime.MinValue; static TimeSpan InetLastLen = TimeSpan.Zero;
+        static bool InetDown() { return InetState == 1; }
+        static string[] InetHosts() { return CfgList("net.probeHosts", new[] { "77.88.8.8:53", "8.8.8.8:53", "1.1.1.1:443", "87.250.250.242:443" }); }
+        static string Dur(TimeSpan t) { return t.TotalMinutes >= 60 ? (int)t.TotalHours + " ч " + t.Minutes + " мин" : t.TotalSeconds >= 60 ? (int)t.TotalMinutes + " мин " + t.Seconds + " с" : (int)t.TotalSeconds + " с"; }
+        static void InetLoop()
+        {
+            while (true) {
+                try { InetCheck(); } catch { }
+                Thread.Sleep(InetState == 1 ? 3000 : 5000);
+            }
+        }
+        // хватит ответа одного узла (все — параллельно)
+        static long AnyTcp(string srcIp, string[] hosts, int timeoutMs)
+        {
+            var done = new ManualResetEvent(false); var sw = Stopwatch.StartNew(); long[] ms = { -1 }; int left = hosts.Length;
+            foreach (var h in hosts) {
+                var hh = h;
+                ThreadPool.QueueUserWorkItem(_ => {
+                    bool ok = TcpVia(srcIp, hh, timeoutMs);
+                    if (ok && Interlocked.CompareExchange(ref ms[0], sw.ElapsedMilliseconds, -1) == -1) done.Set();
+                    if (Interlocked.Decrement(ref left) == 0) done.Set();
+                });
+            }
+            done.WaitOne(timeoutMs + 500);
+            return Interlocked.Read(ref ms[0]);
+        }
+        static void InetCheck()
+        {
+            string why = null, via = PhysAlias(), gw = ""; long ms = -1;
+            if (via.Length == 0) why = "нет подключения к сети (кабель, Wi-Fi или роутер)";
+            else {
+                try { var g = Nic(via).GetIPProperties().GatewayAddresses.FirstOrDefault(x => x.Address.AddressFamily == AddressFamily.InterNetwork && x.Address.ToString() != "0.0.0.0"); if (g != null) gw = g.Address.ToString(); } catch { }
+                string ip = Ipv4(via);
+                ms = ip == null ? -1 : AnyTcp(ip, InetHosts(), 2500);
+                if (ms < 0) {
+                    // напрямую не открывается, а через туннель — да: интернет есть (провайдер режет только прямые адреса)
+                    string tn = KindAdapter(TunnelKind()), tip = tn.Length > 0 && Up(tn) ? Ipv4(tn) : null;
+                    if (tip != null && AnyTcp(tip, ProbeHosts(), 2500) >= 0) ms = 0;
+                    else {
+                        bool gwOk = false; if (gw.Length > 0) { try { using (var p = new Ping()) gwOk = p.Send(gw, 1000).Status == IPStatus.Success; } catch { } }
+                        why = gw.Length == 0 ? "нет шлюза у " + via : gwOk ? "провайдер не пропускает трафик (роутер " + gw + " отвечает)" : "роутер " + gw + " не отвечает";
+                    }
+                }
+            }
+            InetVia = via; InetGw = gw;
+            if (why == null) {
+                InetFails = 0; InetMs = ms; InetWhy = "";
+                if (InetState != 0) {
+                    if (InetState == 1) { InetLastLen = DateTime.Now - InetSince; Log("Интернет: снова есть (не было " + Dur(InetLastLen) + ")", "WARN"); }
+                    InetState = 0; InetSince = DateTime.Now;
+                }
+            } else {
+                InetWhy = why; InetMs = -1;
+                if (++InetFails >= 2 && InetState != 1) {
+                    InetState = 1; InetSince = DateTime.Now; InetLastDown = DateTime.Now; InetDowns++;
+                    Log("Интернет: пропал — " + why + ". VPN не переподключаю, жду возвращения связи", "WARN");
+                }
+            }
+        }
+
         // ---------------------------------------------------------------- команды
         static readonly string[] OwnCmds = { "check-now", "reconnect", "reconnect-meduza", "reconnect-awg", "restart-meduza", "restart-wg", "reapply-ics", "meduza-test", "meduza-catalog", "meduza-proto-reset", "dual-switch",
             "zapret-on", "zapret-off", "zapret-check", "zapret-releases", "zapret-update", "zapret-reload", "zapret-test" };
@@ -374,6 +440,7 @@ namespace VpnGuard
         }
         static void MzRestart(string reason)
         {
+            if (InetDown()) { Log("MeduzaVPN: перезапуск отменён — нет интернета (" + InetWhy + ")", "INFO"); return; }
             Restarts.RemoveAll(d => d < DateTime.Now.AddMinutes(-30));
             if (Restarts.Count >= CfgInt("meduza.maxRestartsPer30Min", 5)) { Log("MeduzaVPN: слишком много перезапусков за 30 мин, пауза (причина: " + reason + ")", "WARN"); return; }
             Restarts.Add(DateTime.Now); LastRestart = DateTime.Now; LastRestartReason = reason; RestartCount++;
@@ -424,6 +491,7 @@ namespace VpnGuard
         {
             if (!CfgBool("meduza.autoProtocol", true) || !MzPipe()) return false;
             if ((DateTime.Now - MzFallbackAt).TotalMinutes < 15) return false;
+            if (InetDown()) return true;                 // интернета нет вообще — перебирать протоколы бессмысленно
             MzFallbackAt = DateTime.Now;
             string cur = MzProtocol(), chosen = CfgStr("meduza.protocol", "ultra");
             try { MzCatalog(false); } catch { }
@@ -435,6 +503,7 @@ namespace VpnGuard
             Log("MeduzaVPN: " + reason + ", протокол " + cur + " — пробую другие: " + string.Join(", ", order), "WARN");
             string prev = MzOverride;
             foreach (var p in order) {
+                if (InetDown()) { MzOverride = prev; Log("MeduzaVPN: пропал интернет — перебор протоколов прерван", "WARN"); MzDisconnect(); Thread.Sleep(1000); MzConnect(0); return true; }
                 SetActivity("MeduzaVPN: пробую протокол " + p);
                 MzDisconnect(); Thread.Sleep(2000);
                 MzOverride = (p == chosen || p == "meduza-" + chosen) ? "" : p;
@@ -618,6 +687,7 @@ namespace VpnGuard
         static bool AwgTrafficOk(string name) { bool ok = ProbeVia(name, 4000, null); AwgTraffic = ok; AwgTrafficAt = DateTime.Now; return ok; }
         static void AwgRestart(string reason)
         {
+            if (InetDown()) { Log("AmneziaVPN: перезапуск отменён — нет интернета (" + InetWhy + ")", "INFO"); return; }
             AwgRestarts.RemoveAll(d => d < DateTime.Now.AddMinutes(-30));
             if (AwgRestarts.Count >= CfgInt("meduza.maxRestartsPer30Min", 5)) { Log("AmneziaVPN: слишком много перезапусков за 30 мин, пауза (" + reason + ")", "WARN"); return; }
             AwgRestarts.Add(DateTime.Now); AwgLastRestart = DateTime.Now; AwgLastReason = reason; RestartCount++;
@@ -677,6 +747,7 @@ namespace VpnGuard
                 ProbeFailures = 0; DownTicks = 0; LastTraffic = null; AwgProbeFailures = 0; AwgDownTicks = 0; AwgTraffic = null; ForceIcs = true;
                 LastMode = mode;
             }
+            if (InetDown() && mode != "zapret") { ProbeFailures = 0; DownTicks = 0; AwgProbeFailures = 0; AwgDownTicks = 0; DualFails = 0; return; }   // нет интернета у провайдера — туннель ни при чём
             if (mode == "meduza") { MeduzaWatch(); AvpnDisable(false); }
             else if (mode == "amnezia") { if (Up(MzAdapterName())) { Log("MeduzaVPN: подключён, но выбран режим AmneziaVPN — отключаю", "WARN"); MzDisconnect(); } AmneziaWatch(); }
             else if (mode == "dual") DualWatch();
@@ -1142,7 +1213,7 @@ namespace VpnGuard
                         }
                         peers = pr;
                     }
-                    var o = new Dictionary<string, object> { { "t", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }, { "rate", ad }, { "cz", RateOf("live:cz", Interlocked.Read(ref CzTcpDown), Interlocked.Read(ref CzTcpUp)) }, { "peers", peers } };
+                    var o = new Dictionary<string, object> { { "t", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }, { "rate", ad }, { "cz", RateOf("live:cz", Interlocked.Read(ref CzTcpDown), Interlocked.Read(ref CzTcpUp)) }, { "peers", peers }, { "inet", InetState } };
                     File.WriteAllText(tmp, Json.Serialize(o), Encoding.UTF8);
                     try { File.Copy(tmp, path, true); } catch { }
                 } catch { Thread.Sleep(5000); }
@@ -1205,6 +1276,7 @@ namespace VpnGuard
             bool amz = kind == "amnezia"; bool? tTr = amz ? AwgTraffic : LastTraffic; DateTime tTrAt = amz ? AwgTrafficAt : LastTrafficAt; int tFail = amz ? AwgProbeFailures : ProbeFailures; string tWhy = amz ? AwgLastReason : LastRestartReason;
             int uL; string uS;
             if (mode == "zapret") { uL = 0; uS = "VPN выключен — напрямую"; } else if (amz && tun.Length == 0) { uL = 2; uS = "AmneziaVPN не подключён"; } else if (!uUp) { uL = 2; uS = "Отключён"; } else if (tTr == false) { uL = 1; uS = "Нет трафика"; } else { uL = 0; uS = "Подключён"; }
+            if (InetDown() && mode != "zapret") { uL = 2; uS = "Нет интернета — жду связь"; }
             string kindTitle = amz ? "AmneziaVPN" : "MeduzaVPN · " + MzProtocol();
             string trTxt = (tTr == true ? "OK" : tTr == false ? "НЕТ" : "—");
             Dictionary<string, object> sb = null;
@@ -1227,6 +1299,17 @@ namespace VpnGuard
                 Kv("Протокол", kind == "meduza" ? MzProtocol() : amz ? "выбран в AmneziaVPN" : "—"), Kv("Проверка трафика", trTxt + " · " + When(tTrAt)), Kv("Узлы проверки", string.Join(", ", ProbeHosts())),
                 Kv("Сбоев проверки подряд", tFail + " (переподключение после " + CfgInt("meduza.probeFailuresBeforeReconnect", 3) + ")"), Kv("Переподключений с запуска агента", ReconnectCount) });
             ultra["title"] = mode == "zapret" ? "Без VPN (только zapret)" : "Туннель: " + kindTitle; ultra["kind"] = kind; ultra["standby"] = sb; ultra["switches"] = DualSwitches;
+
+            // интернет вообще (InetLoop)
+            int nL = InetState == 0 ? 0 : InetState == 1 ? 2 : -1;
+            string nS = InetState == 0 ? "Есть" + (InetMs > 0 ? " · " + InetMs + " мс" : "") : InetState == 1 ? "Нет · " + Dur(DateTime.Now - InetSince) : InetFails > 0 ? "Проверяется" : "Нет данных";
+            string lastDown = InetDowns == 0 ? "не пропадал" : When(InetLastDown) + (InetState == 1 ? " — сейчас" : " на " + Dur(InetLastLen));
+            var inet = Comp(nL, nS, new[] { InetState == 1 ? InetWhy : "Напрямую через " + (InetVia.Length > 0 ? InetVia : "—") + (InetGw.Length > 0 ? " · роутер " + InetGw : ""),
+                "Пропадал: " + InetDowns + " раз с запуска агента" + (InetDowns > 0 ? ", последний " + lastDown : "") }, new List<object[]> {
+                Kv("Состояние", nS), Kv("Причина", InetState == 1 ? InetWhy : "—"), Kv("Физический адаптер", InetVia.Length > 0 ? InetVia : "нет"), Kv("Роутер (шлюз)", InetGw.Length > 0 ? InetGw : "—"),
+                Kv("Узлы проверки", string.Join(", ", InetHosts()) + " — напрямую, мимо VPN, раз в 5 с"), Kv("Пропадал с запуска агента", InetDowns + " раз"), Kv("Последний раз", lastDown),
+                Kv("Пока интернета нет", "VPN не переподключается и не перезапускается, zapret не переподбирается") });
+            inet["since"] = InetSince == DateTime.MinValue ? "" : InetSince.ToString("o"); inet["downs"] = InetDowns;
 
             // wg_server
             int wL; string wS; int activeN = 0; string port = "";
@@ -1288,7 +1371,7 @@ namespace VpnGuard
             // история (точка не чаще интервала проверки)
             long nowTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds(); long lastTs = History.Count > 0 ? Convert.ToInt64(History[History.Count - 1]["t"]) : 0;
             if (nowTs - lastTs >= Math.Max(10, CfgInt("checkIntervalSec", 30) - 2)) {
-                History.Add(new Dictionary<string, object> { { "t", nowTs }, { "m", mL }, { "u", uL }, { "w", wL }, { "i", iL }, { "z", zL }, { "a", aL },
+                History.Add(new Dictionary<string, object> { { "t", nowTs }, { "n", nL }, { "m", mL }, { "u", uL }, { "w", wL }, { "i", iL }, { "z", zL }, { "a", aL },
                     { "tr", new[] { TrafPending["u"][0], TrafPending["u"][1], TrafPending["w"][0], TrafPending["w"][1], TrafPending["p"][0], TrafPending["p"][1] } }, { "zc", zc } });
                 TrafPending = NewTraf();
                 while (History.Count > 240) History.RemoveAt(0);
@@ -1300,7 +1383,7 @@ namespace VpnGuard
                 { "updated", DateTime.Now.ToString("o") }, { "staleAfterSec", updating ? 1800 : busy ? 900 : CfgInt("checkIntervalSec", 30) + 120 }, { "activity", act2 },
                 { "activitySince", busy ? ActivitySince.ToString("o") : "" }, { "agentStarted", StartedAt.ToString("o") }, { "agentPid", Process.GetCurrentProcess().Id },
                 { "agentVersion", Version + " C#" }, { "engine", "csharp" }, { "intervalSec", CfgInt("checkIntervalSec", 30) }, { "lastUpdateCheck", ps.ContainsKey("meduzaLastCheck") ? ps["meduzaLastCheck"] : "" },
-                { "meduza", meduza }, { "ultra", ultra }, { "wg", wg }, { "ics", icsC }, { "zapret", zapret },
+                { "inet", inet }, { "meduza", meduza }, { "ultra", ultra }, { "wg", wg }, { "ics", icsC }, { "zapret", zapret },
                 { "traffic", new Dictionary<string, object> { { "names", adNames }, { "rate", TrafRate }, { "days", TrafDays.Reverse().Take(14).Reverse().Select(kv => (object)new Dictionary<string, object> { { "d", kv.Key }, { "u", kv.Value["u"] }, { "w", kv.Value["w"] }, { "p", kv.Value["p"] } }).ToArray() } } },
                 { "counters", new Dictionary<string, object> { { "restarts", RestartCount }, { "reconnects", ReconnectCount }, { "icsFixes", IcsFixCount } } },
                 { "vpn", new Dictionary<string, object> { { "mode", mode }, { "name", ModeNames[mode] }, { "uplink", upN }, { "kind", kind }, { "primary", DualPrimary() } } },

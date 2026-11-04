@@ -171,7 +171,7 @@ tr.cur td:first-child { box-shadow: inset 3px 0 var(--accent); }
 <div class="app">
   <nav id="nav">
     <div class="logo">Vpn<b>Guard</b><small id="ver">—</small></div>
-    <a href="#home" data-p="home">Главная</a>
+    <a href="#home" data-p="home">Главная <span class="dot" data-d="inet" title="интернет"></span></a>
     <a href="#ultra" data-p="ultra">Туннель <span class="dot" data-d="ultra"></span></a>
     <a href="#meduza" data-p="meduza">MeduzaVPN <span class="dot" data-d="meduza"></span></a>
     <a href="#amnezia" data-p="amnezia">AmneziaVPN <span class="dot" data-d="amnezia"></span></a>
@@ -324,7 +324,9 @@ function flowModel() {
     t4: cz.running && cz.bypass ? `${cz.bypass} адр. временно через VPN` : '' });
   if (vpnOn) N.push({ id: 'vpn', col: 3, href: '#ultra', dot: lvl(comp('ultra')), c: 'var(--vpn)', t1: 'VPN', r: u, t3: nm.u || 'туннель' });
   N.push({ id: 'zp', col: 3, href: '#zapret', dot: lvl(comp('zapret')), c: 'var(--zp)', t1: vpnOn ? 'Мимо VPN · zapret' : 'Напрямую', r: byp, t3: vpnOn ? 'YouTube, Discord …' : '' });
-  N.push({ id: 'net', col: 4, dot: -1, t1: 'Интернет', r: p, t3: nm.p || 'физический адаптер' });
+  const ni = comp('inet'), nOk = LIVE && LIVE.inet !== undefined ? LIVE.inet : ni ? (ni.level === 0 ? 0 : ni.level === 2 ? 1 : -1) : -1;
+  N.push({ id: 'net', col: 4, dot: nOk === 0 ? 0 : nOk === 1 ? 2 : -1, dim: nOk === 1, t1: nOk === 1 ? 'Интернет · НЕТ СВЯЗИ' : 'Интернет', r: p,
+    t3: nOk === 1 ? (ni && ni.details && ni.details[0]) || 'провайдер не отвечает' : (nm.p || 'физический адаптер') + (ni && ni.level === 0 ? ' · ' + ni.state.replace(/^Есть · /, '') : '') });
   E.push({ a: 'wg', b: 'pc', r: [w[1], w[0]], c: 'var(--accent)' });
   E.push({ a: 'apps', b: 'pc', r: apps, c: 'var(--dim)' });
   if (vpnOn) { E.push({ a: 'pc', b: 'vpn', r: u, c: 'var(--vpn)' }); E.push({ a: 'vpn', b: 'net', r: u, c: 'var(--vpn)' }); }
@@ -466,7 +468,7 @@ function head() {
 const P = {};
 P.home = () => `<div id="htop">${P.home.top()}</div><div id="hflow">${flowBlock()}</div><div id="hbot">${P.home.bot()}</div>`;
 P.home.top = () => {
-  const keys = [['ultra', 'Туннель'], ['meduza', 'MeduzaVPN'], ['amnezia', 'AmneziaVPN'], ['wg', 'WG-Server'], ['ics', 'Раздача ICS'], ['zapret', 'zapret']];
+  const keys = [['inet', 'Интернет'], ['ultra', 'Туннель'], ['meduza', 'MeduzaVPN'], ['amnezia', 'AmneziaVPN'], ['wg', 'WG-Server'], ['ics', 'Раздача ICS'], ['zapret', 'zapret']];
   let worst = -1; const probs = [];
   for (const [k, n] of keys) { const l = lvl(comp(k)); if (l > worst) worst = l; if (l >= 1) probs.push(n + ': ' + comp(k).state); }
   const ht = { 0: 'Всё работает', 1: 'Есть предупреждения', 2: 'Есть сбои' }[worst] || 'Нет данных';
@@ -479,7 +481,7 @@ P.home.top = () => {
       <div class="muted" style="margin:6px 0 12px">${esc(probs.join('  ·  ') || 'Туннель, WG-Server и раздача в порядке')}</div>
       <div class="row">${btn('Переподключить туннель', "cmd('reconnect','переподключение туннеля')")}${btn('Восстановить раздачу', "cmd('reapply-ics','восстановление раздачи')")}${btn('Перезапустить wg_server', "cmd('restart-wg','перезапуск wg_server')")}${mode !== 'zapret' ? btn(z && z.enabled ? 'Выключить zapret' : 'Включить zapret', z && z.enabled ? "cmd('zapret-off','выключение zapret')" : "cmd('zapret-on','включение zapret','Включить zapret? YouTube и Discord этого ПК пойдут мимо VPN.')") : ''}</div></div>
     <div><div class="sub">Режим работы</div><select onchange="setMode(this.value)">${MODES.map(([v, t]) => `<option value="${v}"${v === mode ? ' selected' : ''}>${t}</option>`).join('')}</select></div></div>
-  <div class="grid">${keys.map(([k, n]) => { const o = comp(k), l = lvl(o); return `<div class="tile" onclick="location.hash='${k}'"><div class="t"><span class="dot l${l}"></span>${n}</div><div class="s c${l}" title="${esc(o && o.state)}">${esc(o ? String(o.state).split(' · ')[0] : 'нет данных')}</div><div class="d">${esc(o && o.details && o.details[0])}</div></div>`; }).join('')}</div>
+  <div class="grid">${keys.map(([k, n]) => { const o = comp(k), l = lvl(o); return `<div class="tile" onclick="location.hash='${k === 'inet' ? 'home' : k}'" title="${esc(o && o.details && o.details.join(' · '))}"><div class="t"><span class="dot l${l}"></span>${n}</div><div class="s c${l}" title="${esc(o && o.state)}">${esc(o ? String(o.state).split(' · ')[0] : 'нет данных')}</div><div class="d">${esc(o && o.details && o.details[0])}</div></div>`; }).join('')}</div>
   <div class="grid">
     <div class="tile kpi"><div class="t">Доступность туннеля · 2 ч</div><div class="v ${all ? (ok / all > .99 ? 'c0' : ok / all > .9 ? 'c1' : 'c2') : ''}">${all ? (100 * ok / all).toFixed(1) + ' %' : '—'}</div></div>
     <div class="tile kpi"><div class="t">Скорость туннеля</div><div class="v">${tr && tr.rate && tr.rate.u ? '↓ ' + fmtR(tr.rate.u[0]) : '—'}</div><div class="d">${tr && tr.rate && tr.rate.u ? '↑ ' + fmtR(tr.rate.u[1]) : ''}</div></div>

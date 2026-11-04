@@ -506,6 +506,7 @@ namespace VpnGuard
         static void ZStartTest(string reason)
         {
             if (ZTestRunner() != null) return;
+            if (InetDown()) { Log("zapret: подбор стратегии отложен — нет интернета (" + reason + ")", "INFO"); return; }
             if (!ZInstalled()) { Log("zapret: не установлен — подбирать нечего", "WARN"); return; }
             Log("zapret: запускаю подбор стратегии (" + reason + ")", "INFO");
             var a = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + Path.Combine(Root, "VpnGuard.ps1") + "\" -ZapretTest" + (ConfigPath != Path.Combine(Root, "config.json") ? " -ConfigPath \"" + ConfigPath + "\"" : "");
@@ -714,7 +715,7 @@ namespace VpnGuard
             }
             if (!ZDirect() && ZB("routeIspVideo")) { try { UpdateIspVideo(false); } catch (Exception e) { Log("zapret: видеосерверы провайдера: " + e.Message, "WARN"); } }
             ZSyncRoutes(false);
-            if ((DateTime.Now - ZD("healthAt")).TotalMinutes >= ZI("healthCheckMin")) {
+            if ((DateTime.Now - ZD("healthAt")).TotalMinutes >= ZI("healthCheckMin") && !InetDown()) {
                 var path = ZPhys();
                 if (path != null) {
                     var r = ZTest(path.Ip, ZTargets(), ZI("curlTimeoutSec"));
