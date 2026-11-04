@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
@@ -241,12 +241,12 @@ function flowBlock() {
   // узлы
   const N = {}, add = (id, o) => { N[id] = Object.assign({ id }, o); };
   shown.forEach((c, i) => add('c' + i, { kind: 'client', href: '#wg', dot: c.off ? -1 : c.active ? 0 : -1, dim: c.off || !c.active,
-    t1: c.name || c.ip, t2: c.off ? 'отключён' : c.active ? rt([c.txRate, c.rxRate]) : 'не на связи', t3: c.off || !c.active ? '' : c.zapret === false ? 'zapret выкл — всё через VPN' : c.cz ? `ретранслятор: ${c.cz.conns || 0} соед.${c.cz.vpn ? ', из них через VPN ' + c.cz.vpn : ''}` : '' }));
+    t1: c.name || c.ip, t2: c.off ? 'отключён' : c.active ? rt([c.txRate, c.rxRate]) : 'не на связи', t3: c.off || !c.active ? '' : c.zapret === false ? 'zapret выкл — всё через VPN' : c.cz ? `через zapret: ${c.cz.conns || 0} соед.${c.cz.vpn ? ' · не ответили ' + c.cz.vpn : ''}` : '' }));
   if (more > 0) add('cm', { kind: 'client', href: '#wg', dot: -1, dim: true, t1: `ещё ${more}`, t2: 'на вкладке WG-Server', t3: '' });
   add('apps', { kind: 'client', dot: -1, t1: 'Программы этого ПК', t2: rt(apps), t3: 'оценка' });
   add('wg', { kind: 'hub', href: '#wg', dot: wl, t1: 'WG-Server', t2: `на связи ${peers.filter(x => x.active).length} из ${peers.length}`, t3: rt([w[1], w[0]]) });
-  add('pc', { kind: 'hub', href: '#ics', dot: lvl(comp('ics')), t1: 'Этот ПК · раздача', t2: cz.running ? 'ретранслятор zapret для клиентов:' : 'ретранслятор zapret выключен',
-    t3: cz.running ? `напрямую ↓ ${mb(czr[0])} · VPN ↓ ${mb(czr[2])} Мбит/с` : (vpnOn ? 'раздаёт интернет из туннеля' : 'раздаёт интернет напрямую') });
+  add('pc', { kind: 'hub', href: '#ics', dot: lvl(comp('ics')), t1: 'Этот ПК · раздача', t2: cz.running ? `zapret для клиентов: ↓ ${mb(czr[0])} Мбит/с` : 'zapret для клиентов выключен',
+    t3: cz.running ? (cz.bypass ? `${cz.bypass} адрес(ов) временно через VPN — zapret не ответил` : 'раздаёт интернет клиентам') : (vpnOn ? 'раздаёт интернет из туннеля' : 'раздаёт интернет напрямую') });
   if (vpnOn) add('vpn', { kind: 'out', href: '#ultra', dot: ul, col: 'var(--vpn)', t1: 'VPN · ' + (nm.u || 'туннель'), t2: rt(u), t3: (comp('ultra') && String(comp('ultra').state)) || '' });
   add('zp', { kind: 'out', href: '#zapret', dot: zl, col: 'var(--zp)', t1: vpnOn ? 'Напрямую · zapret' : 'Напрямую (без VPN)', t2: rt(vpnOn ? byp : [p[0] - w[0], p[1] - w[1]].map(v => Math.max(0, v))), t3: vpnOn ? 'YouTube, Discord и др. — мимо VPN' : '' });
   add('net', { kind: 'net', dot: -1, t1: 'Интернет', t2: rt(p), t3: 'через ' + (nm.p || 'физический адаптер') + ' — всё вместе' });
