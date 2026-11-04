@@ -86,6 +86,7 @@ namespace VpnGuard
             Log("VpnGuard " + Version + " запущен — агент на C# (PID " + Process.GetCurrentProcess().Id + ")", "INFO");
             try { CleanupOldAwg(); } catch (Exception e) { Log("AmneziaVPN: очистка старых туннелей AmneziaWG: " + e.Message, "WARN"); }
             MeduzaStartedAt = DateTime.Now;
+            new Thread(LiveLoop) { IsBackground = true, Name = "live" }.Start();
             while (true) {
                 var t0 = DateTime.Now;
                 LoadCfg(false);
@@ -1081,6 +1082,7 @@ namespace VpnGuard
         static Dictionary<string, string> UpdateTraffic()
         {
             var names = new Dictionary<string, string> { { "u", Mode() == "zapret" ? "" : UplinkName() }, { "w", WgIf() }, { "p", PhysAlias() } };
+            LiveNames = names;
             var now = DateTime.Now; double sec = TrafAt == DateTime.MinValue ? 0 : Math.Max(1, (now - TrafAt).TotalSeconds);
             string day = now.ToString("yyyy-MM-dd"); if (!TrafDays.ContainsKey(day)) TrafDays[day] = NewTraf(); var today = TrafDays[day];
             var nics = new List<NetworkInterface>(); try { nics = NetworkInterface.GetAllNetworkInterfaces().ToList(); } catch { }
@@ -1107,6 +1109,44 @@ namespace VpnGuard
                 } catch { }
             }
             return names;
+        }
+
+        // ---------------------------------------------------------------- «живые» скорости раз в 2 с (для схемы трафика в веб-интерфейсе): data\live.json
+        // адаптеры (туннель, wg_server, физический) и ретранслятор zapret — каждые 2 с; клиенты WG-Server (wg show) — каждые 4 с
+        static volatile Dictionary<string, string> LiveNames;
+        static void LiveLoop()
+        {
+            string path = Path.Combine(DataDir, "live.json"), tmp = path + ".tmp"; int tick = 0; object peers = null;
+            while (true) {
+                try {
+                    Thread.Sleep(2000); tick++;
+                    var names = LiveNames; if (names == null) continue;
+                    var nics = NetworkInterface.GetAllNetworkInterfaces();
+                    var ad = new Dictionary<string, object>();
+                    foreach (var kv in names) {
+                        var n = kv.Value.Length > 0 ? nics.FirstOrDefault(x => x.Name == kv.Value) : null;
+                        if (n == null) { ad[kv.Key] = new long[2]; continue; }
+                        long rx = 0, tx = 0; try { var st = n.GetIPStatistics(); rx = st.BytesReceived; tx = st.BytesSent; } catch { }
+                        ad[kv.Key] = RateOf("live:" + kv.Key + ":" + n.Id, rx, tx);
+                    }
+                    if (tick % 2 == 1 || peers == null) {
+                        var wg = Path.Combine(Path.GetDirectoryName(CfgStr("ws4w.wireguardExe", @"C:\Program Files\WireGuard\wireguard.exe")), "wg.exe");
+                        var pr = new Dictionary<string, object>();
+                        var r = File.Exists(wg) ? Exe(wg, "show " + WgIf() + " dump", 5) : null;
+                        if (r != null && r.Code == 0) foreach (var l in r.Out.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Skip(1)) {
+                            var p = l.Split('\t'); if (p.Length < 7) continue;
+                            string ip = Regex.Replace(p[3].Split(',')[0], @"/\d+$", ""); long rx, tx; long.TryParse(p[5], out rx); long.TryParse(p[6], out tx);
+                            var rr = RateOf("live:wg:" + p[0], rx, tx);
+                            var cs = CzClientStat(ip); long[] czr = cs != null ? (long[])cs["rate"] : new long[2];
+                            pr[ip] = new Dictionary<string, object> { { "rx", rr[0] }, { "tx", rr[1] }, { "cz", czr } };
+                        }
+                        peers = pr;
+                    }
+                    var o = new Dictionary<string, object> { { "t", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }, { "rate", ad }, { "cz", RateOf("live:cz", Interlocked.Read(ref CzTcpDown), Interlocked.Read(ref CzTcpUp)) }, { "peers", peers } };
+                    File.WriteAllText(tmp, Json.Serialize(o), Encoding.UTF8);
+                    try { File.Copy(tmp, path, true); } catch { }
+                } catch { Thread.Sleep(5000); }
+            }
         }
 
         // ---------------------------------------------------------------- состояние для окна, веб-интерфейса и значка

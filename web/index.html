@@ -70,14 +70,15 @@ textarea.log { width: 100%; height: 60vh; resize: vertical; }
 .bar i { display: block; height: 100%; }
 canvas { width: 100%; height: 190px; display: block; }
 .legend { display: flex; gap: 16px; font-size: 12px; color: var(--dim); }
-.flow svg { width: 100%; height: auto; display: block; }
+#flowhost { overflow-x: auto; }
+.flow svg { width: 100%; min-width: 820px; height: auto; display: block; }
 .flow text { fill: var(--text); font-family: "Segoe UI", system-ui, sans-serif; }
-.flow .f1 { font-size: 13px; font-weight: 600; } .flow .f2 { font-size: 11.5px; } .flow .f3 { font-size: 11px; fill: var(--dim); }
-.flow .fe { font-size: 11px; fill: var(--dim); paint-order: stroke; stroke: var(--card); stroke-width: 4px; stroke-linejoin: round; }
-.flow a:hover path { stroke: var(--accent); }
-.fl { animation: vgflow linear infinite; }
-@keyframes vgflow { to { stroke-dashoffset: 32; } }
-@media (prefers-reduced-motion: reduce) { .fl { animation: none; } }
+.flow .f1 { font-size: 13px; font-weight: 600; } .flow .f2 { font-size: 12px; font-variant-numeric: tabular-nums; } .flow .f3 { font-size: 11px; fill: var(--dim); }
+.flow .frx, .legend .frx { fill: var(--rx); color: var(--rx); } .flow .ftx, .legend .ftx { fill: var(--tx); color: var(--tx); }
+.fl-node { fill: var(--row); stroke: var(--border); stroke-width: 1; }
+.flow a:hover .fl-node { stroke: var(--accent); }
+.fl-base { fill: none; stroke: var(--border); stroke-width: 1; opacity: .5; }
+.flow .fl-chv { font: bold 10px Consolas, "Courier New", monospace; letter-spacing: 5.5px; dominant-baseline: central; }
 .legend b { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 #toast { position: fixed; right: 16px; bottom: 16px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; max-width: 420px; display: none; box-shadow: 0 4px 18px rgba(0,0,0,.3); }
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: center; justify-content: center; padding: 16px; z-index: 5; }
@@ -292,107 +293,138 @@ function chartBlock(k, title) {
 }
 
 // ---------------------------------------------------------------- схема трафика: кто с кем соединён и сколько пропускает
-// Скорости — из снимка агента (байт/с): адаптеры (туннель, wg_server, физический), клиенты, ретранслятор zapret.
+// Узлы и подписи — из снимка агента (S), скорости — из «живого» снимка (/api/live, раз в 2 с), пока его нет — из S.
+// Связь — две полосы стрелок: «>>>>» — от клиента к интернету (отдача), «<<<<» — обратно (загрузка); чем больше трафика, тем быстрее.
 // «Мимо VPN» и «программы ПК» — оценка: физический − туннель − зашифрованный трафик клиентов.
-function flowBlock() {
-  const tr = S.traffic || {}, R = tr.rate || {}, nm = tr.names || {}, wgc = comp('wg') || {}, cz = wgc.clientZapret || {};
+let LIVE = null, FL = null;
+const FLP = 11;                                  // шаг стрелок: символ 10px Consolas (0,55 em = 5,5) + разрядка 5,5
+function flowModel() {
+  const tr = S.traffic || {}, nm = tr.names || {}, wgc = comp('wg') || {}, cz = wgc.clientZapret || {};
+  const R = (LIVE && LIVE.rate) || tr.rate || {}, LP = (LIVE && LIVE.peers) || null;
   const mode = (S.vpn && S.vpn.mode) || 'meduza', vpnOn = mode !== 'zapret';
   const r2 = k => [+(R[k] || [])[0] || 0, +(R[k] || [])[1] || 0];
   const u = vpnOn ? r2('u') : [0, 0], w = r2('w'), p = r2('p');
-  const byp = [Math.max(0, p[0] - u[0] - w[0]), Math.max(0, p[1] - u[1] - w[1])];
+  const byp = vpnOn ? [Math.max(0, p[0] - u[0] - w[0]), Math.max(0, p[1] - u[1] - w[1])] : [Math.max(0, p[0] - w[0]), Math.max(0, p[1] - w[1])];
   const apps = [Math.max(0, u[0] + byp[0] - w[1]), Math.max(0, u[1] + byp[1] - w[0])];
-  const czr = (cz.rate || []).map(v => +v || 0);
-  const peers = (wgc.peers || []).slice().sort((a, b) => (b.active - a.active) || ((+b.txRate || 0) - (+a.txRate || 0)));
-  const shown = peers.slice(0, 8), more = peers.length - shown.length;
-  const narrow = window.innerWidth < 760;
-  const mb = v => { v = (+v || 0) * 8; return v >= 1e6 ? (v / 1e6).toFixed(v >= 1e7 ? 0 : 1) : v >= 1e3 ? (v / 1e6).toFixed(2) : '0'; };
-  const rt = r => `↓ ${mb(r[0])}  ↑ ${mb(r[1])} Мбит/с`;   // ↓ — к клиенту / на ПК, ↑ — от него
-  const ul = lvl(comp('ultra')), zl = lvl(comp('zapret')), wl = lvl(wgc);
+  const czr = (LIVE && LIVE.cz) || cz.rate || [0, 0];
+  const peers = (wgc.peers || []).slice().sort((a, b) => (b.active - a.active) || String(a.name).localeCompare(String(b.name)));
+  const shown = peers.slice(0, 6), more = peers.length - shown.length;
+  const pr = c => { const l = LP && LP[c.ip]; return l ? [+l.tx || 0, +l.rx || 0] : [+c.txRate || 0, +c.rxRate || 0]; };
+  const N = [], E = [];
+  shown.forEach((c, i) => {
+    const on = !c.off && c.active, r = on ? pr(c) : [0, 0];
+    N.push({ id: 'c' + i, col: 0, href: '#wg', dot: on ? 0 : -1, dim: !on, t1: c.name || c.ip, r: on ? r : null,
+      t3: c.off ? 'отключён' : !c.active ? 'не на связи' : c.zapret === false ? 'zapret выкл — всё через VPN' : c.cz ? `zapret: ${c.cz.conns || 0} соед.${c.cz.vpn ? ' · не ответили ' + c.cz.vpn : ''}` : c.ip });
+    E.push({ a: 'c' + i, b: 'wg', r, c: 'var(--accent)', off: !on });
+  });
+  if (more > 0) { N.push({ id: 'cm', col: 0, href: '#wg', dot: -1, dim: true, t1: `ещё ${more}`, r: null, t3: 'на вкладке WG-Server' }); E.push({ a: 'cm', b: 'wg', r: [0, 0], c: 'var(--accent)', off: true }); }
+  N.push({ id: 'apps', col: 0, dot: -1, t1: 'Программы ПК', r: apps, t3: 'оценка' });
+  N.push({ id: 'wg', col: 1, href: '#wg', dot: lvl(wgc), t1: 'WG-Server', r: [w[1], w[0]], t3: `на связи ${peers.filter(x => x.active).length} из ${peers.length}` });
+  N.push({ id: 'pc', col: 2, href: '#ics', dot: lvl(comp('ics')), t1: 'Этот ПК', r: null, t3: cz.running ? `zapret для клиентов ↓ ${mbs(czr[0])}` : 'раздача ' + (vpnOn ? 'из туннеля' : 'напрямую'),
+    t4: cz.running && cz.bypass ? `${cz.bypass} адр. временно через VPN` : '' });
+  if (vpnOn) N.push({ id: 'vpn', col: 3, href: '#ultra', dot: lvl(comp('ultra')), c: 'var(--vpn)', t1: 'VPN', r: u, t3: nm.u || 'туннель' });
+  N.push({ id: 'zp', col: 3, href: '#zapret', dot: lvl(comp('zapret')), c: 'var(--zp)', t1: vpnOn ? 'Мимо VPN · zapret' : 'Напрямую', r: byp, t3: vpnOn ? 'YouTube, Discord …' : '' });
+  N.push({ id: 'net', col: 4, dot: -1, t1: 'Интернет', r: p, t3: nm.p || 'физический адаптер' });
+  E.push({ a: 'wg', b: 'pc', r: [w[1], w[0]], c: 'var(--accent)' });
+  E.push({ a: 'apps', b: 'pc', r: apps, c: 'var(--dim)' });
+  if (vpnOn) { E.push({ a: 'pc', b: 'vpn', r: u, c: 'var(--vpn)' }); E.push({ a: 'vpn', b: 'net', r: u, c: 'var(--vpn)' }); }
+  E.push({ a: 'pc', b: 'zp', r: byp, c: 'var(--zp)' }); E.push({ a: 'zp', b: 'net', r: byp, c: 'var(--zp)' });
+  return { N, E, key: N.map(n => n.id + (n.dim ? '-' : '+')).join(',') + '|' + vpnOn };
+}
+const mbs = v => { v = (+v || 0) * 8; return v >= 1e7 ? (v / 1e6).toFixed(0) : v >= 1e5 ? (v / 1e6).toFixed(1) : v >= 1e3 ? (v / 1e6).toFixed(2) : '0'; };
+// скорость стрелок, пикс/с: 0 — стоят; дальше растёт с логарифмом трафика
+const laneSpeed = r => (r = +r || 0) < 400 ? 0 : 12 + 20 * Math.log10(r / 400);
 
-  // узлы
-  const N = {}, add = (id, o) => { N[id] = Object.assign({ id }, o); };
-  shown.forEach((c, i) => add('c' + i, { kind: 'client', href: '#wg', dot: c.off ? -1 : c.active ? 0 : -1, dim: c.off || !c.active,
-    t1: c.name || c.ip, t2: c.off ? 'отключён' : c.active ? rt([c.txRate, c.rxRate]) : 'не на связи', t3: c.off || !c.active ? '' : c.zapret === false ? 'zapret выкл — всё через VPN' : c.cz ? `через zapret: ${c.cz.conns || 0} соед.${c.cz.vpn ? ' · не ответили ' + c.cz.vpn : ''}` : '' }));
-  if (more > 0) add('cm', { kind: 'client', href: '#wg', dot: -1, dim: true, t1: `ещё ${more}`, t2: 'на вкладке WG-Server', t3: '' });
-  add('apps', { kind: 'client', dot: -1, t1: 'Программы этого ПК', t2: rt(apps), t3: 'оценка' });
-  add('wg', { kind: 'hub', href: '#wg', dot: wl, t1: 'WG-Server', t2: `на связи ${peers.filter(x => x.active).length} из ${peers.length}`, t3: rt([w[1], w[0]]) });
-  add('pc', { kind: 'hub', href: '#ics', dot: lvl(comp('ics')), t1: 'Этот ПК · раздача', t2: cz.running ? `zapret для клиентов: ↓ ${mb(czr[0])} Мбит/с` : 'zapret для клиентов выключен',
-    t3: cz.running ? (cz.bypass ? `${cz.bypass} адрес(ов) временно через VPN — zapret не ответил` : 'раздаёт интернет клиентам') : (vpnOn ? 'раздаёт интернет из туннеля' : 'раздаёт интернет напрямую') });
-  if (vpnOn) add('vpn', { kind: 'out', href: '#ultra', dot: ul, col: 'var(--vpn)', t1: 'VPN · ' + (nm.u || 'туннель'), t2: rt(u), t3: (comp('ultra') && String(comp('ultra').state)) || '' });
-  add('zp', { kind: 'out', href: '#zapret', dot: zl, col: 'var(--zp)', t1: vpnOn ? 'Напрямую · zapret' : 'Напрямую (без VPN)', t2: rt(vpnOn ? byp : [p[0] - w[0], p[1] - w[1]].map(v => Math.max(0, v))), t3: vpnOn ? 'YouTube, Discord и др. — мимо VPN' : '' });
-  add('net', { kind: 'net', dot: -1, t1: 'Интернет', t2: rt(p), t3: 'через ' + (nm.p || 'физический адаптер') + ' — всё вместе' });
-
-  // рёбра: [откуда, куда, [↓, ↑], цвет, пунктир]
-  const E = [];
-  shown.forEach((c, i) => E.push(['c' + i, 'wg', c.off || !c.active ? [0, 0] : [c.txRate, c.rxRate], 'var(--dim)', c.off]));
-  if (more > 0) E.push(['cm', 'wg', [0, 0], 'var(--dim)', true]);
-  E.push(['wg', 'pc', [w[1], w[0]], 'var(--dim)']);
-  E.push(['apps', 'pc', apps, 'var(--dim)']);
-  if (vpnOn) { E.push(['pc', 'vpn', u, 'var(--vpn)']); E.push(['vpn', 'net', u, 'var(--vpn)']); }
-  const zr = vpnOn ? byp : [Math.max(0, p[0] - w[0]), Math.max(0, p[1] - w[1])];
-  E.push(['pc', 'zp', zr, 'var(--zp)']); E.push(['zp', 'net', zr, 'var(--zp)']);
-
-  // раскладка
-  const cl = Object.values(N).filter(n => n.kind === 'client');
-  let VW, VH;
-  if (!narrow) {
-    const nh = 54, gap = 10, colX = [0, 250, 450, 750, 965], colW = [210, 160, 250, 185, 165];
-    VW = 1130; VH = Math.max(300, cl.length * (nh + gap) + 20);
-    cl.forEach((n, i) => Object.assign(n, { x: colX[0], y: 10 + i * (nh + gap), w: colW[0], h: nh }));
-    const mid = VH / 2;
-    Object.assign(N.wg, { x: colX[1], y: mid - 70 - 35, w: colW[1], h: 70 });
-    Object.assign(N.pc, { x: colX[2], y: mid - 45, w: colW[2], h: 90 });
-    if (N.vpn) Object.assign(N.vpn, { x: colX[3], y: mid - 115, w: colW[3], h: 76 });
-    Object.assign(N.zp, { x: colX[3], y: N.vpn ? mid + 39 : mid - 38, w: colW[3], h: 76 });
-    Object.assign(N.net, { x: colX[4], y: mid - 45, w: colW[4], h: 90 });
-  } else {
-    VW = 420; const nh = 58, gap = 8, half = (VW - gap) / 2; let y = 4;
-    cl.forEach((n, i) => { Object.assign(n, { x: (i % 2) * (half + gap), y: y + Math.floor(i / 2) * (nh + gap), w: half, h: nh }); });
-    y += Math.ceil(cl.length / 2) * (nh + gap) + 34;
-    Object.assign(N.wg, { x: 0, y, w: 150, h: 70 }); Object.assign(N.pc, { x: 180, y, w: 240, h: 70 });
-    y += 70 + 40;
-    if (N.vpn) { Object.assign(N.vpn, { x: 0, y, w: half, h: 76 }); Object.assign(N.zp, { x: half + gap, y, w: half, h: 76 }); }
-    else Object.assign(N.zp, { x: 100, y, w: 220, h: 76 });
-    y += 76 + 40; Object.assign(N.net, { x: 60, y, w: 300, h: 76 }); VH = y + 80;
-  }
-
-  // точки входа/выхода: на широком экране — слева направо, на узком — сверху вниз
-  const outP = n => narrow ? [n.x + n.w / 2, n.y + n.h] : [n.x + n.w, n.y + n.h / 2];
-  const inP = n => narrow ? [n.x + n.w / 2, n.y] : [n.x, n.y + n.h / 2];
-  let maxR = 125000; for (const e of E) maxR = Math.max(maxR, (+e[2][0] || 0) + (+e[2][1] || 0));
-  const now = Date.now() / 1000;
-  let edges = '';
-  for (const [a, b, r, col, dashed] of E) {
-    const A = N[a], B = N[b]; if (!A || !B) continue;
-    let [x1, y1] = outP(A), [x2, y2] = inP(B);
-    // в узкой раскладке WG-Server → ПК идут бок о бок
-    if (narrow && a === 'wg' && b === 'pc') { x1 = A.x + A.w; y1 = A.y + A.h / 2; x2 = B.x; y2 = B.y + B.h / 2; }
-    if (narrow && a === 'apps') { x2 = B.x + B.w / 2; y2 = B.y; }
-    const tot = (+r[0] || 0) + (+r[1] || 0), sw = 1.5 + 9 * Math.sqrt(tot / maxR);
-    const d = narrow && !(a === 'wg' && b === 'pc') ? `M${x1},${y1} C${x1},${(y1 + y2) / 2} ${x2},${(y1 + y2) / 2} ${x2},${y2}` : `M${x1},${y1} C${(x1 + x2) / 2},${y1} ${(x1 + x2) / 2},${y2} ${x2},${y2}`;
-    edges += `<path d="${d}" fill="none" stroke="var(--grid)" stroke-width="${sw.toFixed(1)}"${dashed ? ' stroke-dasharray="4 6"' : ''}/>`;
-    if (tot > 1000 && !dashed) {
-      const dur = Math.max(0.5, 6 - 1.6 * Math.log10(tot / 1000));
-      edges += `<path class="fl" d="${d}" fill="none" stroke="${col}" stroke-width="${sw.toFixed(1)}" stroke-dasharray="7 9" stroke-linecap="round" style="animation-duration:${dur.toFixed(2)}s;animation-delay:-${(now % dur).toFixed(2)}s"/>`;
+function flowBuild(m) {
+  const { N, E } = m, byId = {}; N.forEach(n => byId[n.id] = n);
+  const W = 200, H = 64, G = 14, X = [0, 265, 510, 755, 1000], VW = X[4] + W;
+  const col0 = N.filter(n => n.col === 0);
+  const VH = Math.max(col0.length * (H + G) - G, 2 * H + 40) + 4, mid = VH / 2;
+  col0.forEach((n, i) => Object.assign(n, { x: X[0], y: 2 + i * (H + G) }));
+  for (const n of N) if (n.col > 0) Object.assign(n, { x: X[n.col], y: mid - H / 2 });
+  if (byId.vpn) { byId.vpn.y = mid - H - 14; byId.zp.y = mid + 14; }
+  N.forEach(n => { n.w = W; n.h = H; });
+  // точки подключения: связи одной стороны узла разносятся по ней (по высоте источника/приёмника — без перекрёстков)
+  const sides = {};
+  E.forEach((e, i) => { (sides[e.a + 'r'] = sides[e.a + 'r'] || []).push(i); (sides[e.b + 'l'] = sides[e.b + 'l'] || []).push(i); });
+  for (const k in sides) sides[k].sort((i, j) => { const o = k.endsWith('r') ? 'b' : 'a'; return byId[E[i][o]].y - byId[E[j][o]].y; });
+  const portY = (n, s, i) => { const l = sides[n.id + s], f = (l.indexOf(i) + 1) / (l.length + 1); return n.y + 10 + f * (n.h - 20); };
+  // вертикаль связи: если в узел входит несколько — у каждой своя, ближе к узлу — те, что ближе к краю (верхние сверху, нижние снизу)
+  const vx = (e, i, x1, x2, y1, y2) => {
+    const l = sides[e.b + 'l']; if (l.length < 2) return (x1 + x2) / 2;
+    const B = byId[e.b], c = B.y + B.h / 2, srcY = j => byId[E[j].a].y + H / 2;
+    const above = l.filter(j => srcY(j) < c - 1), below = l.filter(j => srcY(j) > c + 1).reverse();
+    const ra = above.indexOf(i), rb = below.indexOf(i), rank = ra >= 0 ? ra : rb >= 0 ? rb : 0;
+    return x2 - 20 - rank * 18;
+  };
+  let defs = '', links = '';
+  E.forEach((e, i) => {
+    const A = byId[e.a], B = byId[e.b], x1 = A.x + W, x2 = B.x, y1 = portY(A, 'r', i), y2 = portY(B, 'l', i), mx0 = vx(e, i, x1, x2, y1, y2);
+    for (const [lane, off] of [['u', -6], ['d', 6]]) {
+      // ломаная со скошенными изломами; «туда» и «обратно» идут рядом и не пересекаются
+      const d = y2 - y1, mx = mx0 + (d > 0 ? -off : off), a = y1 + off, b = y2 + off, c = Math.min(8, Math.abs(d) / 2), sg = Math.sign(d);
+      const pts = Math.abs(d) < 1 ? [[x1, a], [x2, b]] : [[x1, a], [mx - c, a], [mx, a + sg * c], [mx, b - sg * c], [mx + c, b], [x2, b]];
+      let len = 0; for (let k = 1; k < pts.length; k++) len += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
+      const id = `fl${i}${lane}`, dd = 'M' + pts.map(q => q[0].toFixed(1) + ',' + q[1].toFixed(1)).join(' L');
+      defs += `<path id="${id}" d="${dd}"/>`;
+      const glyph = lane === 'u' ? '>' : '<', txt = glyph.repeat(Math.ceil(len / FLP) + 3);
+      const from = lane === 'u' ? -FLP : 0, to = lane === 'u' ? 0 : -FLP;
+      links += `<use href="#${id}" class="fl-base"/><text class="fl-chv" fill="${e.c}" id="${id}t" opacity=".16"><textPath href="#${id}" startOffset="${from}">${txt}<animate id="${id}a" attributeName="startOffset" from="${from}" to="${to}" dur="1s" repeatCount="indefinite" begin="indefinite"/></textPath></text>`;
     }
-  }
+  });
   let nodes = '';
-  for (const n of Object.values(N)) {
-    const op = n.dim ? ' opacity=".55"' : '', lc = n.dot >= 0 ? `var(--${['ok', 'warn', 'bad'][n.dot]})` : 'var(--none)';
-    const c = 9, sh = `M${n.x + c},${n.y} H${n.x + n.w} V${n.y + n.h - c} L${n.x + n.w - c},${n.y + n.h} H${n.x} V${n.y + c} Z`;
-    const g = `<g${op}><path d="${sh}" fill="var(--row)" stroke="${n.col || 'var(--border)'}" stroke-width="${n.col ? 1.6 : 1}"/>
-      <path d="M${n.x},${n.y} h12 L${n.x},${n.y + 12} Z" fill="${n.col || 'var(--accent)'}" opacity=".85"/>
-      <circle cx="${n.x + 14}" cy="${n.y + 17}" r="5" fill="${lc}"/>
-      <text x="${n.x + 26}" y="${n.y + 21}" class="f1">${esc(clip(n.t1, n.w, 8.4))}</text>
-      <text x="${n.x + 12}" y="${n.y + 39}" class="f2">${esc(clip(n.t2, n.w + 20))}</text>
-      ${n.t3 ? `<text x="${n.x + 12}" y="${n.y + 55}" class="f3">${esc(clip(n.t3, n.w + 30))}</text>` : ''}</g>`;
+  for (const n of N) {
+    const c = 10, sh = `M${n.x + c},${n.y} H${n.x + n.w} V${n.y + n.h - c} L${n.x + n.w - c},${n.y + n.h} H${n.x} V${n.y + c} Z`;
+    const lc = n.dot >= 0 ? `var(--${['ok', 'warn', 'bad'][n.dot]})` : 'var(--none)';
+    const g = `<g id="fln-${n.id}"${n.dim ? ' opacity=".5"' : ''}><path d="${sh}" class="fl-node"${n.c ? ` style="stroke:${n.c}"` : ''}/>
+      <path d="M${n.x},${n.y} h13 L${n.x},${n.y + 13} Z" fill="${n.c || 'var(--accent)'}"/>
+      <rect x="${n.x + n.w - 30}" y="${n.y + 10}" width="18" height="3" fill="${lc}"/>
+      <text x="${n.x + 14}" y="${n.y + 21}" class="f1">${esc(clip(n.t1, n.w - 30, 8.6))}</text>
+      <text x="${n.x + 14}" y="${n.y + 39}" class="f2" id="fl-${n.id}-r"></text>
+      <text x="${n.x + 14}" y="${n.y + 55}" class="f3" id="fl-${n.id}-3"></text></g>`;
     nodes += n.href ? `<a href="${n.href}">${g}</a>` : g;
   }
-  return `<div class="sec">Схема трафика — кто с кем соединён и сколько пропускает</div><div class="card flow">
-    <svg viewBox="0 -4 ${VW} ${VH + 8}" role="img" aria-label="Схема трафика: клиенты → WG-Server → этот ПК → VPN или zapret → интернет">${edges}${nodes}</svg>
-    <div class="legend" style="flex-wrap:wrap;margin-top:6px"><span><b style="background:var(--vpn)"></b>через VPN</span><span><b style="background:var(--zp)"></b>напрямую через zapret (мимо VPN)</span><span>толщина линии — скорость · бегущие штрихи — загрузка</span><span>↓ к клиенту / на ПК · ↑ от него</span></div></div>`;
+  const el = document.createElement('div');
+  el.innerHTML = `<svg viewBox="-2 -2 ${VW + 4} ${VH + 4}" role="img" aria-label="Схема трафика: клиенты → WG-Server → этот ПК → VPN или zapret → интернет"><defs>${defs}</defs>${links}${nodes}</svg>`;
+  return el.firstChild;
 }
-// обрезать подпись под ширину узла (≈6,6 единицы на символ)
+// обновить цифры и скорость стрелок, не пересоздавая схему (анимация не сбивается)
+function flowUpdate(m) {
+  if (!FL) return;
+  const svg = FL.svg;
+  for (const n of m.N) {
+    const r = svg.querySelector(`#fl-${n.id}-r`); if (r) r.innerHTML = n.r ? `<tspan class="frx">↓ ${mbs(n.r[0])}</tspan>  <tspan class="ftx">↑ ${mbs(n.r[1])}</tspan> Мбит/с` : '';
+    const t = svg.querySelector(`#fl-${n.id}-3`); if (t) t.textContent = clip(n.t4 || n.t3, 200, 6.1);
+  }
+  m.E.forEach((e, i) => {
+    for (const [lane, v] of [['u', e.r[1]], ['d', e.r[0]]]) {
+      const a = svg.querySelector(`#fl${i}${lane}a`), tx = svg.querySelector(`#fl${i}${lane}t`); if (!a) continue;
+      const sp = e.off ? 0 : laneSpeed(v), q = sp ? Math.round(sp / 4) * 4 : 0;   // ступенями — без лишних перезапусков
+      if (+a.dataset.q === q && a.dataset.q !== undefined) continue;
+      a.dataset.q = q;
+      if (!q) { try { a.endElement(); } catch (x) { } tx.setAttribute('opacity', '.16'); }
+      else { a.setAttribute('dur', (FLP / q).toFixed(3) + 's'); tx.setAttribute('opacity', lane === 'd' ? '1' : '.8'); try { a.beginElement(); } catch (x) { } }
+    }
+  });
+}
+function flowMount() {
+  const host = $('#flowhost'); if (!host || !S) return;
+  const m = flowModel();
+  if (!FL || FL.key !== m.key) FL = { key: m.key, svg: flowBuild(m) };
+  if (FL.svg.parentNode !== host) host.appendChild(FL.svg);
+  flowUpdate(m);
+}
+function flowBlock() {
+  return `<div class="sec">Схема трафика — кто с кем соединён и сколько пропускает</div><div class="card flow"><div id="flowhost"></div>
+    <div class="legend" style="flex-wrap:wrap;margin-top:8px"><span><b style="background:var(--vpn)"></b>через VPN</span><span><b style="background:var(--zp)"></b>мимо VPN через zapret</span><span><b style="background:var(--accent)"></b>клиенты WG-Server</span><span>&gt;&gt;&gt; отдача · &lt;&lt;&lt; загрузка · чем быстрее стрелки, тем больше трафика · цифры: <span class="frx">↓ загрузка</span> <span class="ftx">↑ отдача</span>, Мбит/с</span></div></div>`;
+}
+// живые скорости раз в 2 с — только на главной и пока вкладка видна
+async function liveTick() {
+  if (page !== 'home' || document.hidden || !S) return;
+  try { LIVE = await api('/api/live'); if (!LIVE || !LIVE.rate) LIVE = null; } catch (e) { LIVE = null; }
+  if (FL) flowUpdate(flowModel());
+}
+// обрезать подпись под ширину (k — ширина символа)
 function clip(s, w, k = 6.6) { s = String(s || ''); const n = Math.floor((w - 20) / k); return s.length > n ? s.slice(0, Math.max(1, n - 1)) + '…' : s; }
 
 // ---------------------------------------------------------------- шапка
@@ -407,7 +439,8 @@ function head() {
 
 // ---------------------------------------------------------------- страницы
 const P = {};
-P.home = () => {
+P.home = () => `<div id="htop">${P.home.top()}</div><div id="hflow">${flowBlock()}</div><div id="hbot">${P.home.bot()}</div>`;
+P.home.top = () => {
   const keys = [['ultra', 'Туннель'], ['meduza', 'MeduzaVPN'], ['amnezia', 'AmneziaVPN'], ['wg', 'WG-Server'], ['ics', 'Раздача ICS'], ['zapret', 'zapret']];
   let worst = -1; const probs = [];
   for (const [k, n] of keys) { const l = lvl(comp(k)); if (l > worst) worst = l; if (l >= 1) probs.push(n + ': ' + comp(k).state); }
@@ -428,11 +461,11 @@ P.home = () => {
     <div class="tile kpi"><div class="t">Трафик туннеля сегодня</div><div class="v">${today ? '↓ ' + fmtB(today.u[0]) : '—'}</div><div class="d">${today ? '↑ ' + fmtB(today.u[1]) : ''}</div></div>
     <div class="tile kpi" onclick="location.hash='wg'"><div class="t">Клиенты WG-Server</div><div class="v">${peers.filter(p => p.active).length} из ${peers.length}</div><div class="d">на связи за 3 мин</div></div>
   </div>
-  ${flowBlock()}
-  ${chartBlock('u', 'Трафик туннеля — последние 2 часа')}
-  <div class="sec">Последние предупреждения и ошибки</div><pre id="events" class="muted">загрузка…</pre>`;
+`;
 };
-P.home.after = async () => { try { const t = await api('/api/logs?minutes=720&lines=3000'); const l = t.split('\n').filter(s => /\[(WARN|ERROR)\]/.test(s)).slice(-15).reverse(); $('#events').textContent = l.join('\n') || 'за 12 часов — ничего'; } catch (e) { } };
+P.home.bot = () => `${chartBlock('u', 'Трафик туннеля — последние 2 часа')}
+  <div class="sec">Последние предупреждения и ошибки</div><pre id="events" class="muted">${esc(P.home.ev || 'загрузка…')}</pre>`;
+P.home.after = async () => { flowMount(); try { const t = await api('/api/logs?minutes=720&lines=3000'); const l = t.split('\n').filter(s => /\[(WARN|ERROR)\]/.test(s)).slice(-15).reverse(); P.home.ev = l.join('\n') || 'за 12 часов — ничего'; if ($('#events')) $('#events').textContent = P.home.ev; } catch (e) { } };
 async function setZVer() {
   const v = $('#zver').value;
   if (!confirm(v ? `Установить zapret ${v} и закрепить эту версию?` : 'Вернуться к последней версии zapret (обновляется сама)?')) return;
@@ -646,7 +679,8 @@ function render(force) {
   const ae = document.activeElement; if (!force && ae && ['SELECT', 'INPUT', 'TEXTAREA'].includes(ae.tagName) && page !== 'home') return;
   if ((page === 'logs' && $('#log') || page === 'diag' && $('#remote') || page === 'settings' && $('#setbox')) && !force) return;
   const keep = page === 'zapret' && $('#zltext') ? { text: $('#zltext').value, sel: $('#zlsel') && $('#zlsel').value } : null;
-  $('#page').innerHTML = (P[page] || P.home)();
+  if (!force && page === 'home' && $('#hflow')) { $('#htop').innerHTML = P.home.top(); $('#hbot').innerHTML = P.home.bot(); }   // схему не трогаем — анимация не сбивается
+  else $('#page').innerHTML = (P[page] || P.home)();
   for (const cv of document.querySelectorAll('canvas[data-chart]')) drawChart(cv, cv.dataset.chart);
   if (keep && keep.text !== undefined && zl) { loadZListsKeep(keep); } else if (P[page] && P[page].after) P[page].after();
 }
@@ -663,7 +697,7 @@ window.addEventListener('hashchange', go);
 window.addEventListener('resize', () => { for (const cv of document.querySelectorAll('canvas[data-chart]')) drawChart(cv, cv.dataset.chart); });
 (async () => {
   try { const w = await (await fetch('/api/whoami')).json(); if (!w.role) { showLogin(); return; } } catch (e) { }
-  await load(); go(); timer = setInterval(load, 5000);
+  await load(); go(); timer = setInterval(load, 5000); setInterval(liveTick, 2000);
 })();
 </script>
 </body>
