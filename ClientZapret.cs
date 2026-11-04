@@ -44,7 +44,7 @@ namespace VpnGuard
         static bool WdLoaded;
 
         // ---------------------------------------------------------------- состояние
-        class CzTcpFlow { public uint Dst; public int DPort; public DateTime Last; public int SynTtl; public uint MaxTs; public bool HasTs; }
+        class CzTcpFlow { public uint Dst; public int DPort; public DateTime Last, Syn = DateTime.UtcNow; public int SynTtl; public uint MaxTs; public bool HasTs; }
         class CzUdpFlow { public uint Client, Dst; public int CPort, DPort; public Socket Sock; public DateTime Last; }
         struct CzUdpKey : IEquatable<CzUdpKey>
         {
@@ -331,7 +331,7 @@ namespace VpnGuard
             var cl = CzC(src); Interlocked.Increment(ref cl.Pkts);
             if (CzNoZ.Contains(src) || !CzInSet(dst)) { Interlocked.Increment(ref CzPass); return false; }
             // zapret к этому адресу не ответил — новые соединения клиента к нему через VPN (раздача); начатые через ретранслятор — как были
-            if (CzBypassed(src, dst) && !CzIsRelayFlow(src, b[o + ihl] << 8 | b[o + ihl + 1], dst, proto == 6 && (b[o + ihl + 13] & 0x02) != 0)) { Interlocked.Increment(ref CzBypassPkts); Interlocked.Increment(ref CzPass); return false; }
+            if (CzBypassed(src, dst) && !CzIsRelayFlow(src, b[o + ihl] << 8 | b[o + ihl + 1], dst, proto == 6 && (b[o + ihl + 13] & 0x02) != 0)) { Interlocked.Increment(ref CzBypassPkts); Interlocked.Increment(ref CzPass); if (proto == 6 && (b[o + ihl + 13] & 0x02) != 0) CzDbgPkt(src, dst, (b[o + ihl + 2] << 8) | b[o + ihl + 3], "через VPN (обход)"); return false; }
             Interlocked.Increment(ref cl.ZPkts); cl.LastZ = DateTime.UtcNow;
             int sport = (b[o + ihl] << 8) | b[o + ihl + 1], dport = (b[o + ihl + 2] << 8) | b[o + ihl + 3];
             if (proto == 6) {
@@ -354,7 +354,7 @@ namespace VpnGuard
                 int ulen = n - ihl - 8; if (ulen < 0) return true;
                 // QUIC (UDP 443): по умолчанию отбрасываем — YouTube и браузеры сразу переходят на TCP, а TCP идёт через ретранслятор и winws
                 // молча отброшенный QUIC приложение YouTube ждёт несколько секунд — ответить «порт недоступен», чтобы оно сразу перешло на TCP
-                if (dport == 443 && !CzQuicRelay) { Interlocked.Increment(ref CzQuicDrop); Interlocked.Increment(ref cl.Quic); CzIcmpUnreach(b, o, ihl, n); return true; }
+                if (dport == 443 && !CzQuicRelay) { Interlocked.Increment(ref CzQuicDrop); Interlocked.Increment(ref cl.Quic); CzIcmpUnreach(b, o, ihl, n); CzDbgPkt(src, dst, dport, "QUIC отклонён (ICMP)"); return true; }
                 var key = new CzUdpKey { A = ((ulong)src << 16) | (uint)sport, B = ((ulong)dst << 16) | (uint)dport }; CzUdpFlow f;
                 lock (CzLock) {
                     if (!CzUdp.TryGetValue(key, out f)) {
@@ -418,7 +418,19 @@ namespace VpnGuard
             }
         }
         // ICMP «порт недоступен» клиенту от имени сайта (тип 3, код 3): в ответе — заголовок IP и первые 8 байт исходного пакета
-        static long CzIcmpSent;
+        static long CzIcmpSent, CzDbgN;
+        // подробный журнал ретранслятора — первый час после запуска агента (не больше 1500 строк)
+        static bool CzDbg() { return CfgBool("ws4w.clientDebug", true) && (DateTime.UtcNow - CzStartedAt).TotalMinutes < 60 && Interlocked.Increment(ref CzDbgN) <= 1500; }
+        static readonly ConcurrentDictionary<ulong, DateTime> CzDbgSeen = new ConcurrentDictionary<ulong, DateTime>();
+        // UDP/QUIC и обход через VPN не проходят через ретранслятор — записать раз в минуту на пару клиент → адрес
+        static void CzDbgPkt(uint src, uint dst, int dport, string what)
+        {
+            if (!CfgBool("ws4w.clientDebug", true) || (DateTime.UtcNow - CzStartedAt).TotalMinutes >= 60) return;
+            ulong k = ((ulong)src << 32) | dst; DateTime t;
+            if (CzDbgSeen.TryGetValue(k, out t) && (DateTime.UtcNow - t).TotalSeconds < 60) return;
+            CzDbgSeen[k] = DateTime.UtcNow;
+            if (CzDbg()) ThreadPool.QueueUserWorkItem(_ => Log("zapret для клиентов [подробно]: " + IpS(src) + " → " + IpS(dst) + ":" + dport + " · " + what, "INFO"));
+        }
         static void CzIcmpUnreach(byte[] b, int o, int ihl, int n)
         {
             if (!CzQuicReject) return;
@@ -719,8 +731,10 @@ namespace VpnGuard
                 if (f == null) { Interlocked.Increment(ref CzRelayNoFlow); return; }
                 c.NoDelay = true; var cl = CzC(cip); var cs = c.GetStream();
                 // 1. первый пакет клиента — по нему видно имя сайта
+                long tAcc = (long)(DateTime.UtcNow - f.Syn).TotalMilliseconds; var sw0 = System.Diagnostics.Stopwatch.StartNew(); long tHello, tConn = -1, tResp = -1;
                 var hello = new byte[16384]; int fn = await CzReadFirst(cs, hello).ConfigureAwait(false);
-                if (fn <= 0) return;
+                tHello = sw0.ElapsedMilliseconds;
+                if (fn <= 0) { if (CzDbg()) Log("zapret для клиентов [подробно]: " + ep.Address + ":" + ep.Port + " → " + IpS(f.Dst) + ":" + f.DPort + " · клиент не прислал запрос за " + tHello + " мс", "INFO"); return; }
                 string host = CzSni(hello, fn) ?? CzHttpHost(hello, fn);
                 if (host == null) Interlocked.Increment(ref CzNoHost);
                 string lists = host == null ? "" : CzWinwsCovers(host, f.Dst, f.DPort) ? "в списках zapret" : "нет в списках zapret";
@@ -753,7 +767,7 @@ namespace VpnGuard
                 for (int ai = 0; ai < cands.Count && ai < 2; ai++) {
                     uint dip = cands[ai]; fail = null; rn = 0;
                     if (srv != null) { try { srv.Close(); } catch { } srv = null; }
-                    srv = await CzConnect(dip, f.DPort).ConfigureAwait(false);
+                    srv = await CzConnect(dip, f.DPort).ConfigureAwait(false); tConn = sw0.ElapsedMilliseconds;
                     if (srv == null) fail = "нет соединения";
                     else {
                         var s0 = srv.GetStream();
@@ -761,7 +775,7 @@ namespace VpnGuard
                         if (fail == null && host != null) {
                             var rd = s0.ReadAsync(rb, 0, rb.Length);
                             if (await Task.WhenAny(rd, Task.Delay(ai == 0 ? (ispCache ? Math.Max(CzFallbackMs, 8000) : CzFallbackMs) : 2000)).ConfigureAwait(false) == rd) {
-                                try { rn = rd.Result; } catch { rn = 0; }
+                                try { rn = rd.Result; } catch { rn = 0; } tResp = sw0.ElapsedMilliseconds;
                                 if (rn <= 0) fail = "сайт закрыл соединение";
                                 else if (CzStubCert(host, rb, rn)) { fail = "сертификат открытым текстом (TLS 1.2) — похоже на заглушку провайдера"; Interlocked.Increment(ref CzStubs); }
                             }
@@ -789,6 +803,7 @@ namespace VpnGuard
                     try { c.Client.LingerState = new LingerOption(true, 0); } catch { }   // сброс — клиент сразу повторит, уже через VPN
                     return;
                 }
+                if (CzDbg()) Log("zapret для клиентов [подробно]: " + ep.Address + ":" + ep.Port + " → " + target + altNote + " · SYN→ретранслятор " + tAcc + " мс, запрос клиента " + tHello + " мс, соединение с сайтом " + tConn + " мс, первый ответ " + tResp + " мс (" + rn + " Б)", "INFO");
                 Interlocked.Increment(ref CzTcpConns); Interlocked.Increment(ref CzActive); Interlocked.Increment(ref cl.Conns); counted = true;
                 Interlocked.Add(ref CzBytes, fn + rn); Interlocked.Add(ref CzTcpUp, fn); Interlocked.Add(ref cl.Up, fn); Interlocked.Add(ref CzTcpDown, rn); Interlocked.Add(ref cl.Down, rn);
                 var ss = srv.GetStream();
