@@ -320,7 +320,7 @@ function flowModel() {
   if (more > 0) { N.push({ id: 'cm', col: 0, href: '#wg', dot: -1, dim: true, t1: `ещё ${more}`, r: null, t3: 'на вкладке WG-Server' }); E.push({ a: 'cm', b: 'wg', r: [0, 0], c: 'var(--accent)', off: true }); }
   N.push({ id: 'apps', col: 0, dot: -1, t1: 'Программы ПК', r: apps, t3: 'оценка' });
   N.push({ id: 'wg', col: 1, href: '#wg', dot: lvl(wgc), t1: 'WG-Server', r: [w[1], w[0]], t3: `на связи ${peers.filter(x => x.active).length} из ${peers.length}` });
-  N.push({ id: 'pc', col: 2, href: '#ics', dot: lvl(comp('ics')), t1: 'Этот ПК', r: null, t3: cz.running ? `zapret для клиентов ↓ ${mbs(czr[0])}` : 'раздача ' + (vpnOn ? 'из туннеля' : 'напрямую'),
+  N.push({ id: 'pc', col: 2, href: '#ics', dot: lvl(comp('ics')), t1: 'Маршрутизация', r: null, t3: 'раздача ICS' + (cz.running ? ` · zapret ↓ ${mbs(czr[0])}` : vpnOn ? ' из туннеля' : ' напрямую'),
     t4: cz.running && cz.bypass ? `${cz.bypass} адр. временно через VPN` : '' });
   if (vpnOn) N.push({ id: 'vpn', col: 3, href: '#ultra', dot: lvl(comp('ultra')), c: 'var(--vpn)', t1: 'VPN', r: u, t3: nm.u || 'туннель' });
   N.push({ id: 'zp', col: 3, href: '#zapret', dot: lvl(comp('zapret')), c: 'var(--zp)', t1: vpnOn ? 'Мимо VPN · zapret' : 'Напрямую', r: byp, t3: vpnOn ? 'YouTube, Discord …' : '' });
@@ -384,7 +384,7 @@ function flowBuild(m) {
     nodes += n.href ? `<a href="${n.href}">${g}</a>` : g;
   }
   const el = document.createElement('div');
-  el.innerHTML = `<svg viewBox="-2 -2 ${VW + 4} ${VH + 4}" role="img" aria-label="Схема трафика: клиенты → WG-Server → этот ПК → VPN или zapret → интернет"><defs>${defs}</defs>${links}${nodes}</svg>`;
+  el.innerHTML = `<svg viewBox="-2 -2 ${VW + 4} ${VH + 4}" role="img" aria-label="Схема трафика: клиенты → WG-Server → маршрутизация → VPN или zapret → интернет"><defs>${defs}</defs>${links}${nodes}</svg>`;
   return el.firstChild;
 }
 // обновить цели: цифры и скорость стрелок плавно догоняют их в цикле отрисовки (flowFrame), схема не пересоздаётся
