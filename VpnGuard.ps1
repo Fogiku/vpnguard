@@ -29,7 +29,7 @@ param(
     [string]$ConfigPath = ''
 )
 
-$AgentVersion = '3.11.0'
+$AgentVersion = '3.12.0'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
