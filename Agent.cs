@@ -302,7 +302,12 @@ namespace VpnGuard
             if (why == null) {
                 InetFails = 0; InetMs = ms; InetWhy = "";
                 if (InetState != 0) {
-                    if (InetState == 1) { InetLastLen = DateTime.Now - InetSince; Log("Интернет: снова есть (не было " + Dur(InetLastLen) + ")", "WARN"); }
+                    if (InetState == 1) {
+                        InetLastLen = DateTime.Now - InetSince; Log("Интернет: снова есть (не было " + Dur(InetLastLen) + ")", "WARN");
+                        // адреса, «замолчавшие» из-за обрыва, — снова через zapret (иначе ещё 5–10 мин шли бы через VPN)
+                        int nb = CzBypass.Count + CzRemap.Count; CzBypass.Clear(); CzRemap.Clear(); CzGoodIp.Clear();
+                        if (nb > 0) Log("zapret для клиентов: после обрыва связи сброшено " + nb + " временных обходов — снова через zapret", "INFO");
+                    }
                     InetState = 0; InetSince = DateTime.Now;
                 }
             } else {
