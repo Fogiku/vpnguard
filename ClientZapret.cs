@@ -702,14 +702,31 @@ namespace VpnGuard
             return res.Take(2).ToList();
         }
         // соединение с сайтом от имени ПК: маршрут zapret → физический адаптер → winws
+        // первый SYN иногда теряется, а Windows повторяет его только через 3 с: нет ответа за 0,5 с — параллельно второе подключение,
+        // через 1,5 с — третье; берём то, что ответит первым
+        static long CzConnRetryWin;
         static async Task<TcpClient> CzConnect(uint dst, int port)
         {
-            var s = NoInherit(new TcpClient(AddressFamily.InterNetwork) { NoDelay = true });
+            var socks = new List<TcpClient>(); var pend = new List<Task>(); var sw = System.Diagnostics.Stopwatch.StartNew(); TcpClient ok = null;
+            int[] at = { 0, 500, 1500 }; int next = 0;
             try {
-                var t = s.ConnectAsync(IpA(dst), port);
-                if (await Task.WhenAny(t, Task.Delay(10000)).ConfigureAwait(false) != t || t.IsFaulted) { CzObserve(t); s.Close(); return null; }
-                return s;
-            } catch { try { s.Close(); } catch { } return null; }
+                while (sw.ElapsedMilliseconds < 10000) {
+                    if (next < at.Length && sw.ElapsedMilliseconds >= at[next]) {
+                        var s = NoInherit(new TcpClient(AddressFamily.InterNetwork) { NoDelay = true });
+                        Task t; try { t = s.ConnectAsync(IpA(dst), port); } catch (Exception e) { var tcs = new TaskCompletionSource<bool>(); tcs.SetException(e); t = tcs.Task; }
+                        socks.Add(s); pend.Add(t); next++;
+                    }
+                    int done = pend.FindIndex(x => x.Status == TaskStatus.RanToCompletion);
+                    if (done >= 0) { ok = socks[done]; if (done > 0) Interlocked.Increment(ref CzConnRetryWin); break; }
+                    var live = pend.Where(x => !x.IsCompleted).ToList();
+                    if (live.Count == 0 && next >= at.Length) break;
+                    long wait = (next < at.Length ? at[next] : 10000) - sw.ElapsedMilliseconds; if (wait < 1) wait = 1;
+                    live.Add(Task.Delay((int)wait));
+                    await Task.WhenAny(live).ConfigureAwait(false);
+                }
+            } catch { }
+            for (int i = 0; i < socks.Count; i++) if (socks[i] != ok) { CzObserve(pend[i]); try { socks[i].Close(); } catch { } }
+            return ok;
         }
 
         // ---------------------------------------------------------------- ретранслятор TCP: соединение к тому же адресу — уже от ПК (через winws или VPN)
@@ -847,7 +864,7 @@ namespace VpnGuard
                 { "packets", Interlocked.Read(ref CzPkts) }, { "passed", Interlocked.Read(ref CzPass) }, { "tcpConns", Interlocked.Read(ref CzTcpConns) }, { "active", CzActive },
                 { "tcpFlows", tcpN }, { "udpFlows", udpN }, { "udpPackets", Interlocked.Read(ref CzUdpPkts) }, { "mb", Math.Round(Interlocked.Read(ref CzBytes) / 1048576.0, 1) },
                 { "errors", Interlocked.Read(ref CzErrors) }, { "relay", CzFwd != WdInvalid ? IpS(CzWgIp) + ":" + CzRelayPort : "" }, { "ifWg", CzWgIdx }, { "ifEth", CzEthIdx },
-                { "ranges", CzSet.Lo.Length }, { "bypass", CzBypass.Count }, { "remap", CzRemap.Count }, { "videoVpn", Interlocked.Read(ref CzVideoToVpn) }, { "quicRejected", Interlocked.Read(ref CzIcmpSent) }, { "hostVpn", Interlocked.Read(ref CzHostToVpn) }, { "badHosts", CzBadHost.Count }, { "stubs", Interlocked.Read(ref CzStubs) }, { "bypassAdded", Interlocked.Read(ref CzBypassAdded) }, { "bypassPkts", Interlocked.Read(ref CzBypassPkts) },
+                { "ranges", CzSet.Lo.Length }, { "bypass", CzBypass.Count }, { "remap", CzRemap.Count }, { "videoVpn", Interlocked.Read(ref CzVideoToVpn) }, { "quicRejected", Interlocked.Read(ref CzIcmpSent) }, { "connRetryWins", Interlocked.Read(ref CzConnRetryWin) }, { "hostVpn", Interlocked.Read(ref CzHostToVpn) }, { "badHosts", CzBadHost.Count }, { "stubs", Interlocked.Read(ref CzStubs) }, { "bypassAdded", Interlocked.Read(ref CzBypassAdded) }, { "bypassPkts", Interlocked.Read(ref CzBypassPkts) },
                 { "noHost", Interlocked.Read(ref CzNoHost) }, { "winwsProfiles", CzProfs.Count }, { "rate", CzRates() },
                 { "tcpUpKb", Interlocked.Read(ref CzTcpUp) / 1024 }, { "tcpDownKb", Interlocked.Read(ref CzTcpDown) / 1024 }, { "udpDownKb", Interlocked.Read(ref CzUdpDown) / 1024 },
                 { "udpSendFail", Interlocked.Read(ref CzUdpSendFail) }, { "quicDropped", Interlocked.Read(ref CzQuicDrop) }, { "netRewritten", Interlocked.Read(ref CzNetRw) },
