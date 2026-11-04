@@ -440,6 +440,7 @@ namespace VpnGuard
 
             switch (path) {
                 case "/api/status": case "/status": { string s = ReadShared(StatusPath); RawJson(ctx, HideSecrets(s ?? "{}")); return; }
+                // «живые» скорости агента (data\live.json, раз в 2 с)
                 case "/api/live": { string s = ReadShared(Path.Combine(DataDir, "live.json")); RawJson(ctx, s ?? "{}"); return; }
                 case "/api/logs": Text(ctx, 200, HideSecrets(Logs(qi("days", 1), qi("minutes", 0), qi("lines", 3000)))); return;
                 case "/logs": Text(ctx, 200, HideSecrets(Logs(qi("days", 2), qi("minutes", 0), qi("lines", 5000)))); return;

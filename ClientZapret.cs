@@ -37,6 +37,10 @@ namespace VpnGuard
         [DllImport("WinDivert.dll", SetLastError = true)] static extern bool WinDivertSendEx(IntPtr h, byte[] pkt, uint len, out uint sendLen, ulong flags, [In] WdAddr[] addr, uint addrLen, IntPtr ov);
         [DllImport("WinDivert.dll")] static extern bool WinDivertClose(IntPtr h);
         static readonly IntPtr WdInvalid = new IntPtr(-1);
+        // сокеты .NET Framework наследуются дочерними процессами (wg.exe, PowerShell, веб-сервер …): копия держала бы порт ретранслятора
+        // и соединения открытыми после закрытия у агента — запрещаем наследование
+        [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetHandleInformation(IntPtr h, uint mask, uint flags);
+        static T NoInherit<T>(T s) where T : class { try { var so = s as Socket ?? (s is TcpClient ? ((TcpClient)(object)s).Client : s is TcpListener ? ((TcpListener)(object)s).Server : null); if (so != null) SetHandleInformation(so.Handle, 1, 0); } catch { } return s; }
         static bool WdLoaded;
 
         // ---------------------------------------------------------------- состояние
@@ -182,7 +186,8 @@ namespace VpnGuard
             // NAT раздачи Windows успевает переслать копию пакетов клиента к настоящему серверу (мимо перехвата) — его ответы (SYN-ACK, RST)
             // приходят клиенту вперемешку с ответами ретранслятора и рвут соединение. Ответы адресов zapret клиенту — только через ретранслятор.
             string bf = "ip and (tcp or udp) and ip.DstAddr >= " + sub + ".0 and ip.DstAddr <= " + sub + ".255 and ip.DstAddr != " + wgIp;
-            var relay = new TcpListener(IPAddress.Parse(wgIp), CzRelayPort) { ExclusiveAddressUse = true };
+            var relay = new TcpListener(IPAddress.Parse(wgIp), CzRelayPort);          // без эксклюзивного порта: иначе после перезапуска агента порт занят, пока не истекут соединения прежнего (TIME_WAIT)
+            NoInherit(relay);
             try { relay.Start(256); } catch (Exception e) { throw new Exception("порт " + CzRelayPort + " на " + wgIp + " занят: " + e.Message); }
             var hf = WinDivertOpen(ff, WdLayerForward, 0, 0);
             if (hf == WdInvalid) { relay.Stop(); throw new Exception("WinDivert (транзит) не открылся, код " + Marshal.GetLastWin32Error()); }
@@ -331,7 +336,7 @@ namespace VpnGuard
                 var key = new CzUdpKey { A = ((ulong)src << 16) | (uint)sport, B = ((ulong)dst << 16) | (uint)dport }; CzUdpFlow f;
                 lock (CzLock) {
                     if (!CzUdp.TryGetValue(key, out f)) {
-                        var s = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+                        var s = NoInherit(new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp));
                         s.Connect(new IPEndPoint(IpA(dst), dport));
                         f = new CzUdpFlow { Client = src, CPort = sport, Dst = dst, DPort = dport, Sock = s };
                         CzUdp[key] = f; var ff = f;
@@ -571,7 +576,7 @@ namespace VpnGuard
         // соединение с сайтом от имени ПК: маршрут zapret → физический адаптер → winws
         static async Task<TcpClient> CzConnect(uint dst, int port)
         {
-            var s = new TcpClient(AddressFamily.InterNetwork) { NoDelay = true };
+            var s = NoInherit(new TcpClient(AddressFamily.InterNetwork) { NoDelay = true });
             try {
                 var t = s.ConnectAsync(IpA(dst), port);
                 if (await Task.WhenAny(t, Task.Delay(10000)).ConfigureAwait(false) != t || t.IsFaulted) { CzObserve(t); s.Close(); return null; }
@@ -586,7 +591,7 @@ namespace VpnGuard
             while (true) {
                 TcpClient c = null; try { c = await l.AcceptTcpClientAsync().ConfigureAwait(false); } catch { if (CzRelay != l) return; }
                 if (c == null) { await Task.Delay(100).ConfigureAwait(false); continue; }
-                CzRelayConn(c);
+                CzRelayConn(NoInherit(c));
             }
         }
         static async void CzRelayConn(TcpClient c)
