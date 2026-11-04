@@ -163,6 +163,8 @@ namespace VpnGuard
             CzUpdateSet(); CzUpdateNoZ();
             CzQuicRelay = CfgStr("ws4w.clientQuic", "drop") == "relay"; CzMss = Math.Max(536, CfgInt("ws4w.clientMss", 1200));
             CzFallbackMs = Math.Max(1500, CfgInt("ws4w.clientFallbackMs", 3000)); CzBypassMin = Math.Max(1, CfgInt("ws4w.clientBypassMin", 5));
+            CzVideoVpn = CfgBool("ws4w.clientVideoVpn", true); CzVideoVpnMin = Math.Max(10, CfgInt("ws4w.clientVideoVpnMin", 360));
+            if (CzVideoVpn) { try { CzLoadGoogle(); } catch (Exception e) { Log("zapret для клиентов: диапазоны Google: " + e.Message, "WARN"); } }
             try { CzUpdateProfiles(CzWinwsArgs()); } catch (Exception e) { Log("zapret для клиентов: профили winws: " + e.Message, "WARN"); }
             string sig = wgIp + "|" + IfIndexOf(WgIf()) + "|" + phys.IfIndex + "|" + phys.Ip;
             if (CzFwd == WdInvalid || sig != CzSig) {
@@ -603,6 +605,34 @@ namespace VpnGuard
         // заглушка провайдера вместо сайта Google: Google с современными браузерами всегда отвечает по TLS 1.3 (сертификат зашифрован);
         // открытый сертификат (сообщение Certificate в первом ответе) — значит, отвечает не Google
         static long CzStubs;
+        // видео Google через VPN (ws4w.clientVideoVpn): кэш провайдера (адреса не Google) остаётся через zapret
+        static bool CzVideoVpn = true; static int CzVideoVpnMin = 360; static long CzVideoToVpn;
+        static readonly ConcurrentDictionary<uint, byte> CzVideoLogged = new ConcurrentDictionary<uint, byte>();
+        static CzRanges CzGoogle = new CzRanges { Lo = new uint[0], Hi = new uint[0] }; static DateTime CzGoogleAt = DateTime.MinValue;
+        static bool CzIsVideoHost(string h) { return h.Contains("---sn-") && (h.EndsWith(".googlevideo.com", StringComparison.OrdinalIgnoreCase) || h.EndsWith(".c.youtube.com", StringComparison.OrdinalIgnoreCase)); }
+        static bool CzIsGoogle(uint v)
+        {
+            var s = CzGoogle; int a = 0, b = s.Lo.Length - 1;
+            while (a <= b) { int m = (a + b) >> 1; if (v < s.Lo[m]) b = m - 1; else if (v > s.Hi[m]) a = m + 1; else return true; }
+            return false;
+        }
+        // диапазоны Google (goog.json, кэш zapret) — раз в 6 ч
+        static void CzLoadGoogle()
+        {
+            if ((DateTime.UtcNow - CzGoogleAt).TotalHours < 6 && CzGoogle.Lo.Length > 0) return;
+            CzGoogleAt = DateTime.UtcNow;
+            var rs = new List<KeyValuePair<uint, uint>>();
+            foreach (var p in GoogleRanges()) {
+                var x = p.Split('/'); IPAddress a; int bits;
+                if (x.Length != 2 || !IPAddress.TryParse(x[0], out a) || !int.TryParse(x[1], out bits) || bits < 8 || bits > 32) continue;
+                uint lo = IpH(a.GetAddressBytes(), 0), mask = bits == 32 ? uint.MaxValue : ~(uint.MaxValue >> bits); lo &= mask;
+                rs.Add(new KeyValuePair<uint, uint>(lo, lo | ~mask));
+            }
+            rs.Sort((p, q) => p.Key.CompareTo(q.Key));
+            var lo2 = new List<uint>(); var hi2 = new List<uint>();
+            foreach (var r in rs) { int k = hi2.Count - 1; if (k >= 0 && r.Key <= hi2[k] + 1 && hi2[k] != uint.MaxValue) { if (r.Value > hi2[k]) hi2[k] = r.Value; } else { lo2.Add(r.Key); hi2.Add(r.Value); } }
+            if (lo2.Count > 0) CzGoogle = new CzRanges { Lo = lo2.ToArray(), Hi = hi2.ToArray() };
+        }
         static bool CzStubCert(string host, byte[] b, int n)
         {
             if (host == null || !Regex.IsMatch(host, @"(^|\.)(youtube\.com|youtu\.be|google\.com|googleapis\.com|googlevideo\.com|ytimg\.com|ggpht\.com|gstatic\.com|googleusercontent\.com)$")) return false;
@@ -669,13 +699,22 @@ namespace VpnGuard
                 if (host == null) Interlocked.Increment(ref CzNoHost);
                 string lists = host == null ? "" : CzWinwsCovers(host, f.Dst, f.DPort) ? "в списках zapret" : "нет в списках zapret";
                 string target = IpS(f.Dst) + ":" + f.DPort + (host != null ? " (" + host + (lists.Length > 0 ? ", " + lists : "") + ")" : "");
+                // 1б. видеосервер Google (rr…---sn-….googlevideo.com на адресе Google, а не кэш провайдера) — через zapret медленно:
+                // эту пару клиент → адрес надолго через VPN и сбросить соединение — клиент сразу повторит, уже через VPN
+                if (host != null && CzVideoVpn && CzIsVideoHost(host) && CzIsGoogle(f.Dst)) {
+                    CzBypass[((ulong)cip << 32) | f.Dst] = DateTime.UtcNow.AddMinutes(CzVideoVpnMin); Interlocked.Increment(ref CzVideoToVpn);
+                    if (CzVideoLogged.TryAdd(f.Dst, 0) && CzVideoLogged.Count <= 200)
+                        Log("zapret для клиентов: " + ep.Address + " → " + target + " · видеосервер Google — через VPN (через zapret медленно), " + CzVideoVpnMin / 60 + " ч", "INFO");
+                    try { c.Client.LingerState = new LingerOption(true, 0); } catch { }
+                    return;
+                }
                 // 2. соединиться от имени ПК (через winws) и отправить его; сайт молчит — эту пару клиент → адрес пустить через VPN
                 // адрес молчит — тот же сайт на другом адресе того же CDN (Google, Cloudflare … отдают любой свой сайт по имени):
                 // на том, где недавно получилось, или из DNS; кроме видеосерверов googlevideo — у каждого свой адрес
                 var rb = new byte[32768]; int rn = 0; string fail = null; var cands = new List<uint> { f.Dst }; uint used = f.Dst; string altNote = "";
                 KeyValuePair<uint, DateTime> rm;
                 if (host != null && CzFamily(host) != null && CzRemap.TryGetValue(f.Dst, out rm) && rm.Value > DateTime.UtcNow) cands.Insert(0, rm.Key);   // этот адрес недавно молчал — сразу на рабочий
-                for (int ai = 0; ai < cands.Count && ai < 4; ai++) {
+                for (int ai = 0; ai < cands.Count && ai < 2; ai++) {
                     uint dip = cands[ai]; fail = null; rn = 0;
                     if (srv != null) { try { srv.Close(); } catch { } srv = null; }
                     srv = await CzConnect(dip, f.DPort).ConfigureAwait(false);
@@ -685,12 +724,12 @@ namespace VpnGuard
                         try { await s0.WriteAsync(hello, 0, fn).ConfigureAwait(false); } catch { fail = "ошибка отправки"; }
                         if (fail == null && host != null) {
                             var rd = s0.ReadAsync(rb, 0, rb.Length);
-                            if (await Task.WhenAny(rd, Task.Delay(ai == 0 ? CzFallbackMs : 3000)).ConfigureAwait(false) == rd) {
+                            if (await Task.WhenAny(rd, Task.Delay(ai == 0 ? CzFallbackMs : 2000)).ConfigureAwait(false) == rd) {
                                 try { rn = rd.Result; } catch { rn = 0; }
                                 if (rn <= 0) fail = "сайт закрыл соединение";
                                 else if (CzStubCert(host, rb, rn)) { fail = "сертификат открытым текстом (TLS 1.2) — похоже на заглушку провайдера"; Interlocked.Increment(ref CzStubs); }
                             }
-                            else { CzObserve(rd); fail = "сайт молчит " + (ai == 0 ? CzFallbackMs / 1000 : 3) + " с"; }
+                            else { CzObserve(rd); fail = "сайт молчит " + (ai == 0 ? CzFallbackMs / 1000.0 : 2) + " с"; }
                         }
                     }
                     if (fail == null) {
@@ -707,7 +746,7 @@ namespace VpnGuard
                     // сразу после (пере)запуска winws обход DPI ещё не работает — такой сбой не повод уводить адрес в VPN
                     bool fresh = (DateTime.UtcNow - ZWinwsStartedAt).TotalSeconds < 30 || (DateTime.UtcNow - CzStartedAt).TotalSeconds < 30;
                     if (!fresh && !InetDown()) { CzBypass[((ulong)cip << 32) | f.Dst] = DateTime.UtcNow.AddMinutes(CzBypassMin); Interlocked.Increment(ref CzBypassAdded); }
-                    if (Interlocked.Increment(ref cl.FailLogged) <= 60) Log("zapret для клиентов: " + ep.Address + ":" + ep.Port + " → " + target + " · через zapret: " + fail + (cands.Count > 1 ? " (и на " + (cands.Count - 1) + " др. адрес.)" : "") + (fresh ? " (zapret только что запущен — обход не включаю)" : " — следующие соединения к " + IpS(f.Dst) + " " + CzBypassMin + " мин пойдут через VPN"), "INFO");
+                    if (Interlocked.Increment(ref cl.FailLogged) <= 60) Log("zapret для клиентов: " + ep.Address + ":" + ep.Port + " → " + target + " · через zapret: " + fail + (cands.Count > 1 ? " (и на запасном " + IpS(cands[1]) + ")" : "") + (fresh ? " (zapret только что запущен — обход не включаю)" : " — следующие соединения к " + IpS(f.Dst) + " " + CzBypassMin + " мин пойдут через VPN"), "INFO");
                     try { c.Client.LingerState = new LingerOption(true, 0); } catch { }   // сброс — клиент сразу повторит, уже через VPN
                     return;
                 }
@@ -754,7 +793,7 @@ namespace VpnGuard
                 { "packets", Interlocked.Read(ref CzPkts) }, { "passed", Interlocked.Read(ref CzPass) }, { "tcpConns", Interlocked.Read(ref CzTcpConns) }, { "active", CzActive },
                 { "tcpFlows", tcpN }, { "udpFlows", udpN }, { "udpPackets", Interlocked.Read(ref CzUdpPkts) }, { "mb", Math.Round(Interlocked.Read(ref CzBytes) / 1048576.0, 1) },
                 { "errors", Interlocked.Read(ref CzErrors) }, { "relay", CzFwd != WdInvalid ? IpS(CzWgIp) + ":" + CzRelayPort : "" }, { "ifWg", CzWgIdx }, { "ifEth", CzEthIdx },
-                { "ranges", CzSet.Lo.Length }, { "bypass", CzBypass.Count }, { "remap", CzRemap.Count }, { "stubs", Interlocked.Read(ref CzStubs) }, { "bypassAdded", Interlocked.Read(ref CzBypassAdded) }, { "bypassPkts", Interlocked.Read(ref CzBypassPkts) },
+                { "ranges", CzSet.Lo.Length }, { "bypass", CzBypass.Count }, { "remap", CzRemap.Count }, { "videoVpn", Interlocked.Read(ref CzVideoToVpn) }, { "stubs", Interlocked.Read(ref CzStubs) }, { "bypassAdded", Interlocked.Read(ref CzBypassAdded) }, { "bypassPkts", Interlocked.Read(ref CzBypassPkts) },
                 { "noHost", Interlocked.Read(ref CzNoHost) }, { "winwsProfiles", CzProfs.Count }, { "rate", CzRates() },
                 { "tcpUpKb", Interlocked.Read(ref CzTcpUp) / 1024 }, { "tcpDownKb", Interlocked.Read(ref CzTcpDown) / 1024 }, { "udpDownKb", Interlocked.Read(ref CzUdpDown) / 1024 },
                 { "udpSendFail", Interlocked.Read(ref CzUdpSendFail) }, { "quicDropped", Interlocked.Read(ref CzQuicDrop) }, { "netRewritten", Interlocked.Read(ref CzNetRw) },
