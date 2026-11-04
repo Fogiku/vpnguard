@@ -705,19 +705,22 @@ namespace VpnGuard
         // первый SYN иногда теряется, а Windows повторяет его только через 3 с: нет ответа за 0,5 с — параллельно второе подключение,
         // через 1,5 с — третье; берём то, что ответит первым
         static long CzConnRetryWin;
-        static async Task<TcpClient> CzConnect(uint dst, int port)
+        // altT — другие адреса того же сайта: повторные подключения идут на них (провайдер иногда на несколько секунд глушит SYN к одному адресу)
+        static async Task<KeyValuePair<TcpClient, uint>> CzConnect(uint dst, int port, Task<List<uint>> altT = null)
         {
-            var socks = new List<TcpClient>(); var pend = new List<Task>(); var sw = System.Diagnostics.Stopwatch.StartNew(); TcpClient ok = null;
+            var socks = new List<TcpClient>(); var pend = new List<Task>(); var ips = new List<uint>(); var sw = System.Diagnostics.Stopwatch.StartNew(); TcpClient ok = null; uint okIp = dst;
             int[] at = { 0, 500, 1500 }; int next = 0;
             try {
                 while (sw.ElapsedMilliseconds < 10000) {
                     if (next < at.Length && sw.ElapsedMilliseconds >= at[next]) {
+                        uint ip = dst;
+                        if (next > 0 && altT != null && altT.Status == TaskStatus.RanToCompletion) { var al = altT.Result.Where(v => v != dst).ToList(); if (al.Count > 0) ip = al[Math.Min(next, al.Count) - 1]; }
                         var s = NoInherit(new TcpClient(AddressFamily.InterNetwork) { NoDelay = true });
-                        Task t; try { t = s.ConnectAsync(IpA(dst), port); } catch (Exception e) { var tcs = new TaskCompletionSource<bool>(); tcs.SetException(e); t = tcs.Task; }
-                        socks.Add(s); pend.Add(t); next++;
+                        Task t; try { t = s.ConnectAsync(IpA(ip), port); } catch (Exception e) { var tcs = new TaskCompletionSource<bool>(); tcs.SetException(e); t = tcs.Task; }
+                        socks.Add(s); pend.Add(t); ips.Add(ip); next++;
                     }
                     int done = pend.FindIndex(x => x.Status == TaskStatus.RanToCompletion);
-                    if (done >= 0) { ok = socks[done]; if (done > 0) Interlocked.Increment(ref CzConnRetryWin); break; }
+                    if (done >= 0) { ok = socks[done]; okIp = ips[done]; if (done > 0) Interlocked.Increment(ref CzConnRetryWin); break; }
                     var live = pend.Where(x => !x.IsCompleted).ToList();
                     if (live.Count == 0 && next >= at.Length) break;
                     long wait = (next < at.Length ? at[next] : 10000) - sw.ElapsedMilliseconds; if (wait < 1) wait = 1;
@@ -726,7 +729,7 @@ namespace VpnGuard
                 }
             } catch { }
             for (int i = 0; i < socks.Count; i++) if (socks[i] != ok) { CzObserve(pend[i]); try { socks[i].Close(); } catch { } }
-            return ok;
+            return new KeyValuePair<TcpClient, uint>(ok, okIp);
         }
 
         // ---------------------------------------------------------------- ретранслятор TCP: соединение к тому же адресу — уже от ПК (через winws или VPN)
@@ -784,7 +787,9 @@ namespace VpnGuard
                 for (int ai = 0; ai < cands.Count && ai < 2; ai++) {
                     uint dip = cands[ai]; fail = null; rn = 0;
                     if (srv != null) { try { srv.Close(); } catch { } srv = null; }
-                    srv = await CzConnect(dip, f.DPort).ConfigureAwait(false); tConn = sw0.ElapsedMilliseconds;
+                    Task<List<uint>> altT = null;
+                    if (host != null && f.DPort == 443 && CzFamily(host) != null) { uint d0 = f.Dst; altT = CzAltIps(host, dip).ContinueWith(t => t.Result.Where(v => v != d0).ToList()); }
+                    var cr = await CzConnect(dip, f.DPort, altT).ConfigureAwait(false); srv = cr.Key; if (srv != null) dip = cr.Value; tConn = sw0.ElapsedMilliseconds;
                     if (srv == null) fail = "нет соединения";
                     else {
                         var s0 = srv.GetStream();

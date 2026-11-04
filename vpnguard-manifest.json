@@ -1,8 +1,8 @@
 {
-    "version":  "3.16.6",
-    "build":  "20261105-0101",
+    "version":  "3.16.7",
+    "build":  "20261105-0108",
     "notes":  "",
-    "date":  "2026-11-05T01:01:54.4591591+03:00",
+    "date":  "2026-11-05T01:08:00.1249143+03:00",
     "files":  [
                   {
                       "path":  "Agent.cs",
@@ -16,8 +16,8 @@
                   },
                   {
                       "path":  "ClientZapret.cs",
-                      "sha256":  "f2d4301a0f620cf25f7fc8ddac13ba1a729142e8a27c9c7778e1fe533a5d049c",
-                      "size":  85055
+                      "sha256":  "4c16b7c51a8016a2e9e0212d6251334107258e5fbcc7f54277a3c5a671446827",
+                      "size":  86023
                   },
                   {
                       "path":  "Install.cmd",
@@ -86,7 +86,7 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "89e8cb1c35353c10e0f6af07dafc1da66852ffaa66490f891dc0eda1c3778f76",
+                      "sha256":  "67d6a9639b297e2a22b4aee70eeab0bca3e94b2adfa00aac930e4d3a278c18fd",
                       "size":  82021
                   },
                   {
