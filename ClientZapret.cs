@@ -729,6 +729,8 @@ namespace VpnGuard
                 // 2. соединиться от имени ПК (через winws) и отправить его; сайт молчит — эту пару клиент → адрес пустить через VPN
                 // адрес молчит — тот же сайт на другом адресе того же CDN (Google, Cloudflare … отдают любой свой сайт по имени):
                 // на том, где недавно получилось, или из DNS; кроме видеосерверов googlevideo — у каждого свой адрес
+                // кэш-сервер видео у провайдера (rr…---sn-… не на адресах Google): работает только напрямую — в VPN не уводить, ждать дольше
+                bool ispCache = host != null && CzIsVideoHost(host) && !CzIsGoogle(f.Dst) && CzGoogle.Lo.Length > 0;
                 var rb = new byte[32768]; int rn = 0; string fail = null; var cands = new List<uint> { f.Dst }; uint used = f.Dst; string altNote = "";
                 KeyValuePair<uint, DateTime> rm;
                 if (host != null && CzFamily(host) != null && CzRemap.TryGetValue(f.Dst, out rm) && rm.Value > DateTime.UtcNow) cands.Insert(0, rm.Key);   // этот адрес недавно молчал — сразу на рабочий
@@ -742,12 +744,12 @@ namespace VpnGuard
                         try { await s0.WriteAsync(hello, 0, fn).ConfigureAwait(false); } catch { fail = "ошибка отправки"; }
                         if (fail == null && host != null) {
                             var rd = s0.ReadAsync(rb, 0, rb.Length);
-                            if (await Task.WhenAny(rd, Task.Delay(ai == 0 ? CzFallbackMs : 2000)).ConfigureAwait(false) == rd) {
+                            if (await Task.WhenAny(rd, Task.Delay(ai == 0 ? (ispCache ? Math.Max(CzFallbackMs, 8000) : CzFallbackMs) : 2000)).ConfigureAwait(false) == rd) {
                                 try { rn = rd.Result; } catch { rn = 0; }
                                 if (rn <= 0) fail = "сайт закрыл соединение";
                                 else if (CzStubCert(host, rb, rn)) { fail = "сертификат открытым текстом (TLS 1.2) — похоже на заглушку провайдера"; Interlocked.Increment(ref CzStubs); }
                             }
-                            else { CzObserve(rd); fail = "сайт молчит " + (ai == 0 ? CzFallbackMs / 1000.0 : 2) + " с"; }
+                            else { CzObserve(rd); fail = "сайт молчит " + (ai == 0 ? (ispCache ? Math.Max(CzFallbackMs, 8000) : CzFallbackMs) / 1000.0 : 2) + " с"; }
                         }
                     }
                     if (fail == null) {
@@ -763,11 +765,11 @@ namespace VpnGuard
                     Interlocked.Increment(ref CzConnFail); Interlocked.Increment(ref cl.Fail);
                     // сразу после (пере)запуска winws обход DPI ещё не работает — такой сбой не повод уводить адрес в VPN
                     bool fresh = (DateTime.UtcNow - ZWinwsStartedAt).TotalSeconds < 30 || (DateTime.UtcNow - CzStartedAt).TotalSeconds < 30;
-                    if (!fresh && !InetDown()) {
+                    if (!fresh && !InetDown() && !ispCache) {
                         CzBypass[((ulong)cip << 32) | f.Dst] = DateTime.UtcNow.AddMinutes(CzBypassMin); Interlocked.Increment(ref CzBypassAdded);
                         if (host != null && !CzIsVideoHost(host) && lists != "в списках zapret") CzBadHost[host] = DateTime.UtcNow.AddMinutes(30);    // не из списков zapret: то же имя на других адресах — сразу через VPN
                     }
-                    if (Interlocked.Increment(ref cl.FailLogged) <= 60) Log("zapret для клиентов: " + ep.Address + ":" + ep.Port + " → " + target + " · через zapret: " + fail + (cands.Count > 1 ? " (и на запасном " + IpS(cands[1]) + ")" : "") + (fresh ? " (zapret только что запущен — обход не включаю)" : " — следующие соединения к " + IpS(f.Dst) + " " + CzBypassMin + " мин пойдут через VPN"), "INFO");
+                    if (Interlocked.Increment(ref cl.FailLogged) <= 60) Log("zapret для клиентов: " + ep.Address + ":" + ep.Port + " → " + target + " · через zapret: " + fail + (cands.Count > 1 ? " (и на запасном " + IpS(cands[1]) + ")" : "") + (ispCache ? " — кэш провайдера, через VPN он не работает: клиент повторит через zapret" : fresh ? " (zapret только что запущен — обход не включаю)" : " — следующие соединения к " + IpS(f.Dst) + " " + CzBypassMin + " мин пойдут через VPN"), "INFO");
                     try { c.Client.LingerState = new LingerOption(true, 0); } catch { }   // сброс — клиент сразу повторит, уже через VPN
                     return;
                 }
