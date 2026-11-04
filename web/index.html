@@ -289,11 +289,15 @@ P.wg = () => {
   const cz = (comp('wg') && comp('wg').clientZapret) || {}, zon = comp('zapret') && comp('zapret').enabled;
   const peers = (comp('wg') && comp('wg').peers) || [];
   const list = (wgList && wgList.clients) || peers.map(p => ({ name: p.name, ip: p.ip, source: '', hasConf: false }));
-  const rows = list.map(c => { const p = peers.find(x => x.ip === c.ip) || {}; return `<tr><td><span class="dot l${p.active ? 0 : -1}"></span> ${esc(c.name)}${c.source === 'WS4W' ? ' <span class="sub">WS4W</span>' : ''}</td><td>${esc(c.ip)}</td><td class="hide-m">${esc(p.endpoint || '—')}</td><td>${p.hsAgo !== undefined ? ago(p.hsAgo) : '—'}</td><td class="hide-m">↓ ${fmtB(p.tx)} ↑ ${fmtB(p.rx)}</td>
-    <td class="row" style="flex-wrap:nowrap">${c.hasConf ? btn('QR и настройки', `showConf('${esc(c.ip)}')`) : ''}${btn('Удалить', `delClient('${esc(c.ip)}','${esc(c.name)}')`)}</td></tr>`; }).join('');
+  const rows = list.map(c => {
+    const p = peers.find(x => x.ip === c.ip) || {}, off = !!p.off, zap = p.zapret !== false, s = p.cz || {}, ip = esc(c.ip), nm = esc(c.name);
+    const zInfo = !cz.enabled ? '' : off ? '' : !zap ? '<div class="sub">zapret выкл — всё через VPN</div>'
+      : `<div class="sub">через zapret: ${s.conns || 0} соед. · ↓ ${fmtB((s.downKb || 0) * 1024)}${s.fail ? ' · не подключилось ' + s.fail : ''}${s.lastAgo >= 0 ? ' · ' + ago(s.lastAgo) : (p.active ? ' · пока не было' : '')}</div>`;
+    return `<tr${off ? ' style="opacity:.6"' : ''}><td><span class="dot l${!off && p.active ? 0 : -1}"></span> ${nm}${c.source === 'WS4W' ? ' <span class="sub">WS4W</span>' : ''}${off ? ' <b>отключён</b>' : ''}${zInfo}</td><td>${ip}</td><td class="hide-m">${esc(p.endpoint || '—')}</td><td>${off ? '—' : p.hsAgo !== undefined ? ago(p.hsAgo) : '—'}</td><td class="hide-m">↓ ${fmtB(p.tx)} ↑ ${fmtB(p.rx)}</td>
+    <td class="row" style="flex-wrap:nowrap">${cz.enabled && !off ? btn(zap ? 'zapret: вкл' : 'zapret: выкл', `cliSet('${ip}',{zapret:${!zap}},'${nm}')`, zap) : ''}${btn(off ? 'Включить' : 'Отключить', `cliSet('${ip}',{off:${!off}},'${nm}')`, off)}${c.hasConf ? btn('QR и настройки', `showConf('${ip}')`) : ''}${btn('Удалить', `delClient('${ip}','${nm}')`)}</td></tr>`; }).join('');
   const czCard = `<div class="sec">zapret для клиентов</div><div class="card">${cz.enabled
       ? `<p><span class="dot l${cz.running ? 0 : 2}"></span> <b>${cz.running ? 'Работает' : 'Не работает'}</b>${cz.error ? ' · ' + esc(cz.error) : ''}</p>
-         <p>Трафик клиентов к адресам zapret (YouTube, Discord, видеосерверы провайдера, свои списки) идёт через zapret этого ПК, остальное — через VPN. На устройствах ничего менять не нужно.</p>
+         <p>Трафик клиентов к адресам zapret (YouTube, Discord, видеосерверы провайдера, свои списки) идёт через zapret этого ПК, остальное — через VPN. На устройствах ничего менять не нужно. Для отдельного клиента zapret можно выключить в таблице ниже.</p>
          <p class="sub">TCP-соединений через zapret: ${cz.tcpConns || 0} (сейчас ${cz.active || 0}), UDP-потоков ${cz.udpFlows || 0} · ${cz.mb || 0} МБ · перехвачено пакетов ${cz.packets || 0}${cz.errors ? ' · ошибок ' + cz.errors : ''}</p>
          ${btn('Выключить', "setCfg('ws4w.clientZapret',false,'zapret для клиентов')")}`
       : `<p class="muted">Клиентам YouTube и Discord сейчас ${zon ? 'не открываются, пока zapret включён (zapret обрабатывает только трафик самого ПК)' : 'идут через VPN'}. Можно пустить их через zapret этого ПК: трафик к адресам zapret (YouTube, Discord …) — через zapret, остальное — через VPN. На устройствах ничего менять не нужно.</p>
@@ -306,6 +310,10 @@ P.wg.after = async () => { try { const r = await api('/api/wg/clients'); if (r.o
 async function addClient() {
   const n = prompt('Имя нового клиента (например, телефон или ноутбук):'); if (!n) return;
   try { const r = await api('/api/wg/add', { name: n }); wgList = null; toast(`Клиент «${r.name}» создан: ${r.ip}`); showConfText(r.name, r.ip, r.text); P.wg.after(); } catch (e) { toast('Не удалось: ' + e.message, true); }
+}
+async function cliSet(ip, o, name) {
+  if (o.off === true && !confirm(`Отключить клиента «${name}» (${ip})? Он перестанет подключаться, пока его не включат обратно. Настройки клиента сохранятся.`)) return;
+  try { await api('/api/wg/client-set', Object.assign({ ip }, o)); toast(`«${name}»: ` + (o.off !== undefined ? (o.off ? 'отключён' : 'включён') : (o.zapret ? 'zapret включён' : 'zapret выключен — весь трафик через VPN')) + ' — агент применит за 10–30 с'); setTimeout(load, 3000); setTimeout(load, 12000); } catch (e) { toast(e.message, true); }
 }
 async function delClient(ip, name) {
   if (!confirm(`Удалить клиента «${name}» (${ip})? Он сразу перестанет подключаться.`)) return;

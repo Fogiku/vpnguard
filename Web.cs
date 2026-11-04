@@ -581,6 +581,23 @@ namespace VpnGuard
                     var r = PsJson("wg-remove", BStr(Body(req), "ip")); if (r.ContainsKey("ok") && r["ok"] is bool && (bool)r["ok"]) Log("Веб-интерфейс: удалён клиент WireGuard «" + r["name"] + "» (" + ip + ")", "INFO");
                     JsonOut(ctx, r); return;
                 }
+                case "/api/wg/client-set": {
+                    // настройки клиента: zapret вкл/выкл, клиент вкл/выкл — списки IP в ws4w.clientNoZapret / ws4w.clientOff (применяет агент)
+                    if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; }
+                    var b = Body(req); string cip = BStr(b, "ip").Trim();
+                    if (!Regex.IsMatch(cip, @"^\d{1,3}(\.\d{1,3}){3}$")) { JsonOut(ctx, Err("неверный IP клиента"), 400); return; }
+                    var done = new List<string>();
+                    foreach (var kv in new[] { new[] { "zapret", "ws4w.clientNoZapret" }, new[] { "off", "ws4w.clientOff" } }) {
+                        if (!b.ContainsKey(kv[0])) continue;
+                        bool val = BBool(b, kv[0]), inList = kv[0] == "off" ? val : !val;
+                        var cur = (CfgGet(kv[1], null) as System.Collections.IEnumerable ?? new object[0]).Cast<object>().Select(x => Convert.ToString(x).Trim()).Where(x => x.Length > 0 && x != cip).ToList();
+                        if (inList) cur.Add(cip);
+                        CfgSet(kv[1], cur.ToArray());
+                        done.Add(kv[0] == "off" ? (val ? "отключён" : "включён") : (val ? "zapret вкл" : "zapret выкл"));
+                    }
+                    if (done.Count > 0) { Log("Веб-интерфейс: клиент WG-Server " + cip + " — " + string.Join(", ", done) + " (" + ip + ")", "INFO"); SendCmd("check-now", "после изменения клиента " + cip); }
+                    JsonOut(ctx, new Dictionary<string, object> { { "ok", true } }); return;
+                }
                 case "/": Text(ctx, 200, RemoteIndex()); return;
                 case "/check": Text(ctx, 200, HideSecrets(PsTask("check", "", 180))); return;
                 case "/diag": Text(ctx, 200, HideSecrets(PsTask("diag", "", 240))); return;

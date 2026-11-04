@@ -618,6 +618,23 @@ function Invoke-RemoteRequest($Ctx, $r) {
             try { $n = Remove-WgClient $c.PublicKey; Write-Log "Веб-интерфейс: удалён клиент WireGuard «$n» ($ip)"; Send-RJson $Ctx @{ ok = $true; name = "$n" } }
             catch { Send-RJson $Ctx @{ ok = $false; error = $_.Exception.Message } 500 }
         }
+        '/api/wg/client-set' {
+            # zapret вкл/выкл и клиент вкл/выкл — списки IP ws4w.clientNoZapret / ws4w.clientOff (применяет агент C#)
+            if (-not (& $webOnly)) { return }
+            $b = Read-RBody $req; $cip = "$($b.ip)".Trim()
+            if ($cip -notmatch '^\d{1,3}(\.\d{1,3}){3}$') { Send-RJson $Ctx @{ ok = $false; error = 'неверный IP клиента' } 400; return }
+            $done = @()
+            foreach ($pair in @(@('zapret', 'clientNoZapret'), @('off', 'clientOff'))) {
+                if ($null -eq $b.($pair[0])) { continue }
+                $val = [bool]$b.($pair[0]); $inList = $(if ($pair[0] -eq 'off') { $val } else { -not $val })
+                $cur = @(@($W.($pair[1])) | Where-Object { "$_".Trim() -and "$_".Trim() -ne $cip } | ForEach-Object { "$_".Trim() })
+                if ($inList) { $cur += $cip }
+                Set-ConfigValue "ws4w.$($pair[1])" ([object[]]$cur)
+                $done += $(if ($pair[0] -eq 'off') { if ($val) { 'отключён' } else { 'включён' } } else { if ($val) { 'zapret вкл' } else { 'zapret выкл' } })
+            }
+            if ($done.Count) { Write-Log "Веб-интерфейс: клиент WG-Server $cip — $($done -join ', ') ($ip)"; Send-RCmd 'check-now' "после изменения клиента $cip" }
+            Send-RJson $Ctx @{ ok = $true }
+        }
         '/api/remote' {
             if (-not (& $webOnly)) { return }
             if ($req.HttpMethod -eq 'POST') {

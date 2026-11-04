@@ -1,13 +1,13 @@
 {
-    "version":  "3.7.3",
-    "build":  "20261104-0930",
+    "version":  "3.8.0",
+    "build":  "20261104-1254",
     "notes":  "",
-    "date":  "2026-11-04T09:30:47.8680809+03:00",
+    "date":  "2026-11-04T12:54:50.4393530+03:00",
     "files":  [
                   {
                       "path":  "Agent.cs",
-                      "sha256":  "db455407cb7dfc04709b0bdb3159a3fb5f3dac4437eb87dd35dae4f098d43e43",
-                      "size":  102307
+                      "sha256":  "86b055f109219d55a6e44ecee81f8da75389fe42f262e33951a219eb2cde822f",
+                      "size":  102568
                   },
                   {
                       "path":  "Amnezia.ps1",
@@ -16,8 +16,8 @@
                   },
                   {
                       "path":  "ClientZapret.cs",
-                      "sha256":  "26dbc4872b9198e6c0454a9be20a6160878b9df578bed32721dbd95eb41344c2",
-                      "size":  37238
+                      "sha256":  "4249a59574e61a15b31ee7df480227003ef612c334778e4c319add318daa3a21",
+                      "size":  45825
                   },
                   {
                       "path":  "Install.cmd",
@@ -46,8 +46,8 @@
                   },
                   {
                       "path":  "Remote.ps1",
-                      "sha256":  "356fff73c9e9ea84bd71d855ff75aa2d5335046d56f9afe23b4932cb986b5a11",
-                      "size":  58985
+                      "sha256":  "cf97f94c6425711798908f186b71f3aa6cc2b71dc96cc0ee503edc8f5fca8209",
+                      "size":  60416
                   },
                   {
                       "path":  "RemoteDiag.ps1",
@@ -86,8 +86,8 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "33c325e79d7b951ce061cb1d21278dacfbcfffb5f580f14a58fdf05f032999ca",
-                      "size":  143397
+                      "sha256":  "098fa1cd94efda681d3c28bbcf6a4e4328db112d071efaaa7e80667b62f7bad0",
+                      "size":  143768
                   },
                   {
                       "path":  "VpnGuardMonitor.cmd",
@@ -101,13 +101,13 @@
                   },
                   {
                       "path":  "Web.cs",
-                      "sha256":  "8935ce4e5221eaa3d163bcb24bfe48f25f287f16bd60436038b64f5d1e10da06",
-                      "size":  54275
+                      "sha256":  "697f087d0a72832a0dfc30fe3eb3106896c62fe69f66e6b7db24ab7b5b2b86fc",
+                      "size":  56022
                   },
                   {
                       "path":  "web/index.html",
-                      "sha256":  "62e892565c365b10928ff02255143d2a62871bde76918334c79776a3abda4cc7",
-                      "size":  58959
+                      "sha256":  "faf52355180064c0d2d2135eece7cf3cc2a82878cc937da239a915077add770a",
+                      "size":  60567
                   },
                   {
                       "path":  "Wg.ps1",

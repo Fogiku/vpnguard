@@ -95,7 +95,7 @@ namespace VpnGuard
                     HandOver(); return;
                 }
                 if (SourceSig() != CodeSig) { Log("Агент C#: код обновлён — перезапуск на новой версии", "INFO"); HandOver(); return; }
-                foreach (var step in new Action[] { Commands, WgWatch, VpnWatch, SharingWatch, ZapretWatch, ClientZapretWatch, PsPartWatch }) {
+                foreach (var step in new Action[] { Commands, WgWatch, WgClientsWatch, VpnWatch, SharingWatch, ZapretWatch, ClientZapretWatch, PsPartWatch }) {
                     try { step(); } catch (Exception e) { Log("Агент C#: " + step.Method.Name + ": " + e.Message, "ERROR"); }
                     if ((DateTime.Now - LastSnapshot).TotalSeconds >= 10) Snapshot();
                 }
@@ -783,8 +783,10 @@ namespace VpnGuard
                 string ip = Regex.Replace(p[3].Split(',')[0], @"/\d+$", ""); long hs; long.TryParse(p[4], out hs); long rx, tx; long.TryParse(p[5], out rx); long.TryParse(p[6], out tx);
                 string name; if (!PeerNamesByKey.TryGetValue(p[0], out name) && !PeerNamesByIp.TryGetValue(ip, out name)) name = ip;
                 bool act = hs > 0 && now - hs < 180; if (act) active++;
-                list.Add(new Dictionary<string, object> { { "name", name }, { "key", p[0].Substring(0, Math.Min(8, p[0].Length)) }, { "ip", ip }, { "endpoint", p[2] == "(none)" ? "" : p[2] }, { "hsAgo", hs > 0 ? now - hs : -1 }, { "active", act }, { "rx", rx }, { "tx", tx } });
+                list.Add(new Dictionary<string, object> { { "name", name }, { "key", p[0].Substring(0, Math.Min(8, p[0].Length)) }, { "ip", ip }, { "endpoint", p[2] == "(none)" ? "" : p[2] }, { "hsAgo", hs > 0 ? now - hs : -1 }, { "active", act }, { "rx", rx }, { "tx", tx },
+                    { "off", false }, { "zapret", CzClientZapret(ip) }, { "cz", CzClientStat(ip) } });
             }
+            try { list.AddRange(WgOffPeers(new HashSet<string>(list.Select(x => (string)((Dictionary<string, object>)x)["ip"])))); } catch { }
             return list;
         }
 

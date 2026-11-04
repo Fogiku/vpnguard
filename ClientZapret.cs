@@ -48,6 +48,31 @@ namespace VpnGuard
         static long CzPkts, CzPass, CzTcpConns, CzUdpPkts, CzBytes, CzErrors, CzTcpUp, CzTcpDown, CzUdpDown, CzUdpSendFail, CzQuicDrop, CzNetRw, CzNetMiss, CzNetBig, CzNetSendFail, CzRelayNoFlow, CzConnFail, CzFwdBig, CzFwdMax, CzNetMax, CzMssClamped, CzDropSum, CzDropMd5, CzDropTtl, CzDropTs, CzDropNoAck, CzSumChecked; static volatile bool CzSumOff; static readonly System.Diagnostics.Stopwatch CzSw = System.Diagnostics.Stopwatch.StartNew(); static int CzActive, CzConnLogged, CzSynLogged, CzTraceLeft = 0; static readonly HashSet<ulong> CzTraced = new HashSet<ulong>(); static DateTime CzTraceAt = DateTime.MinValue;
         static HashSet<uint> CzHosts = new HashSet<uint>(); static List<uint[]> CzNets = new List<uint[]>(); static string CzSetKey = "";
         static DateTime CzFwAt = DateTime.MinValue, CzCleanAt = DateTime.MinValue; static string CzFwSig = "";
+        // по клиентам: кому zapret не нужен (ws4w.clientNoZapret — их трафик целиком через VPN, как без этой функции) и счётчики
+        class CzCli { public long Pkts, ZPkts, Conns, Up, Down, Quic, Fail, Leak; public int Logged; public DateTime LastZ = DateTime.MinValue; }
+        static readonly Dictionary<uint, CzCli> CzClients = new Dictionary<uint, CzCli>();
+        static volatile HashSet<uint> CzNoZ = new HashSet<uint>();
+        static CzCli CzC(uint ip) { lock (CzClients) { CzCli c; if (!CzClients.TryGetValue(ip, out c)) { c = new CzCli(); CzClients[ip] = c; } return c; } }
+        static void CzUpdateNoZ()
+        {
+            var s = new HashSet<uint>(); IPAddress a;
+            foreach (var x in CfgList("ws4w.clientNoZapret", new string[0]).Concat(CfgList("ws4w.clientOff", new string[0])))
+                if (IPAddress.TryParse(x.Trim(), out a) && a.AddressFamily == AddressFamily.InterNetwork) s.Add(IpH(a.GetAddressBytes(), 0));
+            if (!s.SetEquals(CzNoZ)) {
+                var was = CzNoZ; CzNoZ = s;
+                foreach (var v in s.Except(was)) Log("zapret для клиентов: " + IpS(v) + " — без zapret, весь трафик через VPN", "INFO");
+                foreach (var v in was.Except(s)) Log("zapret для клиентов: " + IpS(v) + " — снова через zapret", "INFO");
+            }
+        }
+        static bool CzClientZapret(string ip) { return !CfgList("ws4w.clientNoZapret", new string[0]).Any(x => x.Trim() == ip); }
+        static Dictionary<string, object> CzClientStat(string ip)
+        {
+            IPAddress a; if (!IPAddress.TryParse(ip, out a)) return null;
+            CzCli c; lock (CzClients) if (!CzClients.TryGetValue(IpH(a.GetAddressBytes(), 0), out c)) return null;
+            return new Dictionary<string, object> { { "pkts", Interlocked.Read(ref c.Pkts) }, { "zPkts", Interlocked.Read(ref c.ZPkts) }, { "conns", Interlocked.Read(ref c.Conns) },
+                { "upKb", Interlocked.Read(ref c.Up) / 1024 }, { "downKb", Interlocked.Read(ref c.Down) / 1024 }, { "quic", Interlocked.Read(ref c.Quic) }, { "fail", Interlocked.Read(ref c.Fail) },
+                { "leak", Interlocked.Read(ref c.Leak) }, { "lastAgo", c.LastZ == DateTime.MinValue ? -1 : (long)(DateTime.Now - c.LastZ).TotalSeconds } };
+        }
 
         static bool CzWanted() { return CfgBool("ws4w.clientZapret", false); }
         static uint IpH(byte[] b, int o) { return ((uint)b[o] << 24) | ((uint)b[o + 1] << 16) | ((uint)b[o + 2] << 8) | b[o + 3]; }
@@ -71,7 +96,7 @@ namespace VpnGuard
                 if (CzFwd != WdInvalid) { CzStop(); Log("zapret для клиентов WG-Server: остановлен" + (why == "off" ? "" : " — " + why), "INFO"); }
                 CzError = why == "off" ? "" : why; return;
             }
-            CzUpdateSet();
+            CzUpdateSet(); CzUpdateNoZ();
             string sig = wgIp + "|" + IfIndexOf(WgIf()) + "|" + phys.IfIndex + "|" + phys.Ip;
             if (CzFwd == WdInvalid || sig != CzSig) {
                 CzStop();
@@ -98,6 +123,7 @@ namespace VpnGuard
             var hn = WinDivertOpen(nf, WdLayerNetwork, 0, 0);
             if (hn == WdInvalid) { WinDivertClose(hf); relay.Stop(); throw new Exception("WinDivert (ответы) не открылся, код " + Marshal.GetLastWin32Error()); }
             CzFwd = hf; CzNet = hn; CzRelay = relay;
+            lock (CzClients) foreach (var cc in CzClients.Values) cc.Logged = 0;
             // NAT раздачи Windows успевает переслать копию пакетов клиента к настоящему серверу (мимо перехвата) — его ответы (SYN-ACK, RST)
             // приходят клиенту вперемешку с ответами ретранслятора и рвут соединение. Ответы адресов zapret клиенту — только через ретранслятор.
             string bf = "ip and (tcp or udp) and ip.DstAddr >= " + sub + ".0 and ip.DstAddr <= " + sub + ".255 and ip.DstAddr != " + wgIp;
@@ -118,8 +144,9 @@ namespace VpnGuard
             while (true) {
                 if (!WinDivertRecv(h, p, (uint)p.Length, out n, ref a)) { if (CzBlk != h) return; Thread.Sleep(5); continue; }
                 bool drop = false;
-                try { if (n >= 20 && (p[0] >> 4) == 4 && CzInSet(IpH(p, 12))) drop = true; } catch { }
-                if (drop) { Interlocked.Increment(ref CzLeakDrop); continue; }
+                uint to = 0;
+                try { if (n >= 20 && (p[0] >> 4) == 4) { to = IpH(p, 16); if (!CzNoZ.Contains(to) && CzInSet(IpH(p, 12))) drop = true; } } catch { }
+                if (drop) { Interlocked.Increment(ref CzLeakDrop); Interlocked.Increment(ref CzC(to).Leak); continue; }
                 uint sl; WinDivertSend(h, p, n, out sl, ref a);
             }
         }
@@ -233,7 +260,9 @@ namespace VpnGuard
             int ihl = (p[0] & 15) * 4, proto = p[9];
             if (n < ihl + 8) return false;
             uint src = IpH(p, 12), dst = IpH(p, 16);
-            if (!CzInSet(dst)) return false;
+            var cl = CzC(src); Interlocked.Increment(ref cl.Pkts);
+            if (CzNoZ.Contains(src) || !CzInSet(dst)) return false;
+            Interlocked.Increment(ref cl.ZPkts); cl.LastZ = DateTime.Now;
             int sport = (p[ihl] << 8) | p[ihl + 1], dport = (p[ihl + 2] << 8) | p[ihl + 3];
             if (proto == 6) {
                 if (n > 1300) Interlocked.Increment(ref CzFwdBig);
@@ -262,7 +291,7 @@ namespace VpnGuard
             if (proto == 17) {
                 int ulen = n - ihl - 8; if (ulen < 0) return true;
                 // QUIC (UDP 443): по умолчанию отбрасываем — YouTube и браузеры сразу переходят на TCP, а TCP идёт через ретранслятор и winws
-                if (dport == 443 && CfgStr("ws4w.clientQuic", "drop") != "relay") { Interlocked.Increment(ref CzQuicDrop); return true; }
+                if (dport == 443 && CfgStr("ws4w.clientQuic", "drop") != "relay") { Interlocked.Increment(ref CzQuicDrop); Interlocked.Increment(ref cl.Quic); return true; }
                 string key = src + ":" + sport + ">" + dst + ":" + dport; CzUdpFlow f;
                 lock (CzLock) {
                     if (!CzUdp.TryGetValue(key, out f)) {
@@ -394,27 +423,27 @@ namespace VpnGuard
             var ep = (IPEndPoint)c.Client.RemoteEndPoint; uint cip = IpH(ep.Address.GetAddressBytes(), 0);
             CzTcpFlow f; lock (CzLock) CzTcp.TryGetValue(((ulong)cip << 16) | (uint)ep.Port, out f);
             if (f == null) { Interlocked.Increment(ref CzRelayNoFlow); return; }
-            c.NoDelay = true;
+            c.NoDelay = true; var cl = CzC(cip);
             var srv = new TcpClient(AddressFamily.InterNetwork) { NoDelay = true };
             try {
                 var ar = srv.BeginConnect(IPAddress.Parse(IpS(f.Dst)), f.DPort, null, null);
-                if (!ar.AsyncWaitHandle.WaitOne(15000)) { Interlocked.Increment(ref CzConnFail); return; }
-                try { srv.EndConnect(ar); } catch { Interlocked.Increment(ref CzConnFail); return; }
-                Interlocked.Increment(ref CzTcpConns); Interlocked.Increment(ref CzActive);
+                if (!ar.AsyncWaitHandle.WaitOne(15000)) { Interlocked.Increment(ref CzConnFail); Interlocked.Increment(ref cl.Fail); return; }
+                try { srv.EndConnect(ar); } catch { Interlocked.Increment(ref CzConnFail); Interlocked.Increment(ref cl.Fail); return; }
+                Interlocked.Increment(ref CzTcpConns); Interlocked.Increment(ref CzActive); Interlocked.Increment(ref cl.Conns);
                 var cs = c.GetStream(); var ss = srv.GetStream();
                 long[] cnt = new long[2]; var t0 = DateTime.Now; string first = null; long connMs = CzSw.ElapsedMilliseconds;
-                var up = new Thread(() => { cnt[0] = CzPump(cs, ss, f, true); lock (cnt) if (first == null) first = "клиент"; try { srv.Client.Shutdown(SocketShutdown.Send); } catch { } }) { IsBackground = true }; up.Start();
-                cnt[1] = CzPump(ss, cs, f, false); lock (cnt) if (first == null) first = "сайт"; try { c.Client.Shutdown(SocketShutdown.Send); } catch { }
+                var up = new Thread(() => { cnt[0] = CzPump(cs, ss, f, true, cl); lock (cnt) if (first == null) first = "клиент"; try { srv.Client.Shutdown(SocketShutdown.Send); } catch { } }) { IsBackground = true }; up.Start();
+                cnt[1] = CzPump(ss, cs, f, false, cl); lock (cnt) if (first == null) first = "сайт"; try { c.Client.Shutdown(SocketShutdown.Send); } catch { }
                 up.Join(60000);
-                if (Interlocked.Increment(ref CzConnLogged) <= 20)
+                if (Interlocked.Increment(ref cl.Logged) <= 5)
                     Log("zapret для клиентов: " + ep.Address + ":" + ep.Port + " → " + IpS(f.Dst) + ":" + f.DPort + " · к сайту " + cnt[0] + " Б, к клиенту " + cnt[1] + " Б, " + Math.Round((DateTime.Now - t0).TotalSeconds, 1) + " с, первым закрыл " + first + ", сайт подключён в " + (connMs % 100000).ToString("00000") + "мс", "INFO");
             } catch { }
             finally { if (Interlocked.Decrement(ref CzActive) < 0) Interlocked.Exchange(ref CzActive, 0); try { srv.Close(); } catch { } }
         }
-        static long CzPump(Stream a, Stream b, CzTcpFlow f, bool up)
+        static long CzPump(Stream a, Stream b, CzTcpFlow f, bool up, CzCli cl)
         {
             var bb = new byte[65536]; long total = 0;
-            try { int n; while ((n = a.Read(bb, 0, bb.Length)) > 0) { b.Write(bb, 0, n); total += n; Interlocked.Add(ref CzBytes, n); if (up) Interlocked.Add(ref CzTcpUp, n); else Interlocked.Add(ref CzTcpDown, n); f.Last = DateTime.Now; } } catch { }
+            try { int n; while ((n = a.Read(bb, 0, bb.Length)) > 0) { b.Write(bb, 0, n); total += n; Interlocked.Add(ref CzBytes, n); if (up) { Interlocked.Add(ref CzTcpUp, n); Interlocked.Add(ref cl.Up, n); } else { Interlocked.Add(ref CzTcpDown, n); Interlocked.Add(ref cl.Down, n); } f.Last = DateTime.Now; } } catch { }
             return total;
         }
 
@@ -442,6 +471,70 @@ namespace VpnGuard
             int tcpN, udpN; lock (CzLock) { tcpN = CzTcp.Count; udpN = CzUdp.Count; }
             return "работает · TCP-соединений через zapret " + Interlocked.Read(ref CzTcpConns) + " (сейчас " + CzActive + "), UDP-потоков " + udpN + " · " +
                 Math.Round(Interlocked.Read(ref CzBytes) / 1048576.0, 1) + " МБ · перехвачено пакетов " + Interlocked.Read(ref CzPkts) + (Interlocked.Read(ref CzErrors) > 0 ? ", ошибок " + Interlocked.Read(ref CzErrors) : "");
+        }
+
+        // ---------------------------------------------------------------- отключение клиентов WG-Server (ws4w.clientOff — список IP)
+        // Конфиг сервера не меняется (его ведёт и WS4W): отключённый клиент просто убирается из работающего туннеля
+        // («wg set … peer … remove») и возвращается из конфига, когда его включат. После перезапуска туннеля агент снова уберёт его.
+        class WcPeer { public string Key, Ip, Psk, Allowed; public int Keepalive; }
+        static DateTime WcAt = DateTime.MinValue; static string WcErr = "";
+        static string WgExe() { return Path.Combine(Path.GetDirectoryName(CfgStr("ws4w.wireguardExe", @"C:\Program Files\WireGuard\wireguard.exe")), "wg.exe"); }
+        static HashSet<string> WcOff() { return new HashSet<string>(CfgList("ws4w.clientOff", new string[0]).Select(x => x.Trim())); }
+        static List<WcPeer> WgConfPeers()
+        {
+            var conf = WgConf(); if (conf == null || !conf.EndsWith(".conf")) return null;
+            var res = new List<WcPeer>(); WcPeer cur = null;
+            foreach (var l in File.ReadAllLines(conf)) {
+                var h = Regex.Match(l, @"^\s*\[(\w+)\]");
+                if (h.Success) { cur = h.Groups[1].Value.Equals("Peer", StringComparison.OrdinalIgnoreCase) ? new WcPeer() : null; if (cur != null) res.Add(cur); continue; }
+                var m = Regex.Match(l, @"^\s*(\w+)\s*=\s*(.*?)\s*$"); if (cur == null || !m.Success) continue;
+                string k = m.Groups[1].Value.ToLowerInvariant(), v = m.Groups[2].Value;
+                if (k == "publickey") cur.Key = v; else if (k == "presharedkey") cur.Psk = v;
+                else if (k == "allowedips") { cur.Allowed = Regex.Replace(v, @"\s+", ""); cur.Ip = Regex.Replace(cur.Allowed.Split(',')[0], @"/\d+$", ""); }
+                else if (k == "persistentkeepalive") int.TryParse(v, out cur.Keepalive);
+            }
+            return res.Where(p => p.Key != null && p.Ip != null).ToList();
+        }
+        static void WgClientsWatch()
+        {
+            if ((DateTime.Now - WcAt).TotalSeconds < 10) return; WcAt = DateTime.Now;
+            var svc = Svc(CfgStr("ws4w.serviceName", "WireGuardTunnel$wg_server")); if (svc == null || svc.Status != System.ServiceProcess.ServiceControllerStatus.Running) return;
+            string wg = WgExe(); if (!File.Exists(wg)) return;
+            List<WcPeer> conf; try { conf = WgConfPeers(); } catch { return; } if (conf == null) return;
+            var off = WcOff();
+            var r = Exe(wg, "show " + WgIf() + " peers", 5); if (r.Code != 0) return;
+            var live = new HashSet<string>(r.Out.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()));
+            string err = "";
+            foreach (var p in conf) {
+                string nm; if (!PeerNamesByKey.TryGetValue(p.Key, out nm)) nm = p.Ip;
+                if (off.Contains(p.Ip) && live.Contains(p.Key)) {
+                    var x = Exe(wg, "set " + WgIf() + " peer " + p.Key + " remove", 10);
+                    if (x.Code == 0) Log("WG-Server: клиент «" + nm + "» (" + p.Ip + ") отключён", "WARN"); else err = "не удалось отключить " + p.Ip + ": " + x.Err.Trim();
+                } else if (!off.Contains(p.Ip) && !live.Contains(p.Key)) {
+                    // включили обратно (или убрали вручную) — вернуть из конфига
+                    string tmp = null;
+                    try {
+                        string a = "set " + WgIf() + " peer " + p.Key + " allowed-ips " + (p.Allowed ?? p.Ip + "/32");
+                        if (!string.IsNullOrEmpty(p.Psk)) { tmp = Path.Combine(Path.GetTempPath(), "vg-psk-" + Guid.NewGuid().ToString("N") + ".txt"); File.WriteAllText(tmp, p.Psk); a += " preshared-key \"" + tmp + "\""; }
+                        if (p.Keepalive > 0) a += " persistent-keepalive " + p.Keepalive;
+                        var x = Exe(wg, a, 10);
+                        if (x.Code == 0) Log("WG-Server: клиент «" + nm + "» (" + p.Ip + ") включён", "INFO"); else err = "не удалось включить " + p.Ip + ": " + x.Err.Trim();
+                    } finally { if (tmp != null) try { File.Delete(tmp); } catch { } }
+                }
+            }
+            if (err != WcErr) { if (err.Length > 0) Log("WG-Server: " + err, "ERROR"); WcErr = err; }
+        }
+        // отключённые клиенты (их нет в «wg show») — для списка в окне
+        static IEnumerable<Dictionary<string, object>> WgOffPeers(HashSet<string> shownIps)
+        {
+            var off = WcOff(); if (off.Count == 0) yield break;
+            List<WcPeer> conf = null; try { conf = WgConfPeers(); } catch { }
+            if (conf == null) yield break;
+            foreach (var p in conf) {
+                if (!off.Contains(p.Ip) || shownIps.Contains(p.Ip)) continue;
+                string nm; if (!PeerNamesByKey.TryGetValue(p.Key, out nm) && !PeerNamesByIp.TryGetValue(p.Ip, out nm)) nm = p.Ip;
+                yield return new Dictionary<string, object> { { "name", nm }, { "key", p.Key.Substring(0, Math.Min(8, p.Key.Length)) }, { "ip", p.Ip }, { "endpoint", "" }, { "hsAgo", -1 }, { "active", false }, { "rx", 0 }, { "tx", 0 }, { "off", true }, { "zapret", CzClientZapret(p.Ip) } };
+            }
         }
     }
 }
