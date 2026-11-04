@@ -89,11 +89,8 @@ namespace VpnGuard
             while (true) {
                 var t0 = DateTime.Now;
                 LoadCfg(false);
-                // вернуть работу агенту на PowerShell: так выбрали в настройках или включён режим «два туннеля»
-                if (CfgStr("agent.engine", "powershell") != "csharp" || Mode() == "dual") {
-                    Log(Mode() == "dual" ? "Агент C#: режим «два туннеля» пока работает на агенте PowerShell — передаю работу ему" : "Агент C#: выбран агент на PowerShell — передаю работу ему", "WARN");
-                    HandOver(); return;
-                }
+                // вернуть работу агенту на PowerShell: так выбрали в настройках
+                if (CfgStr("agent.engine", "powershell") != "csharp") { Log("Агент C#: выбран агент на PowerShell — передаю работу ему", "WARN"); HandOver(); return; }
                 if (SourceSig() != CodeSig) { Log("Агент C#: код обновлён — перезапуск на новой версии", "INFO"); HandOver(); return; }
                 foreach (var step in new Action[] { Commands, WgWatch, WgClientsWatch, VpnWatch, SharingWatch, ZapretWatch, ClientZapretWatch, PsPartWatch }) {
                     try { step(); } catch (Exception e) { Log("Агент C#: " + step.Method.Name + ": " + e.Message, "ERROR"); }
@@ -268,8 +265,8 @@ namespace VpnGuard
                 Log("Команда из монитора: " + a, "INFO");
                 switch (a) {
                     case "reconnect":
-                        if (Mode() == "amnezia") { AwgRestarts.Clear(); AwgRestart("по команде из окна"); }
-                        else if (Mode() == "meduza") { MzReconnectCmd(); }
+                        if (TunnelKind() == "amnezia") { AwgRestarts.Clear(); AwgRestart("по команде из окна"); }
+                        else if (TunnelKind() == "meduza") { MzReconnectCmd(); }
                         break;
                     case "reconnect-meduza": MzReconnectCmd(); break;
                     case "reconnect-awg": AwgRestarts.Clear(); AwgRestart("по команде из окна"); break;
@@ -661,7 +658,7 @@ namespace VpnGuard
         }
 
         // ---------------------------------------------------------------- режим работы
-        static string UplinkName() { var m = Mode(); if (m == "zapret") return PhysAlias(); if (m == "amnezia") return AvpnAdapter(); return MzAdapterName(); }
+        static string UplinkName() { var m = Mode(); if (m == "zapret") return PhysAlias(); return KindAdapter(TunnelKind()); }
         static readonly Dictionary<string, string> ModeNames = new Dictionary<string, string> { { "meduza", "MeduzaVPN" }, { "amnezia", "AmneziaVPN" }, { "dual", "два туннеля (MeduzaVPN + AmneziaVPN)" }, { "zapret", "без VPN (только zapret)" } };
         static void VpnWatch()
         {
@@ -669,16 +666,133 @@ namespace VpnGuard
             if (mode != LastMode) {
                 if (LastMode != null) Log("Режим: " + ModeNames[LastMode] + " → " + ModeNames[mode], "WARN");
                 SetActivity("переключаю режим: " + ModeNames[mode]);
-                if (mode != "meduza" && CfgBool("vpn.stopInactive", true) && MzProc() != null) { Log("MeduzaVPN: отключаю и закрываю (выбран другой режим)", "INFO"); MzStop(); }
-                if (mode != "amnezia") AvpnDisable(CfgBool("vpn.stopInactive", true));
-                if (mode == "meduza") MeduzaStartedAt = DateTime.Now;
-                if (mode == "amnezia") AvpnStartedAt = DateTime.Now;
+                if (LastMode == "dual") { try { DualResetRoutes(); } catch (Exception e) { Log("Два туннеля: маршруты: " + e.Message, "WARN"); } }
+                if (mode != "meduza" && mode != "dual" && CfgBool("vpn.stopInactive", true) && MzProc() != null) { Log("MeduzaVPN: отключаю и закрываю (выбран другой режим)", "INFO"); MzStop(); }
+                if (mode != "amnezia" && mode != "dual") AvpnDisable(CfgBool("vpn.stopInactive", true));
+                if (mode == "meduza" || mode == "dual") MeduzaStartedAt = DateTime.Now;
+                if (mode == "amnezia" || mode == "dual") AvpnStartedAt = DateTime.Now;
+                if (mode == "dual") { DualActive = DualPrimary(); DualFails = 0; DualOkSince = DateTime.MinValue; }
                 ProbeFailures = 0; DownTicks = 0; LastTraffic = null; AwgProbeFailures = 0; AwgDownTicks = 0; AwgTraffic = null; ForceIcs = true;
                 LastMode = mode;
             }
             if (mode == "meduza") { MeduzaWatch(); AvpnDisable(false); }
             else if (mode == "amnezia") { if (Up(MzAdapterName())) { Log("MeduzaVPN: подключён, но выбран режим AmneziaVPN — отключаю", "WARN"); MzDisconnect(); } AmneziaWatch(); }
+            else if (mode == "dual") DualWatch();
             else if (mode == "zapret") { if (Up(MzAdapterName())) { Log("MeduzaVPN: подключён, но выбран режим без VPN — отключаю", "WARN"); MzDisconnect(); } AvpnDisable(false); LastTraffic = null; AwgTraffic = null; }
+        }
+
+        // ---------------------------------------------------------------- режим «два туннеля» (dual): оба подняты, трафик (и раздача) — через активный; упал — сразу на другой
+        static string DualActive = "", DualReason = ""; static int DualFails, DualSwitches; static DateTime DualSwitchAt = DateTime.MinValue, DualOkSince = DateTime.MinValue;
+        static readonly List<KeyValuePair<int, string>> DualRoutes = new List<KeyValuePair<int, string>>();   // маршруты, добавленные агентом: индекс адаптера, префикс
+        static string DualPrimary() { return CfgStr("vpn.primary", "meduza") == "amnezia" ? "amnezia" : "meduza"; }
+        static string DualAct() { return DualActive == "meduza" || DualActive == "amnezia" ? DualActive : DualPrimary(); }
+        static string OtherKind(string k) { return k == "meduza" ? "amnezia" : "meduza"; }
+        // какой VPN несёт трафик сейчас: meduza | amnezia | "" (без VPN)
+        static string TunnelKind() { var m = Mode(); return m == "dual" ? DualAct() : m == "zapret" ? "" : m; }
+        static string KindAdapter(string k) { return k == "meduza" ? MzAdapterName() : k == "amnezia" ? AvpnAdapter() : ""; }
+        static bool? KindTraffic(string k) { return k == "amnezia" ? AwgTraffic : LastTraffic; }
+        // быстрая проверка туннеля: адаптер поднят и через него открываются узлы проверки
+        static bool KindOk(string k)
+        {
+            var n = KindAdapter(k); if (string.IsNullOrEmpty(n) || !Up(n)) return false;
+            string ip = Ipv4(n); if (ip == null) return false;
+            foreach (var h in ProbeHosts()) if (TcpVia(ip, h, 3000)) return true;
+            return false;
+        }
+        static void KindWatch(string k) { if (k == "meduza") MeduzaWatch(); else AmneziaWatch(); }
+        static void StopKind(string k)
+        {
+            if (k == "meduza") { if (Up(MzAdapterName())) { Log("MeduzaVPN: отключаю (резерв поднимается только при сбое)", "INFO"); MzDisconnect(); } }
+            else AvpnDisable(false);
+        }
+        static void DualSwitch(string k, string reason)
+        {
+            string from = DualAct(); if (from == k) return;
+            DualActive = k; DualSwitchAt = DateTime.Now; DualSwitches++; DualReason = reason; DualFails = 0; DualOkSince = DateTime.MinValue;
+            Log("Два туннеля: трафик переключён " + ModeNames[from] + " → " + ModeNames[k] + " — " + reason, "WARN");
+            try { DualSyncRoutes(); } catch (Exception e) { Log("Два туннеля: маршруты: " + e.Message, "ERROR"); }
+            ForceIcs = true; ProbeFailures = 0;
+        }
+
+        // маршруты и метрики (root\StandardCimv2 — то же, что Get-NetRoute / Get-NetIPInterface)
+        static List<ManagementBaseObject> Cim(string q)
+        {
+            try { using (var s = new ManagementObjectSearcher(new ManagementScope(@"\\.\root\StandardCimv2"), new ObjectQuery(q))) return s.Get().Cast<ManagementBaseObject>().ToList(); }
+            catch { return new List<ManagementBaseObject>(); }
+        }
+        static void SetIfMetric(int idx, int metric) { if (IfMetric(idx) != metric) Exe("netsh.exe", "interface ipv4 set interface " + idx + " metric=" + metric, 15); }
+        static bool HasRoute(int idx, string pfx) { return RouteTable().Any(r => r.IfIndex == idx && Prefix(r) == pfx); }
+        // у активного — половинки 0.0.0.0/1 + 128.0.0.0/1 (сильнее любого 0.0.0.0/0) и метрика выше физического выхода
+        // (чтобы клиенты WireGuard не уходили в него); у резервного — метрика 5000
+        static void DualSyncRoutes()
+        {
+            string act = DualAct(); int physM = 25, best = int.MaxValue;
+            foreach (var r in Cim("SELECT InterfaceIndex, InterfaceAlias, RouteMetric, NextHop FROM MSFT_NetRoute WHERE DestinationPrefix='0.0.0.0/0' AND AddressFamily=2")) {
+                string al = Convert.ToString(r["InterfaceAlias"]), nh = Convert.ToString(r["NextHop"]);
+                if (IsTunnel(al) || nh == "0.0.0.0") continue;
+                int m = Convert.ToInt32(r["RouteMetric"]) + Math.Max(0, IfMetric(Convert.ToInt32(r["InterfaceIndex"])));
+                if (m < best) best = m;
+            }
+            if (best != int.MaxValue) physM = best;
+            foreach (var k in new[] { "meduza", "amnezia" }) {
+                string n = KindAdapter(k); if (string.IsNullOrEmpty(n) || !Up(n)) continue;
+                int idx = IfIndexOf(n); if (idx <= 0) continue;
+                if (k != act) { SetIfMetric(idx, 5000); continue; }
+                var own0 = Cim("SELECT RouteMetric FROM MSFT_NetRoute WHERE DestinationPrefix='0.0.0.0/0' AND InterfaceIndex=" + idx);
+                if (own0.Count > 0) SetIfMetric(idx, Math.Min(4000, Math.Max(1, physM - own0.Min(o => Convert.ToInt32(o["RouteMetric"])) + 10)));
+                else if (IfMetric(idx) >= 5000) SetIfMetric(idx, 5);
+                foreach (var pfx in new[] { "0.0.0.0/1", "128.0.0.0/1" }) {
+                    if (HasRoute(idx, pfx)) continue;
+                    var x = Exe("netsh.exe", "interface ipv4 add route " + pfx + " " + idx + " 0.0.0.0 metric=0 store=active", 15);
+                    if (x.Code == 0) { lock (DualRoutes) DualRoutes.Add(new KeyValuePair<int, string>(idx, pfx)); Log("Два туннеля: добавлен маршрут " + pfx + " через " + n, "INFO"); }
+                    else Log("Два туннеля: не удалось добавить маршрут " + pfx + " через " + n + ": " + (x.Out + " " + x.Err).Trim(), "WARN");
+                }
+            }
+        }
+        // выход из режима: убрать наши маршруты и вернуть автоматические метрики
+        static void DualResetRoutes()
+        {
+            List<KeyValuePair<int, string>> rs; lock (DualRoutes) { rs = DualRoutes.ToList(); DualRoutes.Clear(); }
+            foreach (var r in rs) Exe("netsh.exe", "interface ipv4 delete route " + r.Value + " " + r.Key + " 0.0.0.0 store=active", 15);
+            foreach (var k in new[] { "meduza", "amnezia" }) {
+                string n = KindAdapter(k); int idx = string.IsNullOrEmpty(n) ? 0 : IfIndexOf(n); if (idx <= 0) continue;
+                Exe("powershell.exe", "-NoProfile -Command Set-NetIPInterface -InterfaceIndex " + idx + " -AddressFamily IPv4 -AutomaticMetric Enabled", 30);
+            }
+        }
+        static void DualWatch()
+        {
+            bool hot = CfgBool("vpn.dualHot", true);
+            string act = DualAct(), oth = OtherKind(act);
+            // 1. быстрая проверка активного — до долгого восстановления, чтобы клиенты не ждали
+            bool actUp = Up(KindAdapter(act)), actOk = actUp && KindOk(act);
+            bool grace = act == "meduza" && (DateTime.Now - MeduzaStartedAt).TotalSeconds < CfgInt("meduza.startupGraceSec", 60);
+            if (actOk || grace) DualFails = 0; else DualFails++;
+            int need = Math.Max(1, CfgInt("vpn.failoverChecks", 2));
+            if (!actOk && !grace && (DualFails >= need || !actUp)) {
+                if (hot) {
+                    if (KindOk(oth)) DualSwitch(oth, ModeNames[act] + (actUp ? " не пропускает трафик" : " отключился"));
+                    else if (DualFails == need) Log("Два туннеля: " + ModeNames[act] + " не работает, резерв " + ModeNames[oth] + " тоже — восстанавливаю", "WARN");
+                } else {
+                    Log("Два туннеля: " + ModeNames[act] + " не работает — поднимаю резерв " + ModeNames[oth], "WARN");
+                    try { KindWatch(oth); } catch (Exception e) { Log(ModeNames[oth] + ": " + e.Message, "ERROR"); }
+                    var dl = DateTime.Now.AddSeconds(30); while (DateTime.Now < dl && !KindOk(oth)) Thread.Sleep(3000);
+                    if (KindOk(oth)) { DualSwitch(oth, ModeNames[act] + " не работает"); StopKind(act); }
+                }
+            }
+            // 2. наблюдение и восстановление: оба (горячий резерв) или только активный
+            act = DualAct();
+            try { DualSyncRoutes(); } catch { }
+            if (hot) { foreach (var k in new[] { act, OtherKind(act) }) { try { KindWatch(k); } catch (Exception e) { Log(ModeNames[k] + ": " + e.Message, "ERROR"); } } }
+            else { KindWatch(act); StopKind(OtherKind(act)); }
+            // 3. основной снова работает N минут — вернуть трафик на него
+            string prim = DualPrimary(); int fb = CfgInt("vpn.failbackMin", 5);
+            if (hot && DualAct() != prim && fb > 0) {
+                bool pOk = KindTraffic(prim) == true && Up(KindAdapter(prim));
+                if (!pOk) DualOkSince = DateTime.MinValue;
+                else if (DualOkSince == DateTime.MinValue) DualOkSince = DateTime.Now;
+                else if ((DateTime.Now - DualOkSince).TotalMinutes >= fb) DualSwitch(prim, "основной туннель работает уже " + fb + " мин");
+            }
+            try { DualSyncRoutes(); } catch { }
         }
 
         // ---------------------------------------------------------------- wg_server
@@ -996,7 +1110,7 @@ namespace VpnGuard
         static object[] Kv(string k, object v) { return new object[] { k, v == null ? "—" : Convert.ToString(v) }; }
         static Dictionary<string, object> Comp(int level, string state, IEnumerable<string> details, List<object[]> kv)
         {
-            return new Dictionary<string, object> { { "level", level }, { "state", state }, { "details", details.Where(d => !string.IsNullOrEmpty(d)).ToArray() }, { "kv", kv.ToArray() } };
+            return new Dictionary<string, object> { { "level", level }, { "state", state }, { "details", details.Where(d => !string.IsNullOrEmpty(d)).ToArray() }, { "kv", kv.Where(x => x != null).ToArray() } };
         }
         static Dictionary<string, object> ReadPsStatus()
         {
@@ -1011,7 +1125,7 @@ namespace VpnGuard
         static void SnapshotCore()
         {
             string mode = Mode(); var proc = MzProc(); bool pipe = MzPipe(); string ver = MzVersion();
-            var avNic = AvpnNic(); string tun = mode == "zapret" ? "" : mode == "amnezia" ? AvpnAdapter() : MzAdapterName();
+            var avNic = AvpnNic(); string kind = TunnelKind(); string tun = mode == "zapret" ? "" : KindAdapter(kind);
             var ma = Nic(tun); var wa = Nic(WgIf()); var wgSvc = Svc(CfgStr("ws4w.serviceName", "WireGuardTunnel$wg_server"));
             bool uUp = ma != null && ma.OperationalStatus == OperationalStatus.Up, wUp = wgSvc != null && wgSvc.Status == ServiceControllerStatus.Running && wa != null && wa.OperationalStatus == OperationalStatus.Up;
             if (uUp) { if (UltraUpSince == DateTime.MinValue) UltraUpSince = DateTime.Now; } else UltraUpSince = DateTime.MinValue;
@@ -1024,7 +1138,10 @@ namespace VpnGuard
             // MeduzaVPN
             int mL; string mS; bool responding = true; try { if (proc != null) responding = proc.Responding; } catch { }
             if (updating) { mL = 1; mS = "Обновляется"; } else if (proc == null) { mL = 2; mS = "Не запущен"; } else if (!responding) { mL = 1; mS = "Не отвечает"; } else { mL = 0; mS = "Работает"; }
-            if (mode != "meduza" && !updating) { mL = -1; mS = proc != null ? "Не используется (запущен)" : "Не используется"; }
+            if (mode != "meduza" && mode != "dual" && !updating) { mL = -1; mS = proc != null ? "Не используется (запущен)" : "Не используется"; }
+            else if (mode == "dual" && mL == 0) {
+                if (!Up(MzAdapterName())) { mL = 1; mS = "Туннель не подключён"; } else if (LastTraffic == false) { mL = 1; mS = "Нет трафика"; } else mS = kind == "meduza" ? "Работает · активный" : "Работает · резерв";
+            }
             string remoteVer = ps.ContainsKey("meduzaRemoteVersion") ? Convert.ToString(ps["meduzaRemoteVersion"]) : "";
             string started = ""; try { if (proc != null) started = proc.StartTime.ToString("dd.MM HH:mm"); } catch { }
             var meduza = Comp(mL, mS, new[] { "Версия " + ver + (remoteVer.Length > 0 && remoteVer != ver ? " (есть " + remoteVer + ")" : ""), proc != null ? "PID " + proc.Id + (started.Length > 0 ? ", с " + started : "") : "процесс отсутствует",
@@ -1042,19 +1159,31 @@ namespace VpnGuard
             meduza["catalog"] = Catalog; meduza["protoTest"] = ProtoTest; meduza["protocolNow"] = MzProtocol(); meduza["protocolOverride"] = MzOverride;
 
             // Туннель
-            bool amz = mode == "amnezia"; bool? tTr = amz ? AwgTraffic : LastTraffic; DateTime tTrAt = amz ? AwgTrafficAt : LastTrafficAt; int tFail = amz ? AwgProbeFailures : ProbeFailures; string tWhy = amz ? AwgLastReason : LastRestartReason;
+            bool amz = kind == "amnezia"; bool? tTr = amz ? AwgTraffic : LastTraffic; DateTime tTrAt = amz ? AwgTrafficAt : LastTrafficAt; int tFail = amz ? AwgProbeFailures : ProbeFailures; string tWhy = amz ? AwgLastReason : LastRestartReason;
             int uL; string uS;
             if (mode == "zapret") { uL = 0; uS = "VPN выключен — напрямую"; } else if (amz && tun.Length == 0) { uL = 2; uS = "AmneziaVPN не подключён"; } else if (!uUp) { uL = 2; uS = "Отключён"; } else if (tTr == false) { uL = 1; uS = "Нет трафика"; } else { uL = 0; uS = "Подключён"; }
             string kindTitle = amz ? "AmneziaVPN" : "MeduzaVPN · " + MzProtocol();
             string trTxt = (tTr == true ? "OK" : tTr == false ? "НЕТ" : "—");
+            Dictionary<string, object> sb = null;
+            if (mode == "dual") {
+                string oth = OtherKind(kind); bool othUp = Up(KindAdapter(oth)); bool? othTr = KindTraffic(oth);
+                sb = new Dictionary<string, object> { { "kind", oth }, { "name", ModeNames[oth] }, { "up", othUp }, { "ok", othUp && othTr == true },
+                    { "state", !othUp ? "не подключён" : othTr == true ? "готов" : othTr == false ? "нет трафика" : "проверяется" } };
+                if (uL == 0) uS = othUp && othTr == true ? "Подключён · резерв готов" : "Подключён · резерв не готов";
+            }
+            var dualKv = mode != "dual" ? new List<object[]>() : new List<object[]> {
+                Kv("Трафик идёт через", ModeNames[kind] + (kind == DualPrimary() ? " (основной)" : " (резервный)")),
+                Kv("Переключений", DualSwitches + (DualSwitches > 0 ? " · последнее " + When(DualSwitchAt) + ": " + DualReason : "")),
+                Kv("Резерв", (CfgBool("vpn.dualHot", true) ? "горячий — оба туннеля подняты" : "холодный — поднимается при сбое") + (CfgInt("vpn.failbackMin", 5) > 0 ? ", возврат на основной через " + CfgInt("vpn.failbackMin", 5) + " мин" : "")) };
             var ultra = Comp(uL, uS, new[] { mode == "zapret" ? "Выход: " + PhysAlias() + " · YouTube/Discord — через zapret" : "",
+                sb != null ? "Резерв: " + sb["name"] + " — " + sb["state"] + " · переключений: " + DualSwitches : "",
                 "Адаптер: " + (ma != null ? tun + " · " + ma.OperationalStatus + ", IP " + uIp : mode == "zapret" ? "не нужен" : "отсутствует"),
                 "Трафик: " + trTxt + ", проверка " + When(tTrAt), "Сбоев проверки подряд: " + tFail, tWhy.Length > 0 ? "Последняя причина: " + tWhy : "" }, new List<object[]> {
-                Kv("Режим", ModeNames[mode]), Kv("Адаптер", ma != null ? tun + " · " + ma.OperationalStatus + " · " + ma.Description : "отсутствует"), Kv("IP", uIp ?? "—"),
+                Kv("Режим", ModeNames[mode]), dualKv.Count > 0 ? dualKv[0] : null, dualKv.Count > 1 ? dualKv[1] : null, dualKv.Count > 2 ? dualKv[2] : null, Kv("Адаптер", ma != null ? tun + " · " + ma.OperationalStatus + " · " + ma.Description : "отсутствует"), Kv("IP", uIp ?? "—"),
                 Kv("Скорость канала", ma != null ? (ma.Speed / 1000000) + " Мбит/с" : "—"), Kv("Подключён с", UltraUpSince == DateTime.MinValue ? "—" : When(UltraUpSince)),
-                Kv("Протокол", mode == "meduza" ? MzProtocol() : amz ? "выбран в AmneziaVPN" : "—"), Kv("Проверка трафика", trTxt + " · " + When(tTrAt)), Kv("Узлы проверки", string.Join(", ", ProbeHosts())),
+                Kv("Протокол", kind == "meduza" ? MzProtocol() : amz ? "выбран в AmneziaVPN" : "—"), Kv("Проверка трафика", trTxt + " · " + When(tTrAt)), Kv("Узлы проверки", string.Join(", ", ProbeHosts())),
                 Kv("Сбоев проверки подряд", tFail + " (переподключение после " + CfgInt("meduza.probeFailuresBeforeReconnect", 3) + ")"), Kv("Переподключений с запуска агента", ReconnectCount) });
-            ultra["title"] = mode == "zapret" ? "Без VPN (только zapret)" : "Туннель: " + kindTitle; ultra["kind"] = mode == "zapret" ? "" : mode; ultra["standby"] = null; ultra["switches"] = 0;
+            ultra["title"] = mode == "zapret" ? "Без VPN (только zapret)" : "Туннель: " + kindTitle; ultra["kind"] = kind; ultra["standby"] = sb; ultra["switches"] = DualSwitches;
 
             // wg_server
             int wL; string wS; int activeN = 0; string port = "";
@@ -1083,7 +1212,7 @@ namespace VpnGuard
                 Kv("Восстановлена", When(LastIcsFix)), Kv("Восстановлений с запуска агента", IcsFixCount) });
 
             // AmneziaVPN
-            bool used = mode == "amnezia"; string avExe = AwgExe(); bool inst = File.Exists(avExe);
+            bool used = mode == "amnezia" || mode == "dual"; string avExe = AwgExe(); bool inst = File.Exists(avExe);
             var avProc = AvpnProc(); var avSvc = Svc(AvpnSvcName()); bool aUp = avNic != null && avNic.OperationalStatus == OperationalStatus.Up;
             string aIp = aUp ? Ipv4(avNic.Name) : null;
             int aL; string aS;
@@ -1099,7 +1228,7 @@ namespace VpnGuard
                 Kv("Приложение AmneziaVPN", inst ? "установлено · версия " + aVer : "не установлено (" + avExe + ")"),
                 Kv("Процесс", avProc != null ? "PID " + avProc.Id + " · " + avMem + " МБ" : "не запущен"),
                 Kv("Служба", avSvc != null ? avSvc.ServiceName + " · " + avSvc.Status + " / " + StartMode(avSvc.ServiceName) : "не найдена"),
-                Kv("Используется", used ? "да — режим AmneziaVPN" : "нет (другой режим)"),
+                Kv("Используется", mode == "dual" ? (kind == "amnezia" ? "да — активный из двух туннелей" : "да — резерв из двух туннелей") : used ? "да — режим AmneziaVPN" : "нет (другой режим)"),
                 Kv("Адаптер туннеля", avNic != null ? avNic.Name + " · " + avNic.Description + " · " + avNic.OperationalStatus : "не найден (туннель не подключён)"), Kv("IP", aIp ?? "—"),
                 Kv("Проверка трафика", aTr + " · " + When(AwgTrafficAt)), Kv("Сбоев проверки подряд", AwgProbeFailures + " (перезапуск после " + CfgInt("meduza.probeFailuresBeforeReconnect", 3) + ")"),
                 Kv("Перезапусков за 30 мин", AwgRestarts.Count(d => d > DateTime.Now.AddMinutes(-30)) + " из " + CfgInt("meduza.maxRestartsPer30Min", 5) + " допустимых"),
@@ -1131,7 +1260,7 @@ namespace VpnGuard
                 { "meduza", meduza }, { "ultra", ultra }, { "wg", wg }, { "ics", icsC }, { "zapret", zapret },
                 { "traffic", new Dictionary<string, object> { { "names", adNames }, { "rate", TrafRate }, { "days", TrafDays.Reverse().Take(14).Reverse().Select(kv => (object)new Dictionary<string, object> { { "d", kv.Key }, { "u", kv.Value["u"] }, { "w", kv.Value["w"] }, { "p", kv.Value["p"] } }).ToArray() } } },
                 { "counters", new Dictionary<string, object> { { "restarts", RestartCount }, { "reconnects", ReconnectCount }, { "icsFixes", IcsFixCount } } },
-                { "vpn", new Dictionary<string, object> { { "mode", mode }, { "name", ModeNames[mode] }, { "uplink", upN }, { "kind", mode == "zapret" ? "" : mode }, { "primary", CfgStr("vpn.primary", "meduza") } } },
+                { "vpn", new Dictionary<string, object> { { "mode", mode }, { "name", ModeNames[mode] }, { "uplink", upN }, { "kind", kind }, { "primary", DualPrimary() } } },
                 { "amnezia", awg }, { "software", ps.ContainsKey("software") ? ps["software"] : new object[0] }, { "remote", ps.ContainsKey("remote") ? ps["remote"] : null }, { "app", ps.ContainsKey("app") ? ps["app"] : null },
                 { "history", History.ToArray() } };
             var tmp = StatusPath + ".tmp";

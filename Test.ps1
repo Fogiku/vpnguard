@@ -232,7 +232,7 @@ else {
     Start-Sleep -Seconds 4; $tp.Refresh()
     if ($tp.HasExited) { Fail "значок завершился сразу (код $($tp.ExitCode))" } else { Ok "собран ($([int]((Get-Item $tray).Length / 1KB)) КБ), запускается и читает состояние"; Stop-Process -Id $tp.Id -Force }
 }
-Write-Host '5в. Агент на C# с zapret (сборка и снимок состояния в режимах meduza, amnezia, zapret)'
+Write-Host '5в. Агент на C# с zapret (сборка и снимок состояния в режимах meduza, amnezia, dual, zapret)'
 $agx = Join-Path $tmp 'VpnGuardAgent.exe'
 $co = & $csc /nologo /target:winexe /optimize+ "/out:$agx" /r:System.Web.Extensions.dll /r:System.ServiceProcess.dll /r:System.Management.dll /r:System.Core.dll /r:Microsoft.CSharp.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll (Join-Path $Root 'Agent.cs') (Join-Path $Root 'Zapret.cs') (Join-Path $Root 'ClientZapret.cs') 2>&1
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $agx)) { foreach ($l in @($co) | Where-Object { "$_" -match 'error' } | Select-Object -First 5) { Fail "сборка агента C#: $l" } }
@@ -262,8 +262,10 @@ else {
         # AmneziaVPN не установлен в пустой папке; адаптер старого туннеля AmneziaWG (data\amnezia) — не туннель AmneziaVPN
         if ($mode -eq 'amnezia' -and ($j.amnezia.state -notin 'Не установлен', 'Не запущен', 'Туннель не подключён', 'Подключён', 'Нет трафика' -or $j.amnezia.installed -eq $null -or $j.ultra.title -ne 'Туннель: AmneziaVPN')) { $bad += "amnezia: состояние '$($j.amnezia.state)', заголовок '$($j.ultra.title)'" }
         if (@($j.history).Count -lt 1) { $bad += "${mode}: нет истории" }
+        # два туннеля: трафик через основной (MeduzaVPN), резерв — AmneziaVPN
+        if ($mode -eq 'dual' -and ($j.vpn.kind -ne 'meduza' -or $j.ultra.standby.kind -ne 'amnezia' -or $j.amnezia.level -eq -1)) { $bad += "dual: kind '$($j.vpn.kind)', резерв '$($j.ultra.standby.kind)', amnezia level $($j.amnezia.level)" }
     }
-    if ($bad) { $bad | Select-Object -Unique | ForEach-Object { Fail "агент C#: $_" } } else { Ok "собран ($([int]((Get-Item $agx).Length / 1KB)) КБ); снимок состояния в трёх режимах совпадает по форме с агентом PowerShell" }
+    if ($bad) { $bad | Select-Object -Unique | ForEach-Object { Fail "агент C#: $_" } } else { Ok "собран ($([int]((Get-Item $agx).Length / 1KB)) КБ); снимок состояния в четырёх режимах совпадает по форме с агентом PowerShell" }
 }
 Write-Host '6. Окно (отрисовка всех страниц на тестовых данных)'
 $demo = Join-Path $tmp 'demo'; New-Item -ItemType Directory $demo -Force | Out-Null

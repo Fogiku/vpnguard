@@ -1,13 +1,13 @@
 {
-    "version":  "3.9.2",
-    "build":  "20261104-1355",
+    "version":  "3.10.0",
+    "build":  "20261104-1405",
     "notes":  "",
-    "date":  "2026-11-04T13:55:10.7962946+03:00",
+    "date":  "2026-11-04T14:05:17.1545198+03:00",
     "files":  [
                   {
                       "path":  "Agent.cs",
-                      "sha256":  "f9176566968d90dc91ca1639911405b8597d1a3b3381ab43abaff6b19f4c71e5",
-                      "size":  102380
+                      "sha256":  "39ceb2ed2a2b55441e1446c95a35661aca4b117e2fe76b747729670c933589e3",
+                      "size":  114385
                   },
                   {
                       "path":  "Amnezia.ps1",
@@ -61,8 +61,8 @@
                   },
                   {
                       "path":  "Test.ps1",
-                      "sha256":  "135165c67eb45f6e1af4f36facd094e7f37db98831aa1467bd82431bbe1749f4",
-                      "size":  30820
+                      "sha256":  "dc6415f00c96a44616221f8bb20abd2aa1327b653e57e76675262f2158b708bc",
+                      "size":  31197
                   },
                   {
                       "path":  "Tray.cs",
@@ -86,8 +86,8 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "d23400f08c643a9286dcac5ab40369fc3b8190fde5e3cf7f02f05b11539149f3",
-                      "size":  143768
+                      "sha256":  "c5cc3c0c64cd213b75d89213fa39d670bdf0b871f738cd322c5700f0ee8edac8",
+                      "size":  143626
                   },
                   {
                       "path":  "VpnGuardMonitor.cmd",
@@ -101,8 +101,8 @@
                   },
                   {
                       "path":  "Web.cs",
-                      "sha256":  "697f087d0a72832a0dfc30fe3eb3106896c62fe69f66e6b7db24ab7b5b2b86fc",
-                      "size":  56022
+                      "sha256":  "57366af573b28381ff197d7fca24bbe89553530653af49e0f70c745da0dc87c4",
+                      "size":  55967
                   },
                   {
                       "path":  "web/index.html",

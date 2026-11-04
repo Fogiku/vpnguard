@@ -37,7 +37,7 @@ param(
     [string]$ConfigPath = ''
 )
 
-$AgentVersion = '3.9.2'
+$AgentVersion = '3.10.0'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -2113,7 +2113,6 @@ function Save-CsState($s) { try { $s | ConvertTo-Json -Depth 4 | Set-Content $Cs
 
 function Test-CsAgentWanted {
     if (-not $Cfg.agent -or "$($Cfg.agent.engine)" -ne 'csharp') { return $false }
-    if ((Get-VpnMode) -eq 'dual') { return $false }          # «два туннеля» — пока только агент на PowerShell
     $sig = Get-CsSig
     if (-not $sig) { return $false }
     return "$((Get-CsState).fallbackSig)" -ne $sig            # этот Agent.cs уже падал — остаёмся на PowerShell
