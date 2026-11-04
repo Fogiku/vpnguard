@@ -1,12 +1,13 @@
 ﻿// VpnGuard — агент на C#: zapret и для клиентов WG-Server (ws4w.clientZapret), разделение по IP, прозрачно.
 // winws обрабатывает только трафик, который начинается на самом ПК. Трафик клиентов wg_server к адресам из маршрутов zapret
-// (YouTube, Discord, видеосерверы провайдера, свои списки) Windows и так отправляет через физический адаптер — мимо VPN.
-// Агент перехватывает эти транзитные пакеты (WinDivert, тот же драйвер, что у zapret) и делает их «своими»:
+// (YouTube, Discord, видеосерверы провайдера, свои списки) агент перехватывает (WinDivert, тот же драйвер, что у zapret) и делает «своим»:
 //   TCP — заворачивает на свой ретранслятор на ПК (адрес ПК в сети wg_server : 34010), тот соединяется с тем же адресом
 //         и портом уже от имени ПК → это соединение обрабатывает winws; ответы клиенту уходят с исходного адреса сайта;
-//   UDP (QUIC и др.) — отправляет от ПК сам и возвращает ответы клиенту пакетами с адреса сайта.
+//   UDP — QUIC (443) отбрасывает (браузеры сразу переходят на TCP), остальное отправляет от ПК и возвращает ответы клиенту.
 // Всё остальное у клиентов — как раньше, через VPN. Ничего настраивать на устройствах не нужно.
+// Пакеты принимаются и отправляются пачками (до 255 за вызов): через перехват идёт весь трафик клиентов, не только zapret.
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -16,6 +17,7 @@ using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace VpnGuard
 {
@@ -26,11 +28,12 @@ namespace VpnGuard
         struct WdAddr { [FieldOffset(0)] public long Timestamp; [FieldOffset(8)] public uint Flags; [FieldOffset(12)] public uint Reserved2; [FieldOffset(16)] public uint IfIdx; [FieldOffset(20)] public uint SubIfIdx; }
         const int WdLayerNetwork = 0, WdLayerForward = 1;
         const uint WdOutbound = 1u << 17;
+        const int WdBatch = 255, WdAddrSize = 80;
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr LoadLibrary(string path);
         [DllImport("WinDivert.dll", CharSet = CharSet.Ansi, SetLastError = true)] static extern IntPtr WinDivertOpen(string filter, int layer, short priority, ulong flags);
-        [DllImport("WinDivert.dll", SetLastError = true)] static extern bool WinDivertRecv(IntPtr h, byte[] pkt, uint len, out uint recvLen, ref WdAddr addr);
         [DllImport("WinDivert.dll", SetLastError = true)] static extern bool WinDivertSend(IntPtr h, byte[] pkt, uint len, out uint sendLen, ref WdAddr addr);
-        [DllImport("WinDivert.dll")] static extern bool WinDivertHelperCalcChecksums(byte[] pkt, uint len, ref WdAddr addr, ulong flags);
+        [DllImport("WinDivert.dll", SetLastError = true)] static extern bool WinDivertRecvEx(IntPtr h, byte[] pkt, uint len, out uint recvLen, ulong flags, [In, Out] WdAddr[] addr, ref uint addrLen, IntPtr ov);
+        [DllImport("WinDivert.dll", SetLastError = true)] static extern bool WinDivertSendEx(IntPtr h, byte[] pkt, uint len, out uint sendLen, ulong flags, [In] WdAddr[] addr, uint addrLen, IntPtr ov);
         [DllImport("WinDivert.dll")] static extern bool WinDivertClose(IntPtr h);
         static readonly IntPtr WdInvalid = new IntPtr(-1);
         static bool WdLoaded;
@@ -38,21 +41,33 @@ namespace VpnGuard
         // ---------------------------------------------------------------- состояние
         class CzTcpFlow { public uint Dst; public int DPort; public DateTime Last; public int SynTtl; public uint MaxTs; public bool HasTs; }
         class CzUdpFlow { public uint Client, Dst; public int CPort, DPort; public Socket Sock; public DateTime Last; }
+        struct CzUdpKey : IEquatable<CzUdpKey>
+        {
+            public ulong A, B;
+            public bool Equals(CzUdpKey o) { return A == o.A && B == o.B; }
+            public override bool Equals(object o) { return o is CzUdpKey && Equals((CzUdpKey)o); }
+            public override int GetHashCode() { return (A * 31 + B).GetHashCode(); }
+        }
+        // адреса zapret: слитые диапазоны [Lo, Hi], по возрастанию — поиск двоичный
+        class CzRanges { public uint[] Lo = new uint[0], Hi = new uint[0]; }
         static readonly object CzLock = new object();
         static readonly Dictionary<ulong, CzTcpFlow> CzTcp = new Dictionary<ulong, CzTcpFlow>();
-        static readonly Dictionary<string, CzUdpFlow> CzUdp = new Dictionary<string, CzUdpFlow>();
-        static IntPtr CzFwd = WdInvalid, CzNet = WdInvalid;
+        static readonly Dictionary<CzUdpKey, CzUdpFlow> CzUdp = new Dictionary<CzUdpKey, CzUdpFlow>();
+        static IntPtr CzFwd = WdInvalid, CzNet = WdInvalid, CzBlk = WdInvalid;
         static TcpListener CzRelay;
         const int CzRelayPort = 34010;
-        static uint CzWgIp, CzEthIp; static int CzWgIdx, CzEthIdx; static string CzSig = "", CzError = "";
-        static long CzPkts, CzPass, CzTcpConns, CzUdpPkts, CzBytes, CzErrors, CzTcpUp, CzTcpDown, CzUdpDown, CzUdpSendFail, CzQuicDrop, CzNetRw, CzNetMiss, CzNetBig, CzNetSendFail, CzRelayNoFlow, CzConnFail, CzFwdBig, CzFwdMax, CzNetMax, CzMssClamped, CzDropSum, CzDropMd5, CzDropTtl, CzDropTs, CzDropNoAck, CzSumChecked; static volatile bool CzSumOff; static readonly System.Diagnostics.Stopwatch CzSw = System.Diagnostics.Stopwatch.StartNew(); static int CzActive, CzConnLogged, CzSynLogged, CzTraceLeft = 0; static readonly HashSet<ulong> CzTraced = new HashSet<ulong>(); static DateTime CzTraceAt = DateTime.MinValue;
-        static HashSet<uint> CzHosts = new HashSet<uint>(); static List<uint[]> CzNets = new List<uint[]>(); static string CzSetKey = "";
+        static uint CzWgIp; static int CzWgIdx, CzEthIdx; static string CzSig = "", CzError = "";
+        static long CzPkts, CzPass, CzTcpConns, CzUdpPkts, CzBytes, CzErrors, CzTcpUp, CzTcpDown, CzUdpDown, CzUdpSendFail, CzQuicDrop, CzNetRw, CzNetMiss, CzNetSendFail,
+            CzRelayNoFlow, CzConnFail, CzMssClamped, CzDropSum, CzDropMd5, CzDropTtl, CzDropTs, CzDropNoAck, CzSumChecked, CzLeakDrop;
+        static volatile bool CzSumOff, CzQuicRelay; static int CzActive, CzMss = 1200;
+        static volatile CzRanges CzSet = new CzRanges(); static string CzSetKey = "";
         static DateTime CzFwAt = DateTime.MinValue, CzCleanAt = DateTime.MinValue; static string CzFwSig = "";
         // по клиентам: кому zapret не нужен (ws4w.clientNoZapret — их трафик целиком через VPN, как без этой функции) и счётчики
         class CzCli { public long Pkts, ZPkts, Conns, Up, Down, Quic, Fail, Leak; public int Logged; public DateTime LastZ = DateTime.MinValue; }
-        static readonly Dictionary<uint, CzCli> CzClients = new Dictionary<uint, CzCli>();
+        static readonly ConcurrentDictionary<uint, CzCli> CzClients = new ConcurrentDictionary<uint, CzCli>();
+        static readonly Func<uint, CzCli> CzNewCli = k => new CzCli();
         static volatile HashSet<uint> CzNoZ = new HashSet<uint>();
-        static CzCli CzC(uint ip) { lock (CzClients) { CzCli c; if (!CzClients.TryGetValue(ip, out c)) { c = new CzCli(); CzClients[ip] = c; } return c; } }
+        static CzCli CzC(uint ip) { return CzClients.GetOrAdd(ip, CzNewCli); }
         static void CzUpdateNoZ()
         {
             var s = new HashSet<uint>(); IPAddress a;
@@ -67,11 +82,10 @@ namespace VpnGuard
         static bool CzClientZapret(string ip) { return !CfgList("ws4w.clientNoZapret", new string[0]).Any(x => x.Trim() == ip); }
         static Dictionary<string, object> CzClientStat(string ip)
         {
-            IPAddress a; if (!IPAddress.TryParse(ip, out a)) return null;
-            CzCli c; lock (CzClients) if (!CzClients.TryGetValue(IpH(a.GetAddressBytes(), 0), out c)) return null;
+            IPAddress a; CzCli c; if (!IPAddress.TryParse(ip, out a) || !CzClients.TryGetValue(IpH(a.GetAddressBytes(), 0), out c)) return null;
             return new Dictionary<string, object> { { "pkts", Interlocked.Read(ref c.Pkts) }, { "zPkts", Interlocked.Read(ref c.ZPkts) }, { "conns", Interlocked.Read(ref c.Conns) },
                 { "upKb", Interlocked.Read(ref c.Up) / 1024 }, { "downKb", Interlocked.Read(ref c.Down) / 1024 }, { "quic", Interlocked.Read(ref c.Quic) }, { "fail", Interlocked.Read(ref c.Fail) },
-                { "leak", Interlocked.Read(ref c.Leak) }, { "lastAgo", c.LastZ == DateTime.MinValue ? -1 : (long)(DateTime.Now - c.LastZ).TotalSeconds } };
+                { "leak", Interlocked.Read(ref c.Leak) }, { "lastAgo", c.LastZ == DateTime.MinValue ? -1 : (long)(DateTime.UtcNow - c.LastZ).TotalSeconds } };
         }
 
         static bool CzWanted() { return CfgBool("ws4w.clientZapret", false); }
@@ -79,7 +93,34 @@ namespace VpnGuard
         static void PutIp(byte[] b, int o, uint v) { b[o] = (byte)(v >> 24); b[o + 1] = (byte)(v >> 16); b[o + 2] = (byte)(v >> 8); b[o + 3] = (byte)v; }
         static uint IpH(string s) { var b = IPAddress.Parse(s).GetAddressBytes(); return IpH(b, 0); }
         static string IpS(uint v) { return (v >> 24) + "." + ((v >> 16) & 255) + "." + ((v >> 8) & 255) + "." + (v & 255); }
+        static IPAddress IpA(uint v) { return new IPAddress(new[] { (byte)(v >> 24), (byte)(v >> 16), (byte)(v >> 8), (byte)v }); }
         static int IfIndexOf(string name) { var n = Nic(name); try { return n == null ? 0 : n.GetIPProperties().GetIPv4Properties().Index; } catch { return 0; } }
+
+        // ---------------------------------------------------------------- контрольные суммы (свои: без копий пакета и без вызовов в DLL)
+        static uint CsAdd(byte[] b, int o, int len, uint sum)
+        {
+            int end = o + (len & ~1);
+            for (; o < end; o += 2) sum += (uint)((b[o] << 8) | b[o + 1]);
+            if ((len & 1) != 0) sum += (uint)(b[end] << 8);
+            return sum;
+        }
+        static ushort CsFold(uint sum) { while ((sum >> 16) != 0) sum = (sum & 0xFFFF) + (sum >> 16); return (ushort)~sum; }
+        // сумма TCP/UDP с псевдозаголовком; поле суммы в пакете должно быть обнулено (или включено — тогда у верной суммы результат 0)
+        static ushort CsL4(byte[] b, int o, int ihl, int n)
+        {
+            int l4 = n - ihl; uint sum = CsAdd(b, o + 12, 8, 0) + b[o + 9] + (uint)l4;
+            return CsFold(CsAdd(b, o + ihl, l4, sum));
+        }
+        // пересчитать суммы IPv4 и TCP/UDP пакета b[o .. o+n)
+        static void CsFix(byte[] b, int o, int n)
+        {
+            int ihl = (b[o] & 15) * 4, proto = b[o + 9];
+            b[o + 10] = 0; b[o + 11] = 0; ushort ic = CsFold(CsAdd(b, o, ihl, 0)); b[o + 10] = (byte)(ic >> 8); b[o + 11] = (byte)ic;
+            int co = proto == 6 ? 16 : proto == 17 ? 6 : -1; if (co < 0 || n < ihl + co + 2) return;
+            b[o + ihl + co] = 0; b[o + ihl + co + 1] = 0;
+            ushort c = CsL4(b, o, ihl, n); if (proto == 17 && c == 0) c = 0xFFFF;
+            b[o + ihl + co] = (byte)(c >> 8); b[o + ihl + co + 1] = (byte)c;
+        }
 
         static void ClientZapretWatch()
         {
@@ -97,6 +138,7 @@ namespace VpnGuard
                 CzError = why == "off" ? "" : why; return;
             }
             CzUpdateSet(); CzUpdateNoZ();
+            CzQuicRelay = CfgStr("ws4w.clientQuic", "drop") == "relay"; CzMss = Math.Max(536, CfgInt("ws4w.clientMss", 1200));
             string sig = wgIp + "|" + IfIndexOf(WgIf()) + "|" + phys.IfIndex + "|" + phys.Ip;
             if (CzFwd == WdInvalid || sig != CzSig) {
                 CzStop();
@@ -104,98 +146,41 @@ namespace VpnGuard
                 catch (Exception e) { CzError = e.Message; Log("zapret для клиентов WG-Server: " + e.Message, "ERROR"); CzStop(); return; }
             }
             CzFirewall(wgIp);
-            if ((DateTime.Now - CzCleanAt).TotalSeconds >= 30) { CzCleanAt = DateTime.Now; CzCleanup(); }
+            if ((DateTime.UtcNow - CzCleanAt).TotalSeconds >= 30) { CzCleanAt = DateTime.UtcNow; CzCleanup(); }
         }
 
         static void CzStart(string dll, string wgIp, ZPath phys)
         {
             if (!WdLoaded) { if (LoadLibrary(dll) == IntPtr.Zero) throw new Exception("не загрузился " + dll + " (код " + Marshal.GetLastWin32Error() + ")"); WdLoaded = true; }
-            CzWgIp = IpH(wgIp); CzEthIp = IpH(phys.Ip); CzWgIdx = IfIndexOf(WgIf()); CzEthIdx = phys.IfIndex;
+            CzWgIp = IpH(wgIp); CzWgIdx = IfIndexOf(WgIf()); CzEthIdx = phys.IfIndex;
             string sub = Regex.Replace(wgIp, @"\.\d+$", "");
             // транзит от клиентов wg_server (раздача Windows шлёт его в туннель VPN); адреса zapret отбираются в коде, остальное — как было
             string ff = "ip and (tcp or udp) and ip.SrcAddr >= " + sub + ".0 and ip.SrcAddr <= " + sub + ".255 and ip.SrcAddr != " + wgIp + " and (ip.DstAddr < " + sub + ".0 or ip.DstAddr > " + sub + ".255)";
             // ответы ретранслятора клиентам: исходящие с адреса ПК в сети wg_server и порта ретранслятора
             string nf = "outbound and ip and tcp and ip.SrcAddr == " + wgIp + " and tcp.SrcPort == " + CzRelayPort;
+            // NAT раздачи Windows успевает переслать копию пакетов клиента к настоящему серверу (мимо перехвата) — его ответы (SYN-ACK, RST)
+            // приходят клиенту вперемешку с ответами ретранслятора и рвут соединение. Ответы адресов zapret клиенту — только через ретранслятор.
+            string bf = "ip and (tcp or udp) and ip.DstAddr >= " + sub + ".0 and ip.DstAddr <= " + sub + ".255 and ip.DstAddr != " + wgIp;
             var relay = new TcpListener(IPAddress.Parse(wgIp), CzRelayPort) { ExclusiveAddressUse = true };
             try { relay.Start(256); } catch (Exception e) { throw new Exception("порт " + CzRelayPort + " на " + wgIp + " занят: " + e.Message); }
             var hf = WinDivertOpen(ff, WdLayerForward, 0, 0);
             if (hf == WdInvalid) { relay.Stop(); throw new Exception("WinDivert (транзит) не открылся, код " + Marshal.GetLastWin32Error()); }
             var hn = WinDivertOpen(nf, WdLayerNetwork, 0, 0);
             if (hn == WdInvalid) { WinDivertClose(hf); relay.Stop(); throw new Exception("WinDivert (ответы) не открылся, код " + Marshal.GetLastWin32Error()); }
-            CzFwd = hf; CzNet = hn; CzRelay = relay;
-            lock (CzClients) foreach (var cc in CzClients.Values) cc.Logged = 0;
-            // NAT раздачи Windows успевает переслать копию пакетов клиента к настоящему серверу (мимо перехвата) — его ответы (SYN-ACK, RST)
-            // приходят клиенту вперемешку с ответами ретранслятора и рвут соединение. Ответы адресов zapret клиенту — только через ретранслятор.
-            string bf = "ip and (tcp or udp) and ip.DstAddr >= " + sub + ".0 and ip.DstAddr <= " + sub + ".255 and ip.DstAddr != " + wgIp;
             var hb = WinDivertOpen(bf, WdLayerForward, 0, 0);
             if (hb == WdInvalid) Log("zapret для клиентов: фильтр ответов не открылся, код " + Marshal.GetLastWin32Error() + " — соединения могут рваться", "ERROR");
-            else { CzBlk = hb; new Thread(() => CzBlkLoop(hb)) { IsBackground = true, Name = "cz-blk" }.Start(); }
-            new Thread(() => CzFwdLoop(hf)) { IsBackground = true, Name = "cz-fwd" }.Start();
-            new Thread(() => CzNetLoop(hn)) { IsBackground = true, Name = "cz-net" }.Start();
-            new Thread(() => CzAcceptLoop(relay)) { IsBackground = true, Name = "cz-relay" }.Start();
+            CzFwd = hf; CzNet = hn; CzBlk = hb; CzRelay = relay;
+            foreach (var cc in CzClients.Values) cc.Logged = 0;
+            new Thread(() => CzBatchLoop(hf, () => CzFwd, CzOnFwd)) { IsBackground = true, Name = "cz-fwd" }.Start();
+            new Thread(() => CzBatchLoop(hn, () => CzNet, CzOnNet)) { IsBackground = true, Name = "cz-net" }.Start();
+            if (hb != WdInvalid) new Thread(() => CzBatchLoop(hb, () => CzBlk, CzOnBlk)) { IsBackground = true, Name = "cz-blk" }.Start();
+            CzAcceptLoop(relay);
             Log("zapret для клиентов WG-Server: включён — трафик клиентов к адресам zapret (" + ZRoutes().Count + " маршрутов) идёт через zapret этого ПК, остальное — через VPN (" + phys.Alias + ", ретранслятор " + wgIp + ":" + CzRelayPort + ")", "WARN");
-        }
-        static readonly List<IntPtr> CzProbes = new List<IntPtr>();
-        static readonly Dictionary<string, long> CzProbeStat = new Dictionary<string, long>();
-        static IntPtr CzBlk = WdInvalid; static long CzLeakDrop;
-        static void CzBlkLoop(IntPtr h)
-        {
-            var p = new byte[65535]; var a = new WdAddr(); uint n;
-            while (true) {
-                if (!WinDivertRecv(h, p, (uint)p.Length, out n, ref a)) { if (CzBlk != h) return; Thread.Sleep(5); continue; }
-                bool drop = false;
-                uint to = 0;
-                try { if (n >= 20 && (p[0] >> 4) == 4) { to = IpH(p, 16); if (!CzNoZ.Contains(to) && CzInSet(IpH(p, 12))) drop = true; } } catch { }
-                if (drop) { Interlocked.Increment(ref CzLeakDrop); Interlocked.Increment(ref CzC(to).Leak); continue; }
-                uint sl; WinDivertSend(h, p, n, out sl, ref a);
-            }
-        }
-        // все TCP к клиентам не от ретранслятора: кто шлёт клиенту RST / SYN-ACK мимо нас
-        static int CzRstLogged;
-        static void CzRstProbe(string filter, int layer, string name)
-        {
-            var h = WinDivertOpen(filter, layer, -100, 1 /* SNIFF */);
-            if (h == WdInvalid) { Log("zapret для клиентов: наблюдение «" + name + "» не открылось, код " + Marshal.GetLastWin32Error(), "WARN"); return; }
-            lock (CzProbes) CzProbes.Add(h);
-            new Thread(() => {
-                var p = new byte[65535]; var a = new WdAddr(); uint n;
-                while (WinDivertRecv(h, p, (uint)p.Length, out n, ref a)) {
-                    try {
-                        int ihl = (p[0] & 15) * 4, f = p[ihl + 13];
-                        int sport = (p[ihl] << 8) | p[ihl + 1], dport = (p[ihl + 2] << 8) | p[ihl + 3];
-                        if (sport == CzRelayPort) continue;
-                        uint src = IpH(p, 12); bool inSet = CzInSet(src);
-                        if (!inSet) continue;                      // ответы от адресов zapret, пришедшие не через ретранслятор
-                        string fl = ((f & 2) != 0 ? "S" : "") + ((f & 16) != 0 ? "A" : "") + ((f & 8) != 0 ? "P" : "") + ((f & 1) != 0 ? "F" : "") + ((f & 4) != 0 ? "R" : "");
-                        if (Interlocked.Increment(ref CzRstLogged) <= 60)
-                            Log("наблюдение " + (CzSw.ElapsedMilliseconds % 100000).ToString("00000") + "мс [" + name + "] " + IpS(src) + ":" + sport + " → " + IpS(IpH(p, 16)) + ":" + dport + " " + fl + " ifIdx=" + a.IfIdx + (((a.Flags >> 17) & 1) == 1 ? " исх" : " вх") + " len=" + n + " ttl=" + p[8], "INFO");
-                    } catch { }
-                }
-            }) { IsBackground = true, Name = "cz-rst-" + name }.Start();
-        }
-        static void CzProbe(string filter, int layer, string name)
-        {
-            var h = WinDivertOpen(filter, layer, -100, 1 /* SNIFF */);
-            if (h == WdInvalid) { lock (CzProbeStat) CzProbeStat[name + ".openError"] = Marshal.GetLastWin32Error(); return; }
-            lock (CzProbes) CzProbes.Add(h);
-            new Thread(() => {
-                var p = new byte[65535]; var a = new WdAddr(); uint n;
-                while (WinDivertRecv(h, p, (uint)p.Length, out n, ref a)) {
-                    try {
-                        uint dst = IpH(p, 16); bool inSet = CzInSet(dst);
-                        string k1 = name + ".if" + a.IfIdx + (((a.Flags >> 17) & 1) == 1 ? "out" : "in"), k2 = name + (inSet ? ".zapret" : ".other");
-                        lock (CzProbeStat) { long v; CzProbeStat.TryGetValue(k1, out v); CzProbeStat[k1] = v + 1; CzProbeStat.TryGetValue(k2, out v); CzProbeStat[k2] = v + 1; }
-                    } catch { }
-                }
-            }) { IsBackground = true, Name = "cz-probe-" + name }.Start();
         }
         static void CzStop()
         {
-            lock (CzProbes) { foreach (var ph in CzProbes) { try { WinDivertClose(ph); } catch { } } CzProbes.Clear(); }
-            var bk = CzBlk; CzBlk = WdInvalid; try { if (bk != WdInvalid) WinDivertClose(bk); } catch { }
-            var f = CzFwd; var n = CzNet; CzFwd = WdInvalid; CzNet = WdInvalid;
-            try { if (f != WdInvalid) WinDivertClose(f); } catch { }
-            try { if (n != WdInvalid) WinDivertClose(n); } catch { }
+            var hs = new[] { CzBlk, CzFwd, CzNet }; CzBlk = WdInvalid; CzFwd = WdInvalid; CzNet = WdInvalid;
+            foreach (var h in hs) try { if (h != WdInvalid) WinDivertClose(h); } catch { }
             try { if (CzRelay != null) CzRelay.Stop(); } catch { }
             CzRelay = null; CzSig = "";
             lock (CzLock) { foreach (var u in CzUdp.Values) { try { u.Sock.Close(); } catch { } } CzUdp.Clear(); CzTcp.Clear(); }
@@ -203,8 +188,8 @@ namespace VpnGuard
         static void CzFirewall(string wgIp)
         {
             string sub = Regex.Replace(wgIp, @"\.\d+$", ".0/24"), sig = wgIp + "|" + sub;
-            if (sig == CzFwSig && (DateTime.Now - CzFwAt).TotalMinutes < 30) return;
-            CzFwAt = DateTime.Now;
+            if (sig == CzFwSig && (DateTime.UtcNow - CzFwAt).TotalMinutes < 30) return;
+            CzFwAt = DateTime.UtcNow;
             const string name = "VpnGuard WG-Server zapret";
             bool have = Exe("netsh.exe", "advfirewall firewall show rule name=\"" + name + "\"", 15).Code == 0;
             if (have && sig == CzFwSig) return;
@@ -212,163 +197,173 @@ namespace VpnGuard
             Exe("netsh.exe", "advfirewall firewall add rule name=\"" + name + "\" dir=in action=allow protocol=TCP localip=" + wgIp + " localport=" + CzRelayPort + " remoteip=" + sub, 15);
             CzFwSig = sig;
         }
-        // адреса zapret — те же, что в маршрутах мимо VPN
+        // адреса zapret — те же, что в маршрутах мимо VPN; слить в упорядоченные диапазоны
         static void CzUpdateSet()
         {
             var routes = ZRoutes(); var key = routes.Count + "|" + ZS("lastRouteRefresh");
             if (key == CzSetKey) return;
-            var hosts = new HashSet<uint>(); var nets = new List<uint[]>();
+            var rs = new List<KeyValuePair<uint, uint>>();
             foreach (var r in routes) {
                 var pp = JS(r, "p").Split('/'); IPAddress ip; int len;
-                if (pp.Length != 2 || !IPAddress.TryParse(pp[0], out ip) || !int.TryParse(pp[1], out len)) continue;
-                uint v = IpH(ip.GetAddressBytes(), 0);
-                if (len >= 32) hosts.Add(v); else { uint m = len == 0 ? 0 : 0xFFFFFFFFu << (32 - len); nets.Add(new[] { v & m, m }); }
+                if (pp.Length != 2 || !IPAddress.TryParse(pp[0], out ip) || ip.AddressFamily != AddressFamily.InterNetwork || !int.TryParse(pp[1], out len) || len < 0 || len > 32) continue;
+                uint m = len == 0 ? 0 : 0xFFFFFFFFu << (32 - len), lo = IpH(ip.GetAddressBytes(), 0) & m;
+                rs.Add(new KeyValuePair<uint, uint>(lo, lo | ~m));
             }
-            CzHosts = hosts; CzNets = nets; CzSetKey = key;
+            rs.Sort((x, y) => x.Key.CompareTo(y.Key));
+            var lo2 = new List<uint>(); var hi2 = new List<uint>();
+            foreach (var r in rs) {
+                int k = hi2.Count - 1;
+                if (k >= 0 && (hi2[k] == uint.MaxValue || r.Key <= hi2[k] + 1)) { if (r.Value > hi2[k]) hi2[k] = r.Value; }
+                else { lo2.Add(r.Key); hi2.Add(r.Value); }
+            }
+            CzSet = new CzRanges { Lo = lo2.ToArray(), Hi = hi2.ToArray() }; CzSetKey = key;
         }
         static bool CzInSet(uint v)
         {
-            if (CzHosts.Contains(v)) return true;
-            foreach (var n in CzNets) if ((v & n[1]) == n[0]) return true;
+            var s = CzSet; int a = 0, b = s.Lo.Length - 1;
+            while (a <= b) { int m = (a + b) >> 1; if (v < s.Lo[m]) b = m - 1; else if (v > s.Hi[m]) a = m + 1; else return true; }
             return false;
         }
         static void CzCleanup()
         {
-            var now = DateTime.Now;
+            var now = DateTime.UtcNow;
             lock (CzLock) {
                 foreach (var k in CzTcp.Where(x => (now - x.Value.Last).TotalMinutes > 10).Select(x => x.Key).ToList()) CzTcp.Remove(k);
                 foreach (var k in CzUdp.Where(x => (now - x.Value.Last).TotalSeconds > 120).Select(x => x.Key).ToList()) { try { CzUdp[k].Sock.Close(); } catch { } CzUdp.Remove(k); }
             }
         }
 
-        // ---------------------------------------------------------------- перехват транзита клиентов
-        static void CzFwdLoop(IntPtr h)
+        // ---------------------------------------------------------------- пакеты пачками
+        // обработчик: пакет b[o .. o+n), адрес a; true — пакет забран (дальше не пропускать), false — пропустить (возможно, изменённым)
+        delegate bool CzPktFn(byte[] b, int o, int n, ref WdAddr a);
+        static void CzBatchLoop(IntPtr h, Func<IntPtr> current, CzPktFn fn)
         {
-            var pkt = new byte[65535]; var addr = new WdAddr(); uint len;
+            var buf = new byte[WdBatch * 1600 + 65536]; var addrs = new WdAddr[WdBatch];
+            var outBuf = new byte[buf.Length]; var outAddrs = new WdAddr[WdBatch];
             while (true) {
-                if (!WinDivertRecv(h, pkt, (uint)pkt.Length, out len, ref addr)) { if (CzFwd != h) return; Interlocked.Increment(ref CzErrors); Thread.Sleep(5); continue; }
-                Interlocked.Increment(ref CzPkts);
-                try { if (CzHandleFwd(h, pkt, (int)len, ref addr)) continue; } catch { Interlocked.Increment(ref CzErrors); }
-                uint sl; WinDivertSend(h, pkt, len, out sl, ref addr);          // не наше — пропустить как было
-                Interlocked.Increment(ref CzPass);
+                uint got, alen = (uint)(WdBatch * WdAddrSize);
+                if (!WinDivertRecvEx(h, buf, (uint)buf.Length, out got, 0, addrs, ref alen, IntPtr.Zero)) { if (current() != h) return; Interlocked.Increment(ref CzErrors); Thread.Sleep(5); continue; }
+                int cnt = (int)(alen / WdAddrSize), o = 0, outLen = 0, outN = 0;
+                for (int i = 0; i < cnt && o + 20 <= got; i++) {
+                    int n = (buf[o] >> 4) == 4 ? (buf[o + 2] << 8) | buf[o + 3] : 0;
+                    if (n < 20 || o + n > got) break;                                   // не IPv4 или обрезан — дальше не разобрать
+                    bool taken = false;
+                    try { taken = fn(buf, o, n, ref addrs[i]); } catch { Interlocked.Increment(ref CzErrors); }
+                    if (!taken) { Buffer.BlockCopy(buf, o, outBuf, outLen, n); outLen += n; outAddrs[outN++] = addrs[i]; }
+                    o += n;
+                }
+                if (outN > 0) { uint sl; if (!WinDivertSendEx(h, outBuf, (uint)outLen, out sl, 0, outAddrs, (uint)(outN * WdAddrSize), IntPtr.Zero)) Interlocked.Increment(ref CzNetSendFail); }
             }
         }
-        // true — пакет обработан (не пропускать дальше как есть)
-        static bool CzHandleFwd(IntPtr h, byte[] p, int n, ref WdAddr addr)
+        // ответы адресов zapret клиенту мимо ретранслятора (утечка NAT) — отбросить
+        static bool CzOnBlk(byte[] b, int o, int n, ref WdAddr a)
         {
-            if (n < 20 || (p[0] >> 4) != 4) return false;
-            int ihl = (p[0] & 15) * 4, proto = p[9];
+            uint to = IpH(b, o + 16);
+            if (CzNoZ.Contains(to) || !CzInSet(IpH(b, o + 12))) return false;
+            Interlocked.Increment(ref CzLeakDrop); Interlocked.Increment(ref CzC(to).Leak); return true;
+        }
+        // ответы ретранслятора клиенту: адрес и порт ПК → исходный адрес и порт сайта
+        static bool CzOnNet(byte[] b, int o, int n, ref WdAddr a)
+        {
+            int ihl = (b[o] & 15) * 4; uint dst = IpH(b, o + 16); int dport = (b[o + ihl + 2] << 8) | b[o + ihl + 3];
+            CzTcpFlow f; lock (CzLock) CzTcp.TryGetValue(((ulong)dst << 16) | (uint)dport, out f);
+            if (f == null) { Interlocked.Increment(ref CzNetMiss); return false; }
+            PutIp(b, o + 12, f.Dst); b[o + ihl] = (byte)(f.DPort >> 8); b[o + ihl + 1] = (byte)f.DPort;
+            CsFix(b, o, n); Interlocked.Increment(ref CzNetRw);
+            return false;
+        }
+        // транзит клиента: к адресам zapret — на ретранслятор (TCP) или от имени ПК (UDP); остальное — как было
+        static bool CzOnFwd(byte[] b, int o, int n, ref WdAddr addr)
+        {
+            Interlocked.Increment(ref CzPkts);
+            int ihl = (b[o] & 15) * 4, proto = b[o + 9];
             if (n < ihl + 8) return false;
-            uint src = IpH(p, 12), dst = IpH(p, 16);
+            uint src = IpH(b, o + 12), dst = IpH(b, o + 16);
             var cl = CzC(src); Interlocked.Increment(ref cl.Pkts);
-            if (CzNoZ.Contains(src) || !CzInSet(dst)) return false;
-            Interlocked.Increment(ref cl.ZPkts); cl.LastZ = DateTime.Now;
-            int sport = (p[ihl] << 8) | p[ihl + 1], dport = (p[ihl + 2] << 8) | p[ihl + 3];
+            if (CzNoZ.Contains(src) || !CzInSet(dst)) { Interlocked.Increment(ref CzPass); return false; }
+            Interlocked.Increment(ref cl.ZPkts); cl.LastZ = DateTime.UtcNow;
+            int sport = (b[o + ihl] << 8) | b[o + ihl + 1], dport = (b[o + ihl + 2] << 8) | b[o + ihl + 3];
             if (proto == 6) {
-                if (n > 1300) Interlocked.Increment(ref CzFwdBig);
-                if (n > Interlocked.Read(ref CzFwdMax)) Interlocked.Exchange(ref CzFwdMax, n);
+                if (n < ihl + 20) return true;
                 ulong key = ((ulong)src << 16) | (uint)sport;
                 // поддельные пакеты (их шлют средства обхода DPI на стороне клиента: zapret, роутер с «байпасом») — отбросить, как это сделали бы
                 // сеть или сервер; иначе ретранслятор примет подделку за данные и испортит соединение
-                string fake = CzFakeReason(p, ihl, n, key, dst, dport);
-                if (fake != null) { CzTrace(key, "клиент→ ОТБРОШЕН (" + fake + ")", p, ihl, n); return true; }
+                if (CzFake(b, o, ihl, n, key, dst, dport)) return true;
                 // SYN: уменьшить MSS клиента — ответы ретранслятора не должны быть больше MTU туннеля клиента (часто 1280)
-                if ((p[ihl + 13] & 0x02) != 0) {
-                    CzClampMss(p, ihl, n, src, sport);
-                    lock (CzTraced) {
-                        if (CfgBool("ws4w.clientTrace", false) && (DateTime.Now - CzTraceAt).TotalSeconds >= 120) { CzTraced.Clear(); CzTraceAt = DateTime.Now; CzTraceLeft = 150; }
-                        if (CzTraced.Count < 3 && dport == 443) CzTraced.Add(key);
-                    }
-                }
-                CzTrace(key, "клиент→", p, ihl, n);
+                if ((b[o + ihl + 13] & 0x02) != 0) CzClampMss(b, o, ihl, n);
                 // к ретранслятору на ПК: как будто клиент подключился к адресу ПК в сети wg_server
+                var p = new byte[n]; Buffer.BlockCopy(b, o, p, 0, n);
                 PutIp(p, 16, CzWgIp); p[ihl + 2] = (byte)(CzRelayPort >> 8); p[ihl + 3] = (byte)(CzRelayPort & 0xFF);
+                CsFix(p, 0, n);
                 var a = new WdAddr { Flags = WdLayerNetwork, IfIdx = (uint)CzWgIdx, SubIfIdx = 0 };     // входящий на wg_server
-                WinDivertHelperCalcChecksums(p, (uint)n, ref a, 0);
                 uint sl; var nh = CzNet; if (nh != WdInvalid) WinDivertSend(nh, p, (uint)n, out sl, ref a);
                 return true;
             }
             if (proto == 17) {
                 int ulen = n - ihl - 8; if (ulen < 0) return true;
                 // QUIC (UDP 443): по умолчанию отбрасываем — YouTube и браузеры сразу переходят на TCP, а TCP идёт через ретранслятор и winws
-                if (dport == 443 && CfgStr("ws4w.clientQuic", "drop") != "relay") { Interlocked.Increment(ref CzQuicDrop); Interlocked.Increment(ref cl.Quic); return true; }
-                string key = src + ":" + sport + ">" + dst + ":" + dport; CzUdpFlow f;
+                if (dport == 443 && !CzQuicRelay) { Interlocked.Increment(ref CzQuicDrop); Interlocked.Increment(ref cl.Quic); return true; }
+                var key = new CzUdpKey { A = ((ulong)src << 16) | (uint)sport, B = ((ulong)dst << 16) | (uint)dport }; CzUdpFlow f;
                 lock (CzLock) {
                     if (!CzUdp.TryGetValue(key, out f)) {
                         var s = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-                        s.Connect(new IPEndPoint(IPAddress.Parse(IpS(dst)), dport));
+                        s.Connect(new IPEndPoint(IpA(dst), dport));
                         f = new CzUdpFlow { Client = src, CPort = sport, Dst = dst, DPort = dport, Sock = s };
                         CzUdp[key] = f; var ff = f;
                         new Thread(() => CzUdpRecv(ff)) { IsBackground = true }.Start();
                     }
-                    f.Last = DateTime.Now;
+                    f.Last = DateTime.UtcNow;
                 }
-                try { f.Sock.Send(p, ihl + 8, ulen, SocketFlags.None); Interlocked.Increment(ref CzUdpPkts); Interlocked.Add(ref CzBytes, ulen); } catch { Interlocked.Increment(ref CzErrors); }
+                try { f.Sock.Send(b, o + ihl + 8, ulen, SocketFlags.None); Interlocked.Increment(ref CzUdpPkts); Interlocked.Add(ref CzBytes, ulen); } catch { Interlocked.Increment(ref CzErrors); }
                 return true;
             }
             return false;
         }
         // подделка? неверная сумма TCP / опция MD5 / TTL ниже, чем у SYN / метка времени из прошлого / данные без ACK
-        static string CzFakeReason(byte[] p, int ihl, int n, ulong key, uint dst, int dport)
+        static bool CzFake(byte[] b, int o, int ihl, int n, ulong key, uint dst, int dport)
         {
-            int flags = p[ihl + 13], doff = (p[ihl + 12] >> 4) * 4, dlen = n - ihl - doff, ttl = p[8];
+            int t = o + ihl, flags = b[t + 13], doff = (b[t + 12] >> 4) * 4, dlen = n - ihl - doff, ttl = b[o + 8];
             bool syn = (flags & 0x02) != 0, ack = (flags & 0x10) != 0, rst = (flags & 0x04) != 0;
-            // контрольная сумма: посчитать на копии и сравнить с той, что пришла
-            var cp = new byte[n]; Buffer.BlockCopy(p, 0, cp, 0, n); var ca = new WdAddr(); WinDivertHelperCalcChecksums(cp, (uint)n, ref ca, 0);
-            long chk = Interlocked.Increment(ref CzSumChecked);
-            if (!CzSumOff && (cp[ihl + 16] != p[ihl + 16] || cp[ihl + 17] != p[ihl + 17])) {
-                long bad = Interlocked.Increment(ref CzDropSum);
-                // предохранитель: если «неверных» больше половины — суммы, видимо, досчитывает адаптер; проверку отключить
-                if (chk >= 200 && bad * 2 > chk) { CzSumOff = true; Log("zapret для клиентов: проверка контрольных сумм отключена — неверных " + bad + " из " + chk + " (их, видимо, досчитывает адаптер)", "WARN"); }
-                else return "неверная сумма";
+            if (!CzSumOff) {
+                long chk = Interlocked.Increment(ref CzSumChecked);
+                if (CsL4(b, o, ihl, n) != 0) {
+                    long bad = Interlocked.Increment(ref CzDropSum);
+                    // предохранитель: если «неверных» больше половины — суммы, видимо, досчитывает адаптер; проверку отключить
+                    if (chk >= 200 && bad * 2 > chk) { CzSumOff = true; Log("zapret для клиентов: проверка контрольных сумм отключена — неверных " + bad + " из " + chk + " (их, видимо, досчитывает адаптер)", "WARN"); }
+                    else return true;
+                }
             }
             bool md5 = false, hasTs = false; uint ts = 0;
-            for (int o = ihl + 20, end = Math.Min(n, ihl + doff); o < end; ) {
-                int kind = p[o]; if (kind == 0) break; if (kind == 1) { o++; continue; }
-                if (o + 1 >= end) break; int l = p[o + 1]; if (l < 2 || o + l > end) break;
+            for (int p = t + 20, end = Math.Min(o + n, t + doff); p < end; ) {
+                int kind = b[p]; if (kind == 0) break; if (kind == 1) { p++; continue; }
+                if (p + 1 >= end) break; int l = b[p + 1]; if (l < 2 || p + l > end) break;
                 if (kind == 19) md5 = true;
-                if (kind == 8 && l == 10) { hasTs = true; ts = IpH(p, o + 2); }
-                o += l;
+                if (kind == 8 && l == 10) { hasTs = true; ts = IpH(b, p + 2); }
+                p += l;
             }
-            if (md5) { Interlocked.Increment(ref CzDropMd5); return "опция MD5"; }
+            if (md5) { Interlocked.Increment(ref CzDropMd5); return true; }
             CzTcpFlow f;
             lock (CzLock) {
-                if (syn && !ack) { f = new CzTcpFlow { Dst = dst, DPort = dport, SynTtl = ttl }; CzTcp[key] = f; }
-                else if (!CzTcp.TryGetValue(key, out f) || f.Dst != dst || f.DPort != dport) { f = new CzTcpFlow { Dst = dst, DPort = dport, SynTtl = ttl }; CzTcp[key] = f; }
-                f.Last = DateTime.Now;
+                if ((syn && !ack) || !CzTcp.TryGetValue(key, out f) || f.Dst != dst || f.DPort != dport) { f = new CzTcpFlow { Dst = dst, DPort = dport, SynTtl = ttl }; CzTcp[key] = f; }
+                f.Last = DateTime.UtcNow;
             }
-            if (f.SynTtl > 0 && ttl + 2 < f.SynTtl) { Interlocked.Increment(ref CzDropTtl); return "TTL " + ttl + " при " + f.SynTtl + " у SYN"; }
-            if (!syn && !ack && !rst && dlen > 0) { Interlocked.Increment(ref CzDropNoAck); return "данные без ACK"; }
+            if (f.SynTtl > 0 && ttl + 2 < f.SynTtl) { Interlocked.Increment(ref CzDropTtl); return true; }
+            if (!syn && !ack && !rst && dlen > 0) { Interlocked.Increment(ref CzDropNoAck); return true; }
             if (hasTs) {
-                if (f.HasTs && (int)(ts - f.MaxTs) < -10000) { Interlocked.Increment(ref CzDropTs); return "метка времени из прошлого"; }
+                if (f.HasTs && (int)(ts - f.MaxTs) < -10000) { Interlocked.Increment(ref CzDropTs); return true; }
                 if (!f.HasTs || (int)(ts - f.MaxTs) > 0) { f.MaxTs = ts; f.HasTs = true; }
             }
-            return null;
+            return false;
         }
-        // трассировка пакетов первых соединений (флаги, seq/ack, длина данных) — для поиска поломок
-        static void CzTrace(ulong key, string dir, byte[] p, int ihl, int n)
+        static void CzClampMss(byte[] b, int o, int ihl, int n)
         {
-            bool on; lock (CzTraced) on = CzTraced.Contains(key) && CzTraceLeft > 0; if (!on) return;
-            if (Interlocked.Decrement(ref CzTraceLeft) < 0) return;
-            int f = p[ihl + 13], doff = (p[ihl + 12] >> 4) * 4, dl = n - ihl - doff;
-            string fl = ((f & 2) != 0 ? "S" : "") + ((f & 16) != 0 ? "A" : "") + ((f & 8) != 0 ? "P" : "") + ((f & 1) != 0 ? "F" : "") + ((f & 4) != 0 ? "R" : "");
-            uint seq = IpH(p, ihl + 4), ack = IpH(p, ihl + 8); int win = (p[ihl + 14] << 8) | p[ihl + 15];
-            Log("трасса " + (CzSw.ElapsedMilliseconds % 100000).ToString("00000") + "мс " + IpS((uint)(key >> 16)) + ":" + (key & 0xFFFF) + " " + dir + " " + fl + " seq=" + seq + " ack=" + ack + " len=" + dl + " win=" + win + " ip=" + n + " id=" + ((p[4] << 8) | p[5]) + " ttl=" + p[8], "INFO");
-        }
-        static void CzClampMss(byte[] p, int ihl, int n, uint src, int sport)
-        {
-            int max = Math.Max(536, CfgInt("ws4w.clientMss", 1200));
-            int doff = (p[ihl + 12] >> 4) * 4, o = ihl + 20, end = Math.Min(n, ihl + doff); int seen = -1;
-            while (o < end) {
-                int kind = p[o]; if (kind == 0) break; if (kind == 1) { o++; continue; }
-                if (o + 1 >= end) break; int l = p[o + 1]; if (l < 2 || o + l > end) break;
-                if (kind == 2 && l == 4) {
-                    seen = (p[o + 2] << 8) | p[o + 3];
-                    if (seen > max) { p[o + 2] = (byte)(max >> 8); p[o + 3] = (byte)(max & 0xFF); Interlocked.Increment(ref CzMssClamped); }
-                }
-                o += l;
+            int t = o + ihl, doff = (b[t + 12] >> 4) * 4, p = t + 20, end = Math.Min(o + n, t + doff), max = CzMss;
+            while (p < end) {
+                int kind = b[p]; if (kind == 0) break; if (kind == 1) { p++; continue; }
+                if (p + 1 >= end) break; int l = b[p + 1]; if (l < 2 || p + l > end) break;
+                if (kind == 2 && l == 4 && ((b[p + 2] << 8) | b[p + 3]) > max) { b[p + 2] = (byte)(max >> 8); b[p + 3] = (byte)(max & 0xFF); Interlocked.Increment(ref CzMssClamped); }
+                p += l;
             }
-            if (Interlocked.Increment(ref CzSynLogged) <= 3) Log("zapret для клиентов: SYN от " + IpS(src) + ":" + sport + ", MSS клиента " + (seen < 0 ? "нет" : seen.ToString()) + (seen > max ? " → " + max : ""), "INFO");
         }
         // ответы сайта по UDP → клиенту, пакетом с адреса и порта сайта
         static void CzUdpRecv(CzUdpFlow f)
@@ -376,74 +371,69 @@ namespace VpnGuard
             var buf = new byte[65535];
             while (true) {
                 int n; try { n = f.Sock.Receive(buf); } catch (SocketException e) { if (e.SocketErrorCode == SocketError.ConnectionReset) continue; return; } catch { return; }
-                f.Last = DateTime.Now;
+                f.Last = DateTime.UtcNow;
                 var p = new byte[28 + n];
                 p[0] = 0x45; p[2] = (byte)(p.Length >> 8); p[3] = (byte)p.Length; p[6] = 0x40; p[8] = 64; p[9] = 17;
                 PutIp(p, 12, f.Dst); PutIp(p, 16, f.Client);
                 p[20] = (byte)(f.DPort >> 8); p[21] = (byte)f.DPort; p[22] = (byte)(f.CPort >> 8); p[23] = (byte)f.CPort; p[24] = (byte)((8 + n) >> 8); p[25] = (byte)(8 + n);
                 Buffer.BlockCopy(buf, 0, p, 28, n);
+                CsFix(p, 0, p.Length);
                 var a = new WdAddr { Flags = WdLayerNetwork | WdOutbound, IfIdx = (uint)CzWgIdx };
-                WinDivertHelperCalcChecksums(p, (uint)p.Length, ref a, 0);
                 uint sl; var nh = CzNet; if (nh == WdInvalid) return;
                 if (WinDivertSend(nh, p, (uint)p.Length, out sl, ref a)) Interlocked.Add(ref CzUdpDown, n); else Interlocked.Increment(ref CzUdpSendFail);
                 Interlocked.Add(ref CzBytes, n);
             }
         }
-        // ответы ретранслятора клиенту: адрес и порт ПК → исходный адрес и порт сайта
-        static void CzNetLoop(IntPtr h)
-        {
-            var pkt = new byte[65535]; var addr = new WdAddr(); uint len;
-            while (true) {
-                if (!WinDivertRecv(h, pkt, (uint)pkt.Length, out len, ref addr)) { if (CzNet != h) return; Thread.Sleep(5); continue; }
-                try {
-                    int ihl = (pkt[0] & 15) * 4; uint dst = IpH(pkt, 16); int dport = (pkt[ihl + 2] << 8) | pkt[ihl + 3];
-                    CzTcpFlow f; lock (CzLock) CzTcp.TryGetValue(((ulong)dst << 16) | (uint)dport, out f);
-                    if (f != null) {
-                        PutIp(pkt, 12, f.Dst); pkt[ihl] = (byte)(f.DPort >> 8); pkt[ihl + 1] = (byte)f.DPort;
-                        WinDivertHelperCalcChecksums(pkt, len, ref addr, 0);
-                        Interlocked.Increment(ref CzNetRw); if (len > 1500) Interlocked.Increment(ref CzNetBig);
-                        CzTrace(((ulong)dst << 16) | (uint)dport, "→клиенту", pkt, ihl, (int)len);
-                        if (len > Interlocked.Read(ref CzNetMax)) Interlocked.Exchange(ref CzNetMax, len);
-                    } else Interlocked.Increment(ref CzNetMiss);
-                } catch { Interlocked.Increment(ref CzErrors); }
-                uint sl; if (!WinDivertSend(h, pkt, len, out sl, ref addr)) Interlocked.Increment(ref CzNetSendFail);
-            }
-        }
 
         // ---------------------------------------------------------------- ретранслятор TCP: соединение к тому же адресу — уже от ПК (через winws)
-        static void CzAcceptLoop(TcpListener l)
+        // асинхронно: без двух потоков на каждое соединение
+        static async void CzAcceptLoop(TcpListener l)
         {
             while (true) {
-                TcpClient c; try { c = l.AcceptTcpClient(); } catch { return; }
-                new Thread(() => { try { CzRelayConn(c); } catch { } finally { try { c.Close(); } catch { } } }) { IsBackground = true }.Start();
+                TcpClient c = null; try { c = await l.AcceptTcpClientAsync().ConfigureAwait(false); } catch { if (CzRelay != l) return; }
+                if (c == null) { await Task.Delay(100).ConfigureAwait(false); continue; }
+                CzRelayConn(c);
             }
         }
-        static void CzRelayConn(TcpClient c)
+        static async void CzRelayConn(TcpClient c)
         {
-            var ep = (IPEndPoint)c.Client.RemoteEndPoint; uint cip = IpH(ep.Address.GetAddressBytes(), 0);
-            CzTcpFlow f; lock (CzLock) CzTcp.TryGetValue(((ulong)cip << 16) | (uint)ep.Port, out f);
-            if (f == null) { Interlocked.Increment(ref CzRelayNoFlow); return; }
-            c.NoDelay = true; var cl = CzC(cip);
-            var srv = new TcpClient(AddressFamily.InterNetwork) { NoDelay = true };
+            var srv = new TcpClient(AddressFamily.InterNetwork) { NoDelay = true }; bool counted = false;
             try {
-                var ar = srv.BeginConnect(IPAddress.Parse(IpS(f.Dst)), f.DPort, null, null);
-                if (!ar.AsyncWaitHandle.WaitOne(15000)) { Interlocked.Increment(ref CzConnFail); Interlocked.Increment(ref cl.Fail); return; }
-                try { srv.EndConnect(ar); } catch { Interlocked.Increment(ref CzConnFail); Interlocked.Increment(ref cl.Fail); return; }
-                Interlocked.Increment(ref CzTcpConns); Interlocked.Increment(ref CzActive); Interlocked.Increment(ref cl.Conns);
-                var cs = c.GetStream(); var ss = srv.GetStream();
-                long[] cnt = new long[2]; var t0 = DateTime.Now; string first = null; long connMs = CzSw.ElapsedMilliseconds;
-                var up = new Thread(() => { cnt[0] = CzPump(cs, ss, f, true, cl); lock (cnt) if (first == null) first = "клиент"; try { srv.Client.Shutdown(SocketShutdown.Send); } catch { } }) { IsBackground = true }; up.Start();
-                cnt[1] = CzPump(ss, cs, f, false, cl); lock (cnt) if (first == null) first = "сайт"; try { c.Client.Shutdown(SocketShutdown.Send); } catch { }
-                up.Join(60000);
+                var ep = (IPEndPoint)c.Client.RemoteEndPoint; uint cip = IpH(ep.Address.GetAddressBytes(), 0);
+                CzTcpFlow f; lock (CzLock) CzTcp.TryGetValue(((ulong)cip << 16) | (uint)ep.Port, out f);
+                if (f == null) { Interlocked.Increment(ref CzRelayNoFlow); return; }
+                c.NoDelay = true; var cl = CzC(cip);
+                var conn = srv.ConnectAsync(IpA(f.Dst), f.DPort);
+                if (await Task.WhenAny(conn, Task.Delay(15000)).ConfigureAwait(false) != conn || conn.IsFaulted) {
+                    Interlocked.Increment(ref CzConnFail); Interlocked.Increment(ref cl.Fail); var ignore = conn.ContinueWith(t => { var e = t.Exception; }); return;
+                }
+                Interlocked.Increment(ref CzTcpConns); Interlocked.Increment(ref CzActive); Interlocked.Increment(ref cl.Conns); counted = true;
+                var cs = c.GetStream(); var ss = srv.GetStream(); var t0 = DateTime.UtcNow; string first = null;
+                var up = CzPump(cs, ss, f, true, cl).ContinueWith(t => { if (first == null) first = "клиент"; try { srv.Client.Shutdown(SocketShutdown.Send); } catch { } return t.Result; });
+                long down = await CzPump(ss, cs, f, false, cl).ConfigureAwait(false);
+                if (first == null) first = "сайт"; try { c.Client.Shutdown(SocketShutdown.Send); } catch { }
+                await Task.WhenAny(up, Task.Delay(60000)).ConfigureAwait(false);
                 if (Interlocked.Increment(ref cl.Logged) <= 5)
-                    Log("zapret для клиентов: " + ep.Address + ":" + ep.Port + " → " + IpS(f.Dst) + ":" + f.DPort + " · к сайту " + cnt[0] + " Б, к клиенту " + cnt[1] + " Б, " + Math.Round((DateTime.Now - t0).TotalSeconds, 1) + " с, первым закрыл " + first + ", сайт подключён в " + (connMs % 100000).ToString("00000") + "мс", "INFO");
+                    Log("zapret для клиентов: " + ep.Address + ":" + ep.Port + " → " + IpS(f.Dst) + ":" + f.DPort + " · к сайту " + (up.IsCompleted ? up.Result : -1) + " Б, к клиенту " + down + " Б, " +
+                        Math.Round((DateTime.UtcNow - t0).TotalSeconds, 1) + " с, первым закрыл " + first, "INFO");
             } catch { }
-            finally { if (Interlocked.Decrement(ref CzActive) < 0) Interlocked.Exchange(ref CzActive, 0); try { srv.Close(); } catch { } }
+            finally {
+                if (counted && Interlocked.Decrement(ref CzActive) < 0) Interlocked.Exchange(ref CzActive, 0);
+                try { srv.Close(); } catch { } try { c.Close(); } catch { }
+            }
         }
-        static long CzPump(Stream a, Stream b, CzTcpFlow f, bool up, CzCli cl)
+        static async Task<long> CzPump(Stream a, Stream b, CzTcpFlow f, bool up, CzCli cl)
         {
-            var bb = new byte[65536]; long total = 0;
-            try { int n; while ((n = a.Read(bb, 0, bb.Length)) > 0) { b.Write(bb, 0, n); total += n; Interlocked.Add(ref CzBytes, n); if (up) { Interlocked.Add(ref CzTcpUp, n); Interlocked.Add(ref cl.Up, n); } else { Interlocked.Add(ref CzTcpDown, n); Interlocked.Add(ref cl.Down, n); } f.Last = DateTime.Now; } } catch { }
+            var bb = new byte[32768]; long total = 0;
+            try {
+                int n;
+                while ((n = await a.ReadAsync(bb, 0, bb.Length).ConfigureAwait(false)) > 0) {
+                    await b.WriteAsync(bb, 0, n).ConfigureAwait(false); total += n;
+                    Interlocked.Add(ref CzBytes, n);
+                    if (up) { Interlocked.Add(ref CzTcpUp, n); Interlocked.Add(ref cl.Up, n); } else { Interlocked.Add(ref CzTcpDown, n); Interlocked.Add(ref cl.Down, n); }
+                    f.Last = DateTime.UtcNow;
+                }
+            } catch { }
             return total;
         }
 
@@ -454,16 +444,15 @@ namespace VpnGuard
             return new Dictionary<string, object> { { "enabled", CzWanted() }, { "running", CzFwd != WdInvalid }, { "error", CzError },
                 { "packets", Interlocked.Read(ref CzPkts) }, { "passed", Interlocked.Read(ref CzPass) }, { "tcpConns", Interlocked.Read(ref CzTcpConns) }, { "active", CzActive },
                 { "tcpFlows", tcpN }, { "udpFlows", udpN }, { "udpPackets", Interlocked.Read(ref CzUdpPkts) }, { "mb", Math.Round(Interlocked.Read(ref CzBytes) / 1048576.0, 1) },
-                { "errors", Interlocked.Read(ref CzErrors) }, { "relay", CzFwd != WdInvalid ? IpS(CzWgIp) + ":" + CzRelayPort : "" },
-                { "ifWg", CzWgIdx }, { "ifEth", CzEthIdx }, { "probe", CzProbeCopy() },
+                { "errors", Interlocked.Read(ref CzErrors) }, { "relay", CzFwd != WdInvalid ? IpS(CzWgIp) + ":" + CzRelayPort : "" }, { "ifWg", CzWgIdx }, { "ifEth", CzEthIdx },
+                { "ranges", CzSet.Lo.Length },
                 { "tcpUpKb", Interlocked.Read(ref CzTcpUp) / 1024 }, { "tcpDownKb", Interlocked.Read(ref CzTcpDown) / 1024 }, { "udpDownKb", Interlocked.Read(ref CzUdpDown) / 1024 },
                 { "udpSendFail", Interlocked.Read(ref CzUdpSendFail) }, { "quicDropped", Interlocked.Read(ref CzQuicDrop) }, { "netRewritten", Interlocked.Read(ref CzNetRw) },
-                { "netNoFlow", Interlocked.Read(ref CzNetMiss) }, { "netBig", Interlocked.Read(ref CzNetBig) }, { "netSendFail", Interlocked.Read(ref CzNetSendFail) },
-                { "relayNoFlow", Interlocked.Read(ref CzRelayNoFlow) }, { "connFail", Interlocked.Read(ref CzConnFail) },
-                { "leakDropped", Interlocked.Read(ref CzLeakDrop) }, { "mssClamped", Interlocked.Read(ref CzMssClamped) }, { "dropBadSum", Interlocked.Read(ref CzDropSum) }, { "dropMd5", Interlocked.Read(ref CzDropMd5) },
-                { "dropTtl", Interlocked.Read(ref CzDropTtl) }, { "dropTs", Interlocked.Read(ref CzDropTs) }, { "dropNoAck", Interlocked.Read(ref CzDropNoAck) }, { "fwdBig", Interlocked.Read(ref CzFwdBig) }, { "fwdMax", Interlocked.Read(ref CzFwdMax) }, { "netMax", Interlocked.Read(ref CzNetMax) } };
+                { "netNoFlow", Interlocked.Read(ref CzNetMiss) }, { "sendFail", Interlocked.Read(ref CzNetSendFail) },
+                { "relayNoFlow", Interlocked.Read(ref CzRelayNoFlow) }, { "connFail", Interlocked.Read(ref CzConnFail) }, { "leakDropped", Interlocked.Read(ref CzLeakDrop) },
+                { "mssClamped", Interlocked.Read(ref CzMssClamped) }, { "dropBadSum", Interlocked.Read(ref CzDropSum) }, { "dropMd5", Interlocked.Read(ref CzDropMd5) },
+                { "dropTtl", Interlocked.Read(ref CzDropTtl) }, { "dropTs", Interlocked.Read(ref CzDropTs) }, { "dropNoAck", Interlocked.Read(ref CzDropNoAck) } };
         }
-        static Dictionary<string, object> CzProbeCopy() { lock (CzProbeStat) return CzProbeStat.ToDictionary(x => x.Key, x => (object)x.Value); }
         static string CzSummary()
         {
             if (!CzWanted()) return "выключен (вкладка WG-Server)";
@@ -477,7 +466,7 @@ namespace VpnGuard
         // Конфиг сервера не меняется (его ведёт и WS4W): отключённый клиент просто убирается из работающего туннеля
         // («wg set … peer … remove») и возвращается из конфига, когда его включат. После перезапуска туннеля агент снова уберёт его.
         class WcPeer { public string Key, Ip, Psk, Allowed; public int Keepalive; }
-        static DateTime WcAt = DateTime.MinValue; static string WcErr = ""; static readonly Dictionary<string, int> WcTries = new Dictionary<string, int>();
+        static DateTime WcAt = DateTime.MinValue; static string WcErr = "", WcSig = ""; static readonly Dictionary<string, int> WcTries = new Dictionary<string, int>();
         static string WgExe() { return Path.Combine(Path.GetDirectoryName(CfgStr("ws4w.wireguardExe", @"C:\Program Files\WireGuard\wireguard.exe")), "wg.exe"); }
         static HashSet<string> WcOff() { return new HashSet<string>(CfgList("ws4w.clientOff", new string[0]).Select(x => x.Trim())); }
         static List<WcPeer> WgConfPeers()
@@ -497,7 +486,8 @@ namespace VpnGuard
         }
         static void WgClientsWatch()
         {
-            if ((DateTime.Now - WcAt).TotalSeconds < 10) return; WcAt = DateTime.Now;
+            // wg.exe — раз в минуту или сразу, когда список отключённых изменился
+            var offSig = string.Join(",", WcOff().OrderBy(x => x)); if (offSig == WcSig && (DateTime.UtcNow - WcAt).TotalSeconds < 60) return; WcAt = DateTime.UtcNow; WcSig = offSig;
             var svc = Svc(CfgStr("ws4w.serviceName", "WireGuardTunnel$wg_server")); if (svc == null || svc.Status != System.ServiceProcess.ServiceControllerStatus.Running) return;
             string wg = WgExe(); if (!File.Exists(wg)) return;
             List<WcPeer> conf; try { conf = WgConfPeers(); } catch { return; } if (conf == null) return;

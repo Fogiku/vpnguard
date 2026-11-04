@@ -298,6 +298,9 @@ function Get-RSystem {
         '===== процессы'
         Get-Process | Where-Object { $_.ProcessName -match 'medusa|meduza|winws|wireguard|amnezia|awg|ws4w|WgServer|powershell|VpnGuardWeb|VpnGuardTray|VpnGuardAgent' } |
             Format-Table Id, ProcessName, @{ n = 'CPU,с'; e = { [int]$_.CPU } }, @{ n = 'МБ'; e = { [int]($_.WorkingSet64 / 1MB) } }, StartTime, Responding -AutoSize
+        '===== командные строки (powershell и VpnGuard)'
+        Get-CimInstance Win32_Process -Filter "Name='powershell.exe' or Name like 'VpnGuard%'" -ErrorAction SilentlyContinue |
+            ForEach-Object { $cl = "$($_.CommandLine)" -replace '\s+', ' '; '{0,6}  {1}' -f $_.ProcessId, $cl.Substring(0, [Math]::Min(220, $cl.Length)) }
         '===== службы'
         Get-Service | Where-Object { $_.Name -match 'WireGuard|Amnezia|SharedAccess|zapret|WinDivert|iphlpsvc|Dnscache|BFE|mpssvc|MeduzaVPN' } | Format-Table Name, Status, StartType, DisplayName -AutoSize
         '===== задачи планировщика'
