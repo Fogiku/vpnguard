@@ -2629,8 +2629,9 @@ $timer.Add_Tick({
         $form.Show(); if ($form.WindowState -eq 'Minimized') { $form.WindowState = 'Normal' }
         $form.TopMost = $true; $form.TopMost = $false; $form.Activate()
     }
-    if ($form.WindowState -ne 'Minimized') { Update-All }
-    else { try { Update-LiveTraffic } catch { } }   # график не прерывается, пока окно свёрнуто
+    # окно скрыто в значок у часов или свёрнуто — не перерисовывать страницы, только снимать трафик (график не прерывается)
+    if ($form.Visible -and $form.WindowState -ne 'Minimized') { Update-All }
+    else { try { Update-LiveTraffic } catch { } }
 })
 # код окна обновился (автообновление) — открыть новое окно и закрыть это
 $MonCode = @('VpnGuardMonitor.ps1', 'Amnezia.ps1', 'Wg.ps1', 'Qr.cs')
