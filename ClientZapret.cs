@@ -688,7 +688,24 @@ namespace VpnGuard
             } catch { }
             return false;
         }
-        static void CzRemember(string host, uint ip) { var f = CzFamily(host); if (f != null) CzGoodIp[f] = ip; }
+        static void CzRemember(string host, uint ip)
+        {
+            var f = CzFamily(host); if (f == null) return;
+            CzGoodIp[f] = ip;
+            CzGoodPool.AddOrUpdate(f, new[] { ip }, (k, old) => new[] { ip }.Concat(old.Where(v => v != ip)).Take(6).ToArray());
+        }
+        // удачные недавно адреса семейства (до 6) — чтобы пачку одновременных соединений разнести по разным адресам
+        static readonly ConcurrentDictionary<string, uint[]> CzGoodPool = new ConcurrentDictionary<string, uint[]>();
+        static readonly ConcurrentDictionary<uint, int> CzInFlight = new ConcurrentDictionary<uint, int>();
+        static int CzRr;
+        static uint CzSpread(string host, uint ip, uint dead)
+        {
+            var fam = CzFamily(host); uint[] pool; if (fam == null || !CzGoodPool.TryGetValue(fam, out pool)) return ip;
+            var p = pool.Where(v => v != dead && CzInSet(v)).ToArray(); if (p.Length == 0) return ip;
+            int busy; CzInFlight.TryGetValue(ip, out busy);
+            if (ip != dead && busy < 2) return ip;                      // адрес свободен — как есть
+            return p.OrderBy(v => { int b; CzInFlight.TryGetValue(v, out b); return b; }).ThenBy(v => (v + (uint)Interlocked.Increment(ref CzRr)) % 7).First();
+        }
         static async Task<List<uint>> CzAltIps(string host, uint bad)
         {
             var res = new List<uint>(); var fam = CzFamily(host); if (fam == null) return res;
@@ -704,7 +721,7 @@ namespace VpnGuard
         // соединение с сайтом от имени ПК: маршрут zapret → физический адаптер → winws
         // первый SYN иногда теряется, а Windows повторяет его только через 3 с: нет ответа за 0,5 с — параллельно второе подключение,
         // через 1,5 с — третье; берём то, что ответит первым
-        static long CzConnRetryWin;
+        static long CzConnRetryWin, CzSpreadN;
         // altT — другие адреса того же сайта: повторные подключения идут на них (провайдер иногда на несколько секунд глушит SYN к одному адресу)
         static async Task<KeyValuePair<TcpClient, uint>> CzConnect(uint dst, int port, Task<List<uint>> altT = null)
         {
@@ -714,7 +731,11 @@ namespace VpnGuard
                 while (sw.ElapsedMilliseconds < 10000) {
                     if (next < at.Length && sw.ElapsedMilliseconds >= at[next]) {
                         uint ip = dst;
-                        if (next > 0 && altT != null && altT.Status == TaskStatus.RanToCompletion) { var al = altT.Result.Where(v => v != dst).ToList(); if (al.Count > 0) ip = al[Math.Min(next, al.Count) - 1]; }
+                        if (next > 0) {
+                            var al = altT != null && altT.Status == TaskStatus.RanToCompletion ? altT.Result.Where(v => v != dst).ToList() : new List<uint>();
+                            if (al.Count < next) { next++; continue; }
+                            ip = al[next - 1];
+                        }
                         var s = NoInherit(new TcpClient(AddressFamily.InterNetwork) { NoDelay = true });
                         Task t; try { t = s.ConnectAsync(IpA(ip), port); } catch (Exception e) { var tcs = new TaskCompletionSource<bool>(); tcs.SetException(e); t = tcs.Task; }
                         socks.Add(s); pend.Add(t); ips.Add(ip); next++;
@@ -786,10 +807,14 @@ namespace VpnGuard
                 if (host != null && CzFamily(host) != null && CzRemap.TryGetValue(f.Dst, out rm) && rm.Value > DateTime.UtcNow) cands[0] = rm.Key;   // исходный известен как мёртвый: запасной, а при его сбое — другой из DNS   // этот адрес недавно молчал — сразу на рабочий
                 for (int ai = 0; ai < cands.Count && ai < 2; ai++) {
                     uint dip = cands[ai]; fail = null; rn = 0;
+                    if (host != null && f.DPort == 443) { uint sp = CzSpread(host, dip, CzRemap.ContainsKey(f.Dst) ? f.Dst : 0); if (sp != dip) { Interlocked.Increment(ref CzSpreadN); dip = sp; } }
                     if (srv != null) { try { srv.Close(); } catch { } srv = null; }
                     Task<List<uint>> altT = null;
-                    if (host != null && f.DPort == 443 && CzFamily(host) != null) { uint d0 = f.Dst; altT = CzAltIps(host, dip).ContinueWith(t => t.Result.Where(v => v != d0).ToList()); }
-                    var cr = await CzConnect(dip, f.DPort, altT).ConfigureAwait(false); srv = cr.Key; if (srv != null) dip = cr.Value; tConn = sw0.ElapsedMilliseconds;
+                    if (host != null && f.DPort == 443 && CzFamily(host) != null) { uint d0 = f.Dst; uint d1 = dip; string fam = CzFamily(host); uint[] pool; var pl = CzGoodPool.TryGetValue(fam, out pool) ? pool.Where(v => v != d0 && v != d1 && CzInSet(v)).ToList() : new List<uint>();
+                        altT = pl.Count >= 2 ? Task.FromResult(pl) : CzAltIps(host, dip).ContinueWith(t => pl.Concat(t.Result).Where(v => v != d0 && v != d1).Distinct().ToList()); }
+                    CzInFlight.AddOrUpdate(dip, 1, (k, v) => v + 1);
+                    KeyValuePair<TcpClient, uint> cr;
+                    try { cr = await CzConnect(dip, f.DPort, altT).ConfigureAwait(false); } finally { CzInFlight.AddOrUpdate(dip, 0, (k, v) => Math.Max(0, v - 1)); } srv = cr.Key; if (srv != null) dip = cr.Value; tConn = sw0.ElapsedMilliseconds;
                     if (srv == null) fail = "нет соединения";
                     else {
                         var s0 = srv.GetStream();
@@ -869,7 +894,7 @@ namespace VpnGuard
                 { "packets", Interlocked.Read(ref CzPkts) }, { "passed", Interlocked.Read(ref CzPass) }, { "tcpConns", Interlocked.Read(ref CzTcpConns) }, { "active", CzActive },
                 { "tcpFlows", tcpN }, { "udpFlows", udpN }, { "udpPackets", Interlocked.Read(ref CzUdpPkts) }, { "mb", Math.Round(Interlocked.Read(ref CzBytes) / 1048576.0, 1) },
                 { "errors", Interlocked.Read(ref CzErrors) }, { "relay", CzFwd != WdInvalid ? IpS(CzWgIp) + ":" + CzRelayPort : "" }, { "ifWg", CzWgIdx }, { "ifEth", CzEthIdx },
-                { "ranges", CzSet.Lo.Length }, { "bypass", CzBypass.Count }, { "remap", CzRemap.Count }, { "videoVpn", Interlocked.Read(ref CzVideoToVpn) }, { "quicRejected", Interlocked.Read(ref CzIcmpSent) }, { "connRetryWins", Interlocked.Read(ref CzConnRetryWin) }, { "hostVpn", Interlocked.Read(ref CzHostToVpn) }, { "badHosts", CzBadHost.Count }, { "stubs", Interlocked.Read(ref CzStubs) }, { "bypassAdded", Interlocked.Read(ref CzBypassAdded) }, { "bypassPkts", Interlocked.Read(ref CzBypassPkts) },
+                { "ranges", CzSet.Lo.Length }, { "bypass", CzBypass.Count }, { "remap", CzRemap.Count }, { "videoVpn", Interlocked.Read(ref CzVideoToVpn) }, { "quicRejected", Interlocked.Read(ref CzIcmpSent) }, { "connRetryWins", Interlocked.Read(ref CzConnRetryWin) }, { "spread", Interlocked.Read(ref CzSpreadN) }, { "hostVpn", Interlocked.Read(ref CzHostToVpn) }, { "badHosts", CzBadHost.Count }, { "stubs", Interlocked.Read(ref CzStubs) }, { "bypassAdded", Interlocked.Read(ref CzBypassAdded) }, { "bypassPkts", Interlocked.Read(ref CzBypassPkts) },
                 { "noHost", Interlocked.Read(ref CzNoHost) }, { "winwsProfiles", CzProfs.Count }, { "rate", CzRates() },
                 { "tcpUpKb", Interlocked.Read(ref CzTcpUp) / 1024 }, { "tcpDownKb", Interlocked.Read(ref CzTcpDown) / 1024 }, { "udpDownKb", Interlocked.Read(ref CzUdpDown) / 1024 },
                 { "udpSendFail", Interlocked.Read(ref CzUdpSendFail) }, { "quicDropped", Interlocked.Read(ref CzQuicDrop) }, { "netRewritten", Interlocked.Read(ref CzNetRw) },
