@@ -196,9 +196,10 @@ namespace VpnGuard
             var hb = WinDivertOpen(bf, WdLayerForward, 0, 0);
             if (hb == WdInvalid) Log("zapret для клиентов: фильтр ответов не открылся, код " + Marshal.GetLastWin32Error() + " — соединения могут рваться", "ERROR");
             var hv = WinDivertOpen("outbound and ip and tcp and tcp.SrcPort >= " + CzVpnPortLo + " and tcp.SrcPort <= " + CzVpnPortHi, WdLayerNetwork, 100, 0);
-            if (hv == WdInvalid) Log("zapret для клиентов: перехват выхода через VPN не открылся, код " + Marshal.GetLastWin32Error() + " — сайты вне списков zapret пойдут напрямую", "WARN");
-            CzFakeIp = IpH(sub + ".254"); if (CzFakeIp == CzWgIp) CzFakeIp = IpH(sub + ".253");
-            CzFwd = hf; CzNet = hn; CzBlk = hb; CzRelay = relay; CzVpnH = hv; CzVpnOk = false;
+            var hs2 = hv == WdInvalid ? WdInvalid : WinDivertOpen("false", WdLayerForward, 0, 8 /* SEND_ONLY */);
+            if (hv == WdInvalid || hs2 == WdInvalid) Log("zapret для клиентов: перехват выхода через VPN не открылся, код " + Marshal.GetLastWin32Error() + " — сайты вне списков zapret пойдут напрямую", "WARN");
+            CzFwd = hf; CzNet = hn; CzBlk = hb; CzRelay = relay; CzVpnH = hs2 == WdInvalid ? WdInvalid : hv; CzVpnSend = hs2; CzVpnOk = false;
+            if (hs2 == WdInvalid && hv != WdInvalid) { WinDivertClose(hv); hv = WdInvalid; }
             foreach (var cc in CzClients.Values) cc.Logged = 0;
             new Thread(() => CzBatchLoop(hf, () => CzFwd, CzOnFwd)) { IsBackground = true, Name = "cz-fwd" }.Start();
             new Thread(() => CzBatchLoop(hn, () => CzNet, CzOnNet)) { IsBackground = true, Name = "cz-net" }.Start();
@@ -209,7 +210,7 @@ namespace VpnGuard
         }
         static void CzStop()
         {
-            var hs = new[] { CzBlk, CzFwd, CzNet, CzVpnH }; CzBlk = WdInvalid; CzFwd = WdInvalid; CzNet = WdInvalid; CzVpnH = WdInvalid; CzVpnOk = false; CzVpnTestSig = "";
+            var hs = new[] { CzBlk, CzFwd, CzNet, CzVpnH, CzVpnSend }; CzBlk = WdInvalid; CzFwd = WdInvalid; CzNet = WdInvalid; CzVpnH = WdInvalid; CzVpnSend = WdInvalid; CzVpnOk = false; CzVpnTestSig = "";
             foreach (var h in hs) try { if (h != WdInvalid) WinDivertClose(h); } catch { }
             try { if (CzRelay != null) CzRelay.Stop(); } catch { }
             CzRelay = null; CzSig = "";
@@ -289,36 +290,22 @@ namespace VpnGuard
         static bool CzOnBlk(byte[] b, int o, int n, ref WdAddr a)
         {
             uint to = IpH(b, o + 16);
-            if (to == CzFakeIp) { CzVpnReply(b, o, n); return true; }
             if (CzNoZ.Contains(to) || !CzInSet(IpH(b, o + 12))) return false;
             Interlocked.Increment(ref CzLeakDrop); Interlocked.Increment(ref CzC(to).Leak); return true;
         }
-        // исходящий пакет VPN-соединения ретранслятора: адрес ПК → .254, на вход wg_server (раздача отправит его в туннель)
+        // исходящий пакет VPN-соединения ретранслятора, который маршрут отправил не в туннель: отправить в интерфейс туннеля самим
         static bool CzOnVpnOut(byte[] b, int o, int n, ref WdAddr a)
         {
             int ihl = (b[o] & 15) * 4; if (n < ihl + 20) return false;
-            int sport = (b[o + ihl] << 8) | b[o + ihl + 1];
-            CzVpnSrc[sport] = IpH(b, o + 12);
+            string vip = CzVpnIp; int vidx = CzVpnIdx;
+            if (vip == null || vidx <= 0 || IpH(b, o + 12) != IpH(vip) || a.IfIdx == (uint)vidx) return false;
             var p = new byte[n]; Buffer.BlockCopy(b, o, p, 0, n);
-            PutIp(p, 12, CzFakeIp);
-            if ((p[ihl + 13] & 0x02) != 0) CzClampMss(p, 0, ihl, n);
+            if ((p[ihl + 13] & 0x02) != 0) CzClampMss(p, 0, ihl, n);       // SYN: сегменты — по MTU туннеля, а не физического адаптера
             CsFix(p, 0, n);
-            var ia = new WdAddr { Flags = WdLayerNetwork, IfIdx = (uint)CzWgIdx, SubIfIdx = 0 };     // входящий на wg_server
-            uint sl; var nh = CzNet; if (nh != WdInvalid && WinDivertSend(nh, p, (uint)n, out sl, ref ia)) Interlocked.Increment(ref CzVpnPkts);
+            var fa = new WdAddr { Flags = (uint)WdLayerForward | WdOutbound, IfIdx = (uint)vidx, SubIfIdx = 0 };
+            uint sl; var sh = CzVpnSend;
+            if (sh != WdInvalid && WinDivertSend(sh, p, (uint)n, out sl, ref fa)) Interlocked.Increment(ref CzVpnPkts); else Interlocked.Increment(ref CzVpnBack);
             return true;
-        }
-        // ответ сайта «клиенту .254» (после NAT раздачи) → сокету ретранслятора на ПК
-        static void CzVpnReply(byte[] b, int o, int n)
-        {
-            int ihl = (b[o] & 15) * 4; if (b[o + 9] != 6 || n < ihl + 20) return;
-            int dport = (b[o + ihl + 2] << 8) | b[o + ihl + 3]; uint orig;
-            if (!CzVpnSrc.TryGetValue(dport, out orig)) return;
-            var p = new byte[n]; Buffer.BlockCopy(b, o, p, 0, n);
-            PutIp(p, 16, orig);
-            if ((p[ihl + 13] & 0x02) != 0) CzClampMss(p, 0, ihl, n);
-            CsFix(p, 0, n);
-            var ia = new WdAddr { Flags = WdLayerNetwork, IfIdx = (uint)CzEthIdx, SubIfIdx = 0 };      // входящий на физическом адаптере
-            uint sl; var nh = CzNet; if (nh != WdInvalid && WinDivertSend(nh, p, (uint)n, out sl, ref ia)) Interlocked.Increment(ref CzVpnBack);
         }
         // ответы ретранслятора клиенту: адрес и порт ПК → исходный адрес и порт сайта
         static bool CzOnNet(byte[] b, int o, int n, ref WdAddr a)
@@ -337,7 +324,6 @@ namespace VpnGuard
             int ihl = (b[o] & 15) * 4, proto = b[o + 9];
             if (n < ihl + 8) return false;
             uint src = IpH(b, o + 12), dst = IpH(b, o + 16);
-            if (src == CzFakeIp) return false;                                   // выход ретранслятора через VPN — пусть раздача отправит его в туннель
             var cl = CzC(src); Interlocked.Increment(ref cl.Pkts);
             if (CzNoZ.Contains(src) || !CzInSet(dst)) { Interlocked.Increment(ref CzPass); return false; }
             Interlocked.Increment(ref cl.ZPkts); cl.LastZ = DateTime.UtcNow;
@@ -454,13 +440,12 @@ namespace VpnGuard
         class CzProf { public List<int[]> Ports = new List<int[]>(); public HashSet<string> Hosts, HostEx; public CzRanges Ips, IpEx; }
         static volatile List<CzProf> CzProfs = new List<CzProf>(); static string CzProfKey = ""; static int CzWArgsPid; static string CzWArgs = "";
         static volatile string CzVpnIp; static volatile int CzVpnIdx; static int CzFallbackMs = 4000;
-        // выход ретранслятора через VPN — тем же путём, что у клиентов: через раздачу Windows. Маршрут zapret отправил бы соединение
-        // к адресу zapret в физический адаптер (адрес/интерфейс сокета Windows тут не переопределяет), поэтому пакеты таких соединений
-        // (локальные порты 47000–47999) агент подаёт на вход wg_server от имени несуществующего клиента (.254) — раздача шлёт их в туннель
-        // с NAT, а ответы ему агент возвращает сокету.
+        // выход ретранслятора через VPN. Сокет привязан к адресу туннеля, но маршрут zapret (адрес сайта → физический адаптер) Windows
+        // ставит выше адреса и интерфейса сокета — пакеты ушли бы в физический адаптер с адресом туннеля. Поэтому исходящие пакеты таких
+        // соединений (локальные порты 47000–47999) агент перехватывает и отправляет сам — слоем пересылки прямо в интерфейс туннеля.
+        // Ответы приходят на адрес туннеля и попадают в сокет как обычно.
         const int CzVpnPortLo = 47000, CzVpnPortHi = 47999;
-        static uint CzFakeIp; static IntPtr CzVpnH = WdInvalid; static volatile bool CzVpnOk;
-        static readonly ConcurrentDictionary<int, uint> CzVpnSrc = new ConcurrentDictionary<int, uint>();
+        static IntPtr CzVpnH = WdInvalid, CzVpnSend = WdInvalid; static volatile bool CzVpnOk;
         static int CzVpnNextPort = CzVpnPortLo; static long CzVpnPkts, CzVpnBack;
         static long CzViaVpn, CzViaDirect, CzFallbacks, CzNoHost;
         static readonly ConcurrentDictionary<string, KeyValuePair<bool, DateTime>> CzLearned = new ConcurrentDictionary<string, KeyValuePair<bool, DateTime>>();
@@ -602,10 +587,10 @@ namespace VpnGuard
             var s = new TcpClient(AddressFamily.InterNetwork) { NoDelay = true };
             try {
                 if (vpn && CzInSet(dst)) {
-                    bool bound = false;
+                    bool bound = false; var vip = IPAddress.Parse(CzVpnIp);
                     for (int i = 0; i < 40 && !bound; i++) {
                         int pt = Interlocked.Increment(ref CzVpnNextPort); if (pt > CzVpnPortHi) { Interlocked.Exchange(ref CzVpnNextPort, CzVpnPortLo); pt = CzVpnPortLo; }
-                        try { s.Client.Bind(new IPEndPoint(IPAddress.Any, pt)); bound = true; } catch { }
+                        try { s.Client.Bind(new IPEndPoint(vip, pt)); bound = true; } catch { }
                     }
                     if (!bound) { s.Close(); return null; }
                 }
@@ -750,7 +735,7 @@ namespace VpnGuard
                 { "tcpFlows", tcpN }, { "udpFlows", udpN }, { "udpPackets", Interlocked.Read(ref CzUdpPkts) }, { "mb", Math.Round(Interlocked.Read(ref CzBytes) / 1048576.0, 1) },
                 { "errors", Interlocked.Read(ref CzErrors) }, { "relay", CzFwd != WdInvalid ? IpS(CzWgIp) + ":" + CzRelayPort : "" }, { "ifWg", CzWgIdx }, { "ifEth", CzEthIdx },
                 { "ranges", CzSet.Lo.Length }, { "viaZapret", Interlocked.Read(ref CzViaDirect) }, { "viaVpn", Interlocked.Read(ref CzViaVpn) }, { "fallbacks", Interlocked.Read(ref CzFallbacks) },
-                { "noHost", Interlocked.Read(ref CzNoHost) }, { "vpnOut", CzVpnIp ?? "" }, { "learned", CzLearned.Count }, { "vpnTest", CzVpnTest }, { "vpnOk", CzVpnOk }, { "vpnPkts", Interlocked.Read(ref CzVpnPkts) }, { "vpnBack", Interlocked.Read(ref CzVpnBack) }, { "winwsProfiles", CzProfs.Count }, { "rate", CzRates() },
+                { "noHost", Interlocked.Read(ref CzNoHost) }, { "vpnOut", CzVpnIp ?? "" }, { "learned", CzLearned.Count }, { "vpnTest", CzVpnTest }, { "vpnOk", CzVpnOk }, { "vpnPkts", Interlocked.Read(ref CzVpnPkts) }, { "vpnSendFail", Interlocked.Read(ref CzVpnBack) }, { "winwsProfiles", CzProfs.Count }, { "rate", CzRates() },
                 { "tcpUpKb", Interlocked.Read(ref CzTcpUp) / 1024 }, { "tcpDownKb", Interlocked.Read(ref CzTcpDown) / 1024 }, { "udpDownKb", Interlocked.Read(ref CzUdpDown) / 1024 },
                 { "udpSendFail", Interlocked.Read(ref CzUdpSendFail) }, { "quicDropped", Interlocked.Read(ref CzQuicDrop) }, { "netRewritten", Interlocked.Read(ref CzNetRw) },
                 { "netNoFlow", Interlocked.Read(ref CzNetMiss) }, { "sendFail", Interlocked.Read(ref CzNetSendFail) },
