@@ -588,6 +588,27 @@ namespace VpnGuard
             return n;
         }
         static void CzObserve(Task t) { t.ContinueWith(x => { var e = x.Exception; }, TaskContinuationOptions.OnlyOnFaulted); }
+        // запасные адреса для имени: удачный недавно у того же «семейства» (youtube.com, googleapis.com …) и адреса из DNS — только из маршрутов zapret
+        static readonly ConcurrentDictionary<string, uint> CzGoodIp = new ConcurrentDictionary<string, uint>();
+        static string CzFamily(string host)
+        {
+            var p = host.Split('.'); if (p.Length < 2) return null;
+            string f = p[p.Length - 2] + "." + p[p.Length - 1];
+            return f == "googlevideo.com" || f == "ggpht.com" ? null : f;            // видеосерверы и картинки — у каждого адреса своё
+        }
+        static void CzRemember(string host, uint ip) { var f = CzFamily(host); if (f != null) CzGoodIp[f] = ip; }
+        static async Task<List<uint>> CzAltIps(string host, uint bad)
+        {
+            var res = new List<uint>(); var fam = CzFamily(host); if (fam == null) return res;
+            uint g; if (CzGoodIp.TryGetValue(fam, out g) && g != bad && CzInSet(g)) res.Add(g);
+            try {
+                var t = Dns.GetHostAddressesAsync(host);
+                if (await Task.WhenAny(t, Task.Delay(2000)).ConfigureAwait(false) == t && t.Status == TaskStatus.RanToCompletion) {
+                    foreach (var a in t.Result) if (a.AddressFamily == AddressFamily.InterNetwork) { var v = IpH(a.GetAddressBytes(), 0); if (v != bad && CzInSet(v) && !res.Contains(v)) res.Add(v); }
+                } else CzObserve(t);
+            } catch { }
+            return res.Take(2).ToList();
+        }
         // соединение с сайтом от имени ПК: маршрут zapret → физический адаптер → winws
         static async Task<TcpClient> CzConnect(uint dst, int port)
         {
@@ -625,24 +646,33 @@ namespace VpnGuard
                 string lists = host == null ? "" : CzWinwsCovers(host, f.Dst, f.DPort) ? "в списках zapret" : "нет в списках zapret";
                 string target = IpS(f.Dst) + ":" + f.DPort + (host != null ? " (" + host + (lists.Length > 0 ? ", " + lists : "") + ")" : "");
                 // 2. соединиться от имени ПК (через winws) и отправить его; сайт молчит — эту пару клиент → адрес пустить через VPN
-                var rb = new byte[32768]; int rn = 0; string fail = null;
-                srv = await CzConnect(f.Dst, f.DPort).ConfigureAwait(false);
-                if (srv == null) fail = "нет соединения";
-                else {
-                    var s0 = srv.GetStream();
-                    try { await s0.WriteAsync(hello, 0, fn).ConfigureAwait(false); } catch { fail = "ошибка отправки"; }
-                    if (fail == null && host != null) {
-                        var rd = s0.ReadAsync(rb, 0, rb.Length);
-                        if (await Task.WhenAny(rd, Task.Delay(CzFallbackMs)).ConfigureAwait(false) == rd) { try { rn = rd.Result; } catch { rn = 0; } if (rn <= 0) fail = "сайт закрыл соединение"; }
-                        else { CzObserve(rd); fail = "сайт молчит " + CzFallbackMs / 1000 + " с"; }
+                // адрес молчит — тот же сайт на другом адресе того же CDN (Google, Cloudflare … отдают любой свой сайт по имени):
+                // на том, где недавно получилось, или из DNS; кроме видеосерверов googlevideo — у каждого свой адрес
+                var rb = new byte[32768]; int rn = 0; string fail = null; var cands = new List<uint> { f.Dst }; uint used = f.Dst; string altNote = "";
+                for (int ai = 0; ai < cands.Count && ai < 3; ai++) {
+                    uint dip = cands[ai]; fail = null; rn = 0;
+                    if (srv != null) { try { srv.Close(); } catch { } srv = null; }
+                    srv = await CzConnect(dip, f.DPort).ConfigureAwait(false);
+                    if (srv == null) fail = "нет соединения";
+                    else {
+                        var s0 = srv.GetStream();
+                        try { await s0.WriteAsync(hello, 0, fn).ConfigureAwait(false); } catch { fail = "ошибка отправки"; }
+                        if (fail == null && host != null) {
+                            var rd = s0.ReadAsync(rb, 0, rb.Length);
+                            if (await Task.WhenAny(rd, Task.Delay(ai == 0 ? CzFallbackMs : 4000)).ConfigureAwait(false) == rd) { try { rn = rd.Result; } catch { rn = 0; } if (rn <= 0) fail = "сайт закрыл соединение"; }
+                            else { CzObserve(rd); fail = "сайт молчит " + (ai == 0 ? CzFallbackMs / 1000 : 4) + " с"; }
+                        }
                     }
+                    if (fail == null) { used = dip; if (ai > 0) altNote = " · " + IpS(f.Dst) + " молчал — через zapret на " + IpS(dip); break; }
+                    if (ai == 0 && host != null && f.DPort == 443) cands.AddRange(await CzAltIps(host, f.Dst).ConfigureAwait(false));
                 }
+                if (fail == null && host != null) CzRemember(host, used);
                 if (fail != null) {
                     Interlocked.Increment(ref CzConnFail); Interlocked.Increment(ref cl.Fail);
                     // сразу после (пере)запуска winws обход DPI ещё не работает — такой сбой не повод уводить адрес в VPN
                     bool fresh = (DateTime.UtcNow - ZWinwsStartedAt).TotalSeconds < 30 || (DateTime.UtcNow - CzStartedAt).TotalSeconds < 30;
                     if (!fresh) { CzBypass[((ulong)cip << 32) | f.Dst] = DateTime.UtcNow.AddMinutes(CzBypassMin); Interlocked.Increment(ref CzBypassAdded); }
-                    if (Interlocked.Increment(ref cl.Logged) <= 8) Log("zapret для клиентов: " + ep.Address + ":" + ep.Port + " → " + target + " · через zapret: " + fail + (fresh ? " (zapret только что запущен — обход не включаю)" : " — следующие соединения к " + IpS(f.Dst) + " " + CzBypassMin + " мин пойдут через VPN"), "INFO");
+                    if (Interlocked.Increment(ref cl.Logged) <= 8) Log("zapret для клиентов: " + ep.Address + ":" + ep.Port + " → " + target + " · через zapret: " + fail + (cands.Count > 1 ? " (и на " + (cands.Count - 1) + " др. адрес.)" : "") + (fresh ? " (zapret только что запущен — обход не включаю)" : " — следующие соединения к " + IpS(f.Dst) + " " + CzBypassMin + " мин пойдут через VPN"), "INFO");
                     try { c.Client.LingerState = new LingerOption(true, 0); } catch { }   // сброс — клиент сразу повторит, уже через VPN
                     return;
                 }
@@ -658,7 +688,7 @@ namespace VpnGuard
                 if (closed == null) closed = "сайт"; try { c.Client.Shutdown(SocketShutdown.Send); } catch { }
                 await Task.WhenAny(up, Task.Delay(60000)).ConfigureAwait(false);
                 if (Interlocked.Increment(ref cl.Logged) <= 8)
-                    Log("zapret для клиентов: " + ep.Address + ":" + ep.Port + " → " + target + " · к сайту " + (fn + (up.IsCompleted ? up.Result : 0)) + " Б, к клиенту " + down + " Б, " +
+                    Log("zapret для клиентов: " + ep.Address + ":" + ep.Port + " → " + target + altNote + " · к сайту " + (fn + (up.IsCompleted ? up.Result : 0)) + " Б, к клиенту " + down + " Б, " +
                         Math.Round((DateTime.UtcNow - t0).TotalSeconds, 1) + " с, первым закрыл " + closed, "INFO");
             } catch { }
             finally {
