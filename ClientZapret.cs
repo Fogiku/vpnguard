@@ -36,7 +36,7 @@ namespace VpnGuard
         static bool WdLoaded;
 
         // ---------------------------------------------------------------- состояние
-        class CzTcpFlow { public uint Dst; public int DPort; public DateTime Last; }
+        class CzTcpFlow { public uint Dst; public int DPort; public DateTime Last; public int SynTtl; public uint MaxTs; public bool HasTs; }
         class CzUdpFlow { public uint Client, Dst; public int CPort, DPort; public Socket Sock; public DateTime Last; }
         static readonly object CzLock = new object();
         static readonly Dictionary<ulong, CzTcpFlow> CzTcp = new Dictionary<ulong, CzTcpFlow>();
@@ -45,7 +45,7 @@ namespace VpnGuard
         static TcpListener CzRelay;
         const int CzRelayPort = 34010;
         static uint CzWgIp, CzEthIp; static int CzWgIdx, CzEthIdx; static string CzSig = "", CzError = "";
-        static long CzPkts, CzPass, CzTcpConns, CzUdpPkts, CzBytes, CzErrors, CzTcpUp, CzTcpDown, CzUdpDown, CzUdpSendFail, CzQuicDrop, CzNetRw, CzNetMiss, CzNetBig, CzNetSendFail, CzRelayNoFlow, CzConnFail, CzFwdBig, CzFwdMax, CzNetMax, CzMssClamped; static readonly System.Diagnostics.Stopwatch CzSw = System.Diagnostics.Stopwatch.StartNew(); static int CzActive, CzConnLogged, CzSynLogged, CzTraceLeft = 400, CzAb; static readonly HashSet<ulong> CzTraced = new HashSet<ulong>();
+        static long CzPkts, CzPass, CzTcpConns, CzUdpPkts, CzBytes, CzErrors, CzTcpUp, CzTcpDown, CzUdpDown, CzUdpSendFail, CzQuicDrop, CzNetRw, CzNetMiss, CzNetBig, CzNetSendFail, CzRelayNoFlow, CzConnFail, CzFwdBig, CzFwdMax, CzNetMax, CzMssClamped, CzDropSum, CzDropMd5, CzDropTtl, CzDropTs, CzDropNoAck, CzSumChecked; static volatile bool CzSumOff; static readonly System.Diagnostics.Stopwatch CzSw = System.Diagnostics.Stopwatch.StartNew(); static int CzActive, CzConnLogged, CzSynLogged, CzTraceLeft = 400, CzAb; static readonly HashSet<ulong> CzTraced = new HashSet<ulong>();
         static HashSet<uint> CzHosts = new HashSet<uint>(); static List<uint[]> CzNets = new List<uint[]>(); static string CzSetKey = "";
         static DateTime CzFwAt = DateTime.MinValue, CzCleanAt = DateTime.MinValue; static string CzFwSig = "";
 
@@ -197,7 +197,10 @@ namespace VpnGuard
                 if (n > 1300) Interlocked.Increment(ref CzFwdBig);
                 if (n > Interlocked.Read(ref CzFwdMax)) Interlocked.Exchange(ref CzFwdMax, n);
                 ulong key = ((ulong)src << 16) | (uint)sport;
-                lock (CzLock) { CzTcpFlow f; if (!CzTcp.TryGetValue(key, out f) || f.Dst != dst || f.DPort != dport) { f = new CzTcpFlow { Dst = dst, DPort = dport }; CzTcp[key] = f; } f.Last = DateTime.Now; }
+                // поддельные пакеты (их шлют средства обхода DPI на стороне клиента: zapret, роутер с «байпасом») — отбросить, как это сделали бы
+                // сеть или сервер; иначе ретранслятор примет подделку за данные и испортит соединение
+                string fake = CzFakeReason(p, ihl, n, key, dst, dport);
+                if (fake != null) { CzTrace(key, "клиент→ ОТБРОШЕН (" + fake + ")", p, ihl, n); return true; }
                 // SYN: уменьшить MSS клиента — ответы ретранслятора не должны быть больше MTU туннеля клиента (часто 1280)
                 if ((p[ihl + 13] & 0x02) != 0) { CzClampMss(p, ihl, n, src, sport); lock (CzTraced) if (CzTraced.Count < 3 && dport == 443) CzTraced.Add(key); }
                 CzTrace(key, "клиент→", p, ihl, n);
@@ -227,6 +230,43 @@ namespace VpnGuard
                 return true;
             }
             return false;
+        }
+        // подделка? неверная сумма TCP / опция MD5 / TTL ниже, чем у SYN / метка времени из прошлого / данные без ACK
+        static string CzFakeReason(byte[] p, int ihl, int n, ulong key, uint dst, int dport)
+        {
+            int flags = p[ihl + 13], doff = (p[ihl + 12] >> 4) * 4, dlen = n - ihl - doff, ttl = p[8];
+            bool syn = (flags & 0x02) != 0, ack = (flags & 0x10) != 0, rst = (flags & 0x04) != 0;
+            // контрольная сумма: посчитать на копии и сравнить с той, что пришла
+            var cp = new byte[n]; Buffer.BlockCopy(p, 0, cp, 0, n); var ca = new WdAddr(); WinDivertHelperCalcChecksums(cp, (uint)n, ref ca, 0);
+            long chk = Interlocked.Increment(ref CzSumChecked);
+            if (!CzSumOff && (cp[ihl + 16] != p[ihl + 16] || cp[ihl + 17] != p[ihl + 17])) {
+                long bad = Interlocked.Increment(ref CzDropSum);
+                // предохранитель: если «неверных» больше половины — суммы, видимо, досчитывает адаптер; проверку отключить
+                if (chk >= 200 && bad * 2 > chk) { CzSumOff = true; Log("zapret для клиентов: проверка контрольных сумм отключена — неверных " + bad + " из " + chk + " (их, видимо, досчитывает адаптер)", "WARN"); }
+                else return "неверная сумма";
+            }
+            bool md5 = false, hasTs = false; uint ts = 0;
+            for (int o = ihl + 20, end = Math.Min(n, ihl + doff); o < end; ) {
+                int kind = p[o]; if (kind == 0) break; if (kind == 1) { o++; continue; }
+                if (o + 1 >= end) break; int l = p[o + 1]; if (l < 2 || o + l > end) break;
+                if (kind == 19) md5 = true;
+                if (kind == 8 && l == 10) { hasTs = true; ts = IpH(p, o + 2); }
+                o += l;
+            }
+            if (md5) { Interlocked.Increment(ref CzDropMd5); return "опция MD5"; }
+            CzTcpFlow f;
+            lock (CzLock) {
+                if (syn && !ack) { f = new CzTcpFlow { Dst = dst, DPort = dport, SynTtl = ttl }; CzTcp[key] = f; }
+                else if (!CzTcp.TryGetValue(key, out f) || f.Dst != dst || f.DPort != dport) { f = new CzTcpFlow { Dst = dst, DPort = dport, SynTtl = ttl }; CzTcp[key] = f; }
+                f.Last = DateTime.Now;
+            }
+            if (f.SynTtl > 0 && ttl + 2 < f.SynTtl) { Interlocked.Increment(ref CzDropTtl); return "TTL " + ttl + " при " + f.SynTtl + " у SYN"; }
+            if (!syn && !ack && !rst && dlen > 0) { Interlocked.Increment(ref CzDropNoAck); return "данные без ACK"; }
+            if (hasTs) {
+                if (f.HasTs && (int)(ts - f.MaxTs) < -10000) { Interlocked.Increment(ref CzDropTs); return "метка времени из прошлого"; }
+                if (!f.HasTs || (int)(ts - f.MaxTs) > 0) { f.MaxTs = ts; f.HasTs = true; }
+            }
+            return null;
         }
         // трассировка пакетов первых соединений (флаги, seq/ack, длина данных) — для поиска поломок
         static void CzTrace(ulong key, string dir, byte[] p, int ihl, int n)
@@ -308,9 +348,6 @@ namespace VpnGuard
             if (f == null) { Interlocked.Increment(ref CzRelayNoFlow); return; }
             c.NoDelay = true;
             var srv = new TcpClient(AddressFamily.InterNetwork) { NoDelay = true };
-            // опыт A/B (первые 60 соединений): каждое второе — через туннель VPN (с адреса туннеля), остальные — как обычно, через zapret
-            int ab = Interlocked.Increment(ref CzAb); string via = "zapret";
-            if (ab <= 60 && ab % 2 == 0) { var tip = Ipv4(UplinkName()); if (tip != null) { try { srv.Client.Bind(new IPEndPoint(IPAddress.Parse(tip), 0)); via = "VPN"; } catch { } } }
             try {
                 var ar = srv.BeginConnect(IPAddress.Parse(IpS(f.Dst)), f.DPort, null, null);
                 if (!ar.AsyncWaitHandle.WaitOne(15000)) { Interlocked.Increment(ref CzConnFail); return; }
@@ -322,7 +359,7 @@ namespace VpnGuard
                 cnt[1] = CzPump(ss, cs, f, false); lock (cnt) if (first == null) first = "сайт"; try { c.Client.Shutdown(SocketShutdown.Send); } catch { }
                 up.Join(60000);
                 if (Interlocked.Increment(ref CzConnLogged) <= 80)
-                    Log("zapret для клиентов: " + ep.Address + ":" + ep.Port + " → " + IpS(f.Dst) + ":" + f.DPort + " · к сайту " + cnt[0] + " Б, к клиенту " + cnt[1] + " Б, " + Math.Round((DateTime.Now - t0).TotalSeconds, 1) + " с, первым закрыл " + first + ", путь " + via + ", сайт подключён в " + (connMs % 100000).ToString("00000") + "мс", "INFO");
+                    Log("zapret для клиентов: " + ep.Address + ":" + ep.Port + " → " + IpS(f.Dst) + ":" + f.DPort + " · к сайту " + cnt[0] + " Б, к клиенту " + cnt[1] + " Б, " + Math.Round((DateTime.Now - t0).TotalSeconds, 1) + " с, первым закрыл " + first + ", сайт подключён в " + (connMs % 100000).ToString("00000") + "мс", "INFO");
             } catch { }
             finally { if (Interlocked.Decrement(ref CzActive) < 0) Interlocked.Exchange(ref CzActive, 0); try { srv.Close(); } catch { } }
         }
@@ -346,7 +383,8 @@ namespace VpnGuard
                 { "udpSendFail", Interlocked.Read(ref CzUdpSendFail) }, { "quicDropped", Interlocked.Read(ref CzQuicDrop) }, { "netRewritten", Interlocked.Read(ref CzNetRw) },
                 { "netNoFlow", Interlocked.Read(ref CzNetMiss) }, { "netBig", Interlocked.Read(ref CzNetBig) }, { "netSendFail", Interlocked.Read(ref CzNetSendFail) },
                 { "relayNoFlow", Interlocked.Read(ref CzRelayNoFlow) }, { "connFail", Interlocked.Read(ref CzConnFail) },
-                { "mssClamped", Interlocked.Read(ref CzMssClamped) }, { "fwdBig", Interlocked.Read(ref CzFwdBig) }, { "fwdMax", Interlocked.Read(ref CzFwdMax) }, { "netMax", Interlocked.Read(ref CzNetMax) } };
+                { "mssClamped", Interlocked.Read(ref CzMssClamped) }, { "dropBadSum", Interlocked.Read(ref CzDropSum) }, { "dropMd5", Interlocked.Read(ref CzDropMd5) },
+                { "dropTtl", Interlocked.Read(ref CzDropTtl) }, { "dropTs", Interlocked.Read(ref CzDropTs) }, { "dropNoAck", Interlocked.Read(ref CzDropNoAck) }, { "fwdBig", Interlocked.Read(ref CzFwdBig) }, { "fwdMax", Interlocked.Read(ref CzFwdMax) }, { "netMax", Interlocked.Read(ref CzNetMax) } };
         }
         static Dictionary<string, object> CzProbeCopy() { lock (CzProbeStat) return CzProbeStat.ToDictionary(x => x.Key, x => (object)x.Value); }
         static string CzSummary()
