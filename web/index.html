@@ -8,17 +8,17 @@
 :root {
   --bg: #14161b; --nav: #1b1e24; --card: #21252d; --row: #252a33; --border: #30353f; --grid: #2e333d;
   --text: #e6e8eb; --dim: #8f96a0; --accent: #4c8dff; --btn: #2b3039; --btn-h: #363c47; --input: #191c22;
-  --ok: #3fb950; --warn: #d29922; --bad: #f85149; --none: #4a505a; --rx: #3987e5; --tx: #d95926;
+  --ok: #3fb950; --warn: #d29922; --bad: #f85149; --none: #4a505a; --rx: #3987e5; --tx: #d95926; --vpn: #4c8dff; --zp: #a371f7;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
   --bg: #f4f5f7; --nav: #ffffff; --card: #ffffff; --row: #f3f4f6; --border: #dde1e6; --grid: #e6e9ed;
   --text: #1c2128; --dim: #5f6773; --accent: #2f6fe4; --btn: #eef0f3; --btn-h: #e2e5ea; --input: #ffffff;
-  --ok: #1f883d; --warn: #9a6700; --bad: #cf222e; --none: #b8bec6; --rx: #2f6fd0; --tx: #c2501f; color-scheme: light; } }
+  --ok: #1f883d; --warn: #9a6700; --bad: #cf222e; --none: #b8bec6; --rx: #2f6fd0; --tx: #c2501f; --vpn: #2f6fe4; --zp: #8250df; color-scheme: light; } }
 :root[data-theme="light"] {
   --bg: #f4f5f7; --nav: #ffffff; --card: #ffffff; --row: #f3f4f6; --border: #dde1e6; --grid: #e6e9ed;
   --text: #1c2128; --dim: #5f6773; --accent: #2f6fe4; --btn: #eef0f3; --btn-h: #e2e5ea; --input: #ffffff;
-  --ok: #1f883d; --warn: #9a6700; --bad: #cf222e; --none: #b8bec6; --rx: #2f6fd0; --tx: #c2501f; color-scheme: light; }
+  --ok: #1f883d; --warn: #9a6700; --bad: #cf222e; --none: #b8bec6; --rx: #2f6fd0; --tx: #c2501f; --vpn: #2f6fe4; --zp: #8250df; color-scheme: light; }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
 a { color: var(--accent); }
@@ -69,6 +69,14 @@ textarea.log { width: 100%; height: 60vh; resize: vertical; }
 .bar i { display: block; height: 100%; }
 canvas { width: 100%; height: 190px; display: block; }
 .legend { display: flex; gap: 16px; font-size: 12px; color: var(--dim); }
+.flow svg { width: 100%; height: auto; display: block; }
+.flow text { fill: var(--text); font-family: "Segoe UI", system-ui, sans-serif; }
+.flow .f1 { font-size: 13px; font-weight: 600; } .flow .f2 { font-size: 11.5px; } .flow .f3 { font-size: 11px; fill: var(--dim); }
+.flow .fe { font-size: 11px; fill: var(--dim); paint-order: stroke; stroke: var(--card); stroke-width: 4px; stroke-linejoin: round; }
+.flow a:hover rect { stroke: var(--accent); }
+.fl { animation: vgflow linear infinite; }
+@keyframes vgflow { to { stroke-dashoffset: 32; } }
+@media (prefers-reduced-motion: reduce) { .fl { animation: none; } }
 .legend b { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 #toast { position: fixed; right: 16px; bottom: 16px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; max-width: 420px; display: none; box-shadow: 0 4px 18px rgba(0,0,0,.3); }
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: center; justify-content: center; padding: 16px; z-index: 5; }
@@ -212,6 +220,108 @@ function chartBlock(k, title) {
   return `<div class="sec">${esc(title)}</div><div class="card"><div class="row" style="justify-content:space-between"><div class="legend"><span><b style="background:var(--rx)"></b>Загрузка ↓ ${rate ? fmtR(rate[0]) : '—'}</span><span><b style="background:var(--tx)"></b>Отдача ↑ ${rate ? fmtR(rate[1]) : '—'}</span></div><span class="sub">${nm ? 'адаптер «' + esc(nm) + '»' : k === 'z' ? 'оценка: физический − туннель − wg_server' : ''}</span></div><canvas data-chart="${k}"></canvas></div>`;
 }
 
+// ---------------------------------------------------------------- схема трафика: кто с кем соединён и сколько пропускает
+// Скорости — из снимка агента (байт/с): адаптеры (туннель, wg_server, физический), клиенты, ретранслятор zapret.
+// «Мимо VPN» и «программы ПК» — оценка: физический − туннель − зашифрованный трафик клиентов.
+function flowBlock() {
+  const tr = S.traffic || {}, R = tr.rate || {}, nm = tr.names || {}, wgc = comp('wg') || {}, cz = wgc.clientZapret || {};
+  const mode = (S.vpn && S.vpn.mode) || 'meduza', vpnOn = mode !== 'zapret';
+  const r2 = k => [+(R[k] || [])[0] || 0, +(R[k] || [])[1] || 0];
+  const u = vpnOn ? r2('u') : [0, 0], w = r2('w'), p = r2('p');
+  const byp = [Math.max(0, p[0] - u[0] - w[0]), Math.max(0, p[1] - u[1] - w[1])];
+  const apps = [Math.max(0, u[0] + byp[0] - w[1]), Math.max(0, u[1] + byp[1] - w[0])];
+  const czr = (cz.rate || []).map(v => +v || 0);
+  const peers = (wgc.peers || []).slice().sort((a, b) => (b.active - a.active) || ((+b.txRate || 0) - (+a.txRate || 0)));
+  const shown = peers.slice(0, 8), more = peers.length - shown.length;
+  const narrow = window.innerWidth < 760;
+  const mb = v => { v = (+v || 0) * 8; return v >= 1e6 ? (v / 1e6).toFixed(v >= 1e7 ? 0 : 1) : v >= 1e3 ? (v / 1e6).toFixed(2) : '0'; };
+  const rt = r => `↓ ${mb(r[0])}  ↑ ${mb(r[1])} Мбит/с`;   // ↓ — к клиенту / на ПК, ↑ — от него
+  const ul = lvl(comp('ultra')), zl = lvl(comp('zapret')), wl = lvl(wgc);
+
+  // узлы
+  const N = {}, add = (id, o) => { N[id] = Object.assign({ id }, o); };
+  shown.forEach((c, i) => add('c' + i, { kind: 'client', href: '#wg', dot: c.off ? -1 : c.active ? 0 : -1, dim: c.off || !c.active,
+    t1: c.name || c.ip, t2: c.off ? 'отключён' : c.active ? rt([c.txRate, c.rxRate]) : 'не на связи', t3: c.off || !c.active ? '' : c.zapret === false ? 'zapret выкл — всё через VPN' : c.cz ? `ретранслятор: ${c.cz.conns || 0} соед.${c.cz.vpn ? ', из них через VPN ' + c.cz.vpn : ''}` : '' }));
+  if (more > 0) add('cm', { kind: 'client', href: '#wg', dot: -1, dim: true, t1: `ещё ${more}`, t2: 'на вкладке WG-Server', t3: '' });
+  add('apps', { kind: 'client', dot: -1, t1: 'Программы этого ПК', t2: rt(apps), t3: 'оценка' });
+  add('wg', { kind: 'hub', href: '#wg', dot: wl, t1: 'WG-Server', t2: `на связи ${peers.filter(x => x.active).length} из ${peers.length}`, t3: rt([w[1], w[0]]) });
+  add('pc', { kind: 'hub', href: '#ics', dot: lvl(comp('ics')), t1: 'Этот ПК · раздача', t2: cz.running ? 'ретранслятор zapret для клиентов:' : 'ретранслятор zapret выключен',
+    t3: cz.running ? `напрямую ↓ ${mb(czr[0])} · VPN ↓ ${mb(czr[2])} Мбит/с` : (vpnOn ? 'раздаёт интернет из туннеля' : 'раздаёт интернет напрямую') });
+  if (vpnOn) add('vpn', { kind: 'out', href: '#ultra', dot: ul, col: 'var(--vpn)', t1: 'VPN · ' + (nm.u || 'туннель'), t2: rt(u), t3: (comp('ultra') && String(comp('ultra').state)) || '' });
+  add('zp', { kind: 'out', href: '#zapret', dot: zl, col: 'var(--zp)', t1: vpnOn ? 'Напрямую · zapret' : 'Напрямую (без VPN)', t2: rt(vpnOn ? byp : [p[0] - w[0], p[1] - w[1]].map(v => Math.max(0, v))), t3: vpnOn ? 'YouTube, Discord и др. — мимо VPN' : '' });
+  add('net', { kind: 'net', dot: -1, t1: 'Интернет', t2: rt(p), t3: 'через ' + (nm.p || 'физический адаптер') + ' — всё вместе' });
+
+  // рёбра: [откуда, куда, [↓, ↑], цвет, пунктир]
+  const E = [];
+  shown.forEach((c, i) => E.push(['c' + i, 'wg', c.off || !c.active ? [0, 0] : [c.txRate, c.rxRate], 'var(--dim)', c.off]));
+  if (more > 0) E.push(['cm', 'wg', [0, 0], 'var(--dim)', true]);
+  E.push(['wg', 'pc', [w[1], w[0]], 'var(--dim)']);
+  E.push(['apps', 'pc', apps, 'var(--dim)']);
+  if (vpnOn) { E.push(['pc', 'vpn', u, 'var(--vpn)']); E.push(['vpn', 'net', u, 'var(--vpn)']); }
+  const zr = vpnOn ? byp : [Math.max(0, p[0] - w[0]), Math.max(0, p[1] - w[1])];
+  E.push(['pc', 'zp', zr, 'var(--zp)']); E.push(['zp', 'net', zr, 'var(--zp)']);
+
+  // раскладка
+  const cl = Object.values(N).filter(n => n.kind === 'client');
+  let VW, VH;
+  if (!narrow) {
+    const nh = 54, gap = 10, colX = [0, 250, 450, 750, 965], colW = [210, 160, 250, 185, 165];
+    VW = 1130; VH = Math.max(300, cl.length * (nh + gap) + 20);
+    cl.forEach((n, i) => Object.assign(n, { x: colX[0], y: 10 + i * (nh + gap), w: colW[0], h: nh }));
+    const mid = VH / 2;
+    Object.assign(N.wg, { x: colX[1], y: mid - 70 - 35, w: colW[1], h: 70 });
+    Object.assign(N.pc, { x: colX[2], y: mid - 45, w: colW[2], h: 90 });
+    if (N.vpn) Object.assign(N.vpn, { x: colX[3], y: mid - 115, w: colW[3], h: 76 });
+    Object.assign(N.zp, { x: colX[3], y: N.vpn ? mid + 39 : mid - 38, w: colW[3], h: 76 });
+    Object.assign(N.net, { x: colX[4], y: mid - 45, w: colW[4], h: 90 });
+  } else {
+    VW = 420; const nh = 58, gap = 8, half = (VW - gap) / 2; let y = 4;
+    cl.forEach((n, i) => { Object.assign(n, { x: (i % 2) * (half + gap), y: y + Math.floor(i / 2) * (nh + gap), w: half, h: nh }); });
+    y += Math.ceil(cl.length / 2) * (nh + gap) + 34;
+    Object.assign(N.wg, { x: 0, y, w: 150, h: 70 }); Object.assign(N.pc, { x: 180, y, w: 240, h: 70 });
+    y += 70 + 40;
+    if (N.vpn) { Object.assign(N.vpn, { x: 0, y, w: half, h: 76 }); Object.assign(N.zp, { x: half + gap, y, w: half, h: 76 }); }
+    else Object.assign(N.zp, { x: 100, y, w: 220, h: 76 });
+    y += 76 + 40; Object.assign(N.net, { x: 60, y, w: 300, h: 76 }); VH = y + 80;
+  }
+
+  // точки входа/выхода: на широком экране — слева направо, на узком — сверху вниз
+  const outP = n => narrow ? [n.x + n.w / 2, n.y + n.h] : [n.x + n.w, n.y + n.h / 2];
+  const inP = n => narrow ? [n.x + n.w / 2, n.y] : [n.x, n.y + n.h / 2];
+  let maxR = 125000; for (const e of E) maxR = Math.max(maxR, (+e[2][0] || 0) + (+e[2][1] || 0));
+  const now = Date.now() / 1000;
+  let edges = '';
+  for (const [a, b, r, col, dashed] of E) {
+    const A = N[a], B = N[b]; if (!A || !B) continue;
+    let [x1, y1] = outP(A), [x2, y2] = inP(B);
+    // в узкой раскладке WG-Server → ПК идут бок о бок
+    if (narrow && a === 'wg' && b === 'pc') { x1 = A.x + A.w; y1 = A.y + A.h / 2; x2 = B.x; y2 = B.y + B.h / 2; }
+    if (narrow && a === 'apps') { x2 = B.x + B.w / 2; y2 = B.y; }
+    const tot = (+r[0] || 0) + (+r[1] || 0), sw = 1.5 + 9 * Math.sqrt(tot / maxR);
+    const d = narrow && !(a === 'wg' && b === 'pc') ? `M${x1},${y1} C${x1},${(y1 + y2) / 2} ${x2},${(y1 + y2) / 2} ${x2},${y2}` : `M${x1},${y1} C${(x1 + x2) / 2},${y1} ${(x1 + x2) / 2},${y2} ${x2},${y2}`;
+    edges += `<path d="${d}" fill="none" stroke="var(--grid)" stroke-width="${sw.toFixed(1)}"${dashed ? ' stroke-dasharray="4 6"' : ''}/>`;
+    if (tot > 1000 && !dashed) {
+      const dur = Math.max(0.5, 6 - 1.6 * Math.log10(tot / 1000));
+      edges += `<path class="fl" d="${d}" fill="none" stroke="${col}" stroke-width="${sw.toFixed(1)}" stroke-dasharray="7 9" stroke-linecap="round" style="animation-duration:${dur.toFixed(2)}s;animation-delay:-${(now % dur).toFixed(2)}s"/>`;
+    }
+  }
+  let nodes = '';
+  for (const n of Object.values(N)) {
+    const op = n.dim ? ' opacity=".55"' : '', lc = n.dot >= 0 ? `var(--${['ok', 'warn', 'bad'][n.dot]})` : 'var(--none)';
+    const g = `<g${op}><rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="8" fill="var(--row)" stroke="${n.col || 'var(--border)'}" stroke-width="${n.col ? 2 : 1}"/>
+      <circle cx="${n.x + 14}" cy="${n.y + 17}" r="5" fill="${lc}"/>
+      <text x="${n.x + 26}" y="${n.y + 21}" class="f1">${esc(clip(n.t1, n.w))}</text>
+      <text x="${n.x + 12}" y="${n.y + 39}" class="f2">${esc(clip(n.t2, n.w + 20))}</text>
+      ${n.t3 ? `<text x="${n.x + 12}" y="${n.y + 55}" class="f3">${esc(clip(n.t3, n.w + 30))}</text>` : ''}</g>`;
+    nodes += n.href ? `<a href="${n.href}">${g}</a>` : g;
+  }
+  return `<div class="sec">Схема трафика — кто с кем соединён и сколько пропускает</div><div class="card flow">
+    <svg viewBox="0 -4 ${VW} ${VH + 8}" role="img" aria-label="Схема трафика: клиенты → WG-Server → этот ПК → VPN или zapret → интернет">${edges}${nodes}</svg>
+    <div class="legend" style="flex-wrap:wrap;margin-top:6px"><span><b style="background:var(--vpn)"></b>через VPN</span><span><b style="background:var(--zp)"></b>напрямую через zapret (мимо VPN)</span><span>толщина линии — скорость · бегущие штрихи — загрузка</span><span>↓ к клиенту / на ПК · ↑ от него</span></div></div>`;
+}
+// обрезать подпись под ширину узла (≈6,6 единицы на символ)
+function clip(s, w) { s = String(s || ''); const n = Math.floor((w - 20) / 6.6); return s.length > n ? s.slice(0, Math.max(1, n - 1)) + '…' : s; }
+
 // ---------------------------------------------------------------- шапка
 function head() {
   $('#ver').textContent = S.agentVersion ? 'агент ' + S.agentVersion : '';
@@ -245,6 +355,7 @@ P.home = () => {
     <div class="tile kpi"><div class="t">Трафик туннеля сегодня</div><div class="v">${today ? '↓ ' + fmtB(today.u[0]) : '—'}</div><div class="d">${today ? '↑ ' + fmtB(today.u[1]) : ''}</div></div>
     <div class="tile kpi" onclick="location.hash='wg'"><div class="t">Клиенты WG-Server</div><div class="v">${peers.filter(p => p.active).length} из ${peers.length}</div><div class="d">на связи за 3 мин</div></div>
   </div>
+  ${flowBlock()}
   ${chartBlock('u', 'Трафик туннеля — последние 2 часа')}
   <div class="sec">Последние предупреждения и ошибки</div><pre id="events" class="muted">загрузка…</pre>`;
 };

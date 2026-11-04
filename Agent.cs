@@ -897,7 +897,9 @@ namespace VpnGuard
                 string ip = Regex.Replace(p[3].Split(',')[0], @"/\d+$", ""); long hs; long.TryParse(p[4], out hs); long rx, tx; long.TryParse(p[5], out rx); long.TryParse(p[6], out tx);
                 string name; if (!PeerNamesByKey.TryGetValue(p[0], out name) && !PeerNamesByIp.TryGetValue(ip, out name)) name = ip;
                 bool act = hs > 0 && now - hs < 180; if (act) active++;
+                var rr = RateOf("wg:" + p[0], rx, tx);
                 list.Add(new Dictionary<string, object> { { "name", name }, { "key", p[0].Substring(0, Math.Min(8, p[0].Length)) }, { "ip", ip }, { "endpoint", p[2] == "(none)" ? "" : p[2] }, { "hsAgo", hs > 0 ? now - hs : -1 }, { "active", act }, { "rx", rx }, { "tx", tx },
+                    { "rxRate", rr[0] }, { "txRate", rr[1] },
                     { "off", false }, { "zapret", CzClientZapret(ip) }, { "cz", CzClientStat(ip) } });
             }
             try { list.AddRange(WgOffPeers(new HashSet<string>(list.Select(x => (string)((Dictionary<string, object>)x)["ip"])))); } catch { }
