@@ -283,6 +283,7 @@ namespace VpnGuard
                 if (StartMode("zapret") != "Disabled") Exe("sc.exe", "config zapret start= disabled", 20);
             } catch (Exception e) { Log("zapret: не удалось остановить службу zapret: " + e.Message, "WARN"); }
         }
+        static DateTime ZWinwsStartedAt = DateTime.MinValue;     // в первые секунды после запуска winws обход DPI ещё не работает
         static void ZStartWinws(string name)
         {
             try { ZEnableTimestamps(); } catch { }
@@ -291,7 +292,7 @@ namespace VpnGuard
             var p = Process.Start(new ProcessStartInfo(Path.Combine(bin, "winws.exe"), a) { WorkingDirectory = bin, UseShellExecute = false, CreateNoWindow = true });
             Thread.Sleep(1500);
             if (p.HasExited) throw new Exception("winws.exe завершился сразу (код " + p.ExitCode + ") со стратегией '" + name + "'");
-            Z["winwsPid"] = p.Id;
+            Z["winwsPid"] = p.Id; ZWinwsStartedAt = DateTime.UtcNow;
         }
         static Process ZWinws()
         {

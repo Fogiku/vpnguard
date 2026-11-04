@@ -162,7 +162,7 @@ namespace VpnGuard
             }
             CzUpdateSet(); CzUpdateNoZ();
             CzQuicRelay = CfgStr("ws4w.clientQuic", "drop") == "relay"; CzMss = Math.Max(536, CfgInt("ws4w.clientMss", 1200));
-            CzFallbackMs = Math.Max(2000, CfgInt("ws4w.clientFallbackMs", 5000)); CzBypassMin = Math.Max(1, CfgInt("ws4w.clientBypassMin", 10));
+            CzFallbackMs = Math.Max(2000, CfgInt("ws4w.clientFallbackMs", 5000)); CzBypassMin = Math.Max(1, CfgInt("ws4w.clientBypassMin", 5));
             try { CzUpdateProfiles(CzWinwsArgs()); } catch (Exception e) { Log("zapret для клиентов: профили winws: " + e.Message, "WARN"); }
             string sig = wgIp + "|" + IfIndexOf(WgIf()) + "|" + phys.IfIndex + "|" + phys.Ip;
             if (CzFwd == WdInvalid || sig != CzSig) {
@@ -210,7 +210,7 @@ namespace VpnGuard
             if (hn == WdInvalid) { WinDivertClose(hf); relay.Stop(); throw new Exception("WinDivert (ответы) не открылся, код " + Marshal.GetLastWin32Error()); }
             var hb = WinDivertOpen(bf, WdLayerForward, 0, 0);
             if (hb == WdInvalid) Log("zapret для клиентов: фильтр ответов не открылся, код " + Marshal.GetLastWin32Error() + " — соединения могут рваться", "ERROR");
-            CzFwd = hf; CzNet = hn; CzBlk = hb; CzRelay = relay;
+            CzFwd = hf; CzNet = hn; CzBlk = hb; CzRelay = relay; CzStartedAt = DateTime.UtcNow;
             foreach (var cc in CzClients.Values) cc.Logged = 0;
             new Thread(() => CzBatchLoop(hf, () => CzFwd, CzOnFwd)) { IsBackground = true, Name = "cz-fwd" }.Start();
             new Thread(() => CzBatchLoop(hn, () => CzNet, CzOnNet)) { IsBackground = true, Name = "cz-net" }.Start();
@@ -439,7 +439,7 @@ namespace VpnGuard
         // ws4w.clientFallbackMs — один повтор через другой путь; удачный путь для имени запоминается на 30 мин.
         class CzProf { public List<int[]> Ports = new List<int[]>(); public HashSet<string> Hosts, HostEx; public CzRanges Ips, IpEx; }
         static volatile List<CzProf> CzProfs = new List<CzProf>(); static string CzProfKey = ""; static int CzWArgsPid; static string CzWArgs = "";
-        static int CzFallbackMs = 5000, CzBypassMin = 10; static long CzBypassPkts, CzBypassAdded, CzNoHost;
+        static int CzFallbackMs = 5000, CzBypassMin = 5; static long CzBypassPkts, CzBypassAdded, CzNoHost; static DateTime CzStartedAt = DateTime.MinValue;
         // клиент → адрес сайта, к которому zapret не ответил: следующие соединения этой пары идут мимо ретранслятора — раздача Windows
         // отправляет их в туннель VPN, как весь остальной трафик клиента (ретранслятор сам выйти в VPN к адресу zapret не может:
         // маршрут zapret у Windows сильнее адреса и интерфейса сокета)
@@ -639,8 +639,10 @@ namespace VpnGuard
                 }
                 if (fail != null) {
                     Interlocked.Increment(ref CzConnFail); Interlocked.Increment(ref cl.Fail);
-                    CzBypass[((ulong)cip << 32) | f.Dst] = DateTime.UtcNow.AddMinutes(CzBypassMin); Interlocked.Increment(ref CzBypassAdded);
-                    if (Interlocked.Increment(ref cl.Logged) <= 8) Log("zapret для клиентов: " + ep.Address + ":" + ep.Port + " → " + target + " · через zapret: " + fail + " — следующие соединения к " + IpS(f.Dst) + " " + CzBypassMin + " мин пойдут через VPN", "INFO");
+                    // сразу после (пере)запуска winws обход DPI ещё не работает — такой сбой не повод уводить адрес в VPN
+                    bool fresh = (DateTime.UtcNow - ZWinwsStartedAt).TotalSeconds < 30 || (DateTime.UtcNow - CzStartedAt).TotalSeconds < 30;
+                    if (!fresh) { CzBypass[((ulong)cip << 32) | f.Dst] = DateTime.UtcNow.AddMinutes(CzBypassMin); Interlocked.Increment(ref CzBypassAdded); }
+                    if (Interlocked.Increment(ref cl.Logged) <= 8) Log("zapret для клиентов: " + ep.Address + ":" + ep.Port + " → " + target + " · через zapret: " + fail + (fresh ? " (zapret только что запущен — обход не включаю)" : " — следующие соединения к " + IpS(f.Dst) + " " + CzBypassMin + " мин пойдут через VPN"), "INFO");
                     try { c.Client.LingerState = new LingerOption(true, 0); } catch { }   // сброс — клиент сразу повторит, уже через VPN
                     return;
                 }

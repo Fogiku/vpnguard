@@ -8,18 +8,18 @@
 :root {
   --bg: #050b14; --nav: #07111d; --card: #0a1724; --row: #0e2032; --border: #1b3a52; --grid: #12293b;
   --text: #d3f1ff; --dim: #6f93ab; --accent: #39d0ff; --btn: #0c1d2d; --btn-h: #10293f; --input: #050f19;
-  --ok: #2ee6a6; --warn: #ffab2e; --bad: #ff4d5e; --none: #34495c; --rx: #39d0ff; --tx: #ff8a3d; --vpn: #39d0ff; --zp: #c77dff;
+  --ok: #2ee6a6; --warn: #ffab2e; --bad: #ff4d5e; --none: #34495c; --rx: #ffd23f; --tx: #c77dff; --vpn: #39d0ff; --zp: #ff8a3d;
   --hud-grid: rgba(57, 208, 255, .035); --hud-line: rgba(57, 208, 255, .25); --hud-sel: rgba(57, 208, 255, .14); --hud-card2: #081320; --hud-on-accent: #031019;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
   --bg: #f4f5f7; --nav: #ffffff; --card: #ffffff; --row: #f3f4f6; --border: #dde1e6; --grid: #e6e9ed;
   --text: #1c2128; --dim: #5f6773; --accent: #2f6fe4; --btn: #eef0f3; --btn-h: #e2e5ea; --input: #ffffff;
-  --ok: #1f883d; --warn: #9a6700; --bad: #cf222e; --none: #b8bec6; --rx: #2f6fd0; --tx: #c2501f; --vpn: #2f6fe4; --zp: #8250df; --hud-grid: rgba(47, 111, 228, .05); --hud-line: rgba(47, 111, 228, .2); --hud-sel: rgba(47, 111, 228, .1); --hud-card2: #fbfcfd; --hud-on-accent: #fff; color-scheme: light; } }
+  --ok: #1f883d; --warn: #9a6700; --bad: #cf222e; --none: #b8bec6; --rx: #a87b00; --tx: #8250df; --vpn: #2f6fe4; --zp: #c2501f; --hud-grid: rgba(47, 111, 228, .05); --hud-line: rgba(47, 111, 228, .2); --hud-sel: rgba(47, 111, 228, .1); --hud-card2: #fbfcfd; --hud-on-accent: #fff; color-scheme: light; } }
 :root[data-theme="light"] {
   --bg: #f4f5f7; --nav: #ffffff; --card: #ffffff; --row: #f3f4f6; --border: #dde1e6; --grid: #e6e9ed;
   --text: #1c2128; --dim: #5f6773; --accent: #2f6fe4; --btn: #eef0f3; --btn-h: #e2e5ea; --input: #ffffff;
-  --ok: #1f883d; --warn: #9a6700; --bad: #cf222e; --none: #b8bec6; --rx: #2f6fd0; --tx: #c2501f; --vpn: #2f6fe4; --zp: #8250df; --hud-grid: rgba(47, 111, 228, .05); --hud-line: rgba(47, 111, 228, .2); --hud-sel: rgba(47, 111, 228, .1); --hud-card2: #fbfcfd; --hud-on-accent: #fff; color-scheme: light; }
+  --ok: #1f883d; --warn: #9a6700; --bad: #cf222e; --none: #b8bec6; --rx: #a87b00; --tx: #8250df; --vpn: #2f6fe4; --zp: #c2501f; --hud-grid: rgba(47, 111, 228, .05); --hud-line: rgba(47, 111, 228, .2); --hud-sel: rgba(47, 111, 228, .1); --hud-card2: #fbfcfd; --hud-on-accent: #fff; color-scheme: light; }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
 a { color: var(--accent); }
@@ -360,7 +360,7 @@ function flowBuild(m) {
   let defs = '', links = '';
   E.forEach((e, i) => {
     const A = byId[e.a], B = byId[e.b], x1 = A.x + W, x2 = B.x, y1 = portY(A, 'r', i), y2 = portY(B, 'l', i), mx0 = vx(e, i, x1, x2, y1, y2);
-    for (const [lane, off] of [['u', -6], ['d', 6]]) {
+    for (const [lane, off] of [['u', -3.5], ['d', 3.5]]) {
       // ломаная со скошенными изломами; «туда» и «обратно» идут рядом и не пересекаются
       const d = y2 - y1, mx = mx0 + (d > 0 ? -off : off), a = y1 + off, b = y2 + off, c = Math.min(8, Math.abs(d) / 2), sg = Math.sign(d);
       const pts = Math.abs(d) < 1 ? [[x1, a], [x2, b]] : [[x1, a], [mx - c, a], [mx, a + sg * c], [mx, b - sg * c], [mx + c, b], [x2, b]];
@@ -368,8 +368,7 @@ function flowBuild(m) {
       const id = `fl${i}${lane}`, dd = 'M' + pts.map(q => q[0].toFixed(1) + ',' + q[1].toFixed(1)).join(' L');
       defs += `<path id="${id}" d="${dd}"/>`;
       const glyph = lane === 'u' ? '>' : '<', txt = glyph.repeat(Math.ceil(len / FLP) + 3);
-      const from = lane === 'u' ? -FLP : 0, to = lane === 'u' ? 0 : -FLP;
-      links += `<use href="#${id}" class="fl-base"/><text class="fl-chv" fill="${e.c}" id="${id}t" opacity=".16"><textPath href="#${id}" startOffset="${from}">${txt}<animate id="${id}a" attributeName="startOffset" from="${from}" to="${to}" dur="1s" repeatCount="indefinite" begin="indefinite"/></textPath></text>`;
+      links += `<use href="#${id}" class="fl-base"/><text class="fl-chv ${lane === 'u' ? 'ftx' : 'frx'}" id="${id}t" opacity=".14"><textPath id="${id}p" href="#${id}" startOffset="0">${txt}</textPath></text>`;
     }
   });
   let nodes = '';
@@ -388,35 +387,61 @@ function flowBuild(m) {
   el.innerHTML = `<svg viewBox="-2 -2 ${VW + 4} ${VH + 4}" role="img" aria-label="Схема трафика: клиенты → WG-Server → этот ПК → VPN или zapret → интернет"><defs>${defs}</defs>${links}${nodes}</svg>`;
   return el.firstChild;
 }
-// обновить цифры и скорость стрелок, не пересоздавая схему (анимация не сбивается)
+// обновить цели: цифры и скорость стрелок плавно догоняют их в цикле отрисовки (flowFrame), схема не пересоздаётся
 function flowUpdate(m) {
   if (!FL) return;
   const svg = FL.svg;
+  FL.nodes = FL.nodes || {}; FL.lanes = FL.lanes || {};
   for (const n of m.N) {
-    const r = svg.querySelector(`#fl-${n.id}-r`); if (r) r.innerHTML = n.r ? `<tspan class="frx">↓ ${mbs(n.r[0])}</tspan>  <tspan class="ftx">↑ ${mbs(n.r[1])}</tspan> Мбит/с` : '';
+    const st = FL.nodes[n.id] || (FL.nodes[n.id] = { el: svg.querySelector(`#fl-${n.id}-r`), v: n.r ? n.r.slice() : null, txt: '' });
+    st.t = n.r ? n.r.slice() : null; if (st.t && !st.v) st.v = st.t.slice();
     const t = svg.querySelector(`#fl-${n.id}-3`); if (t) t.textContent = clip(n.t4 || n.t3, 200, 6.1);
   }
   m.E.forEach((e, i) => {
     for (const [lane, v] of [['u', e.r[1]], ['d', e.r[0]]]) {
-      const a = svg.querySelector(`#fl${i}${lane}a`), tx = svg.querySelector(`#fl${i}${lane}t`); if (!a) continue;
-      const sp = e.off ? 0 : laneSpeed(v), q = sp ? Math.round(sp / 4) * 4 : 0;   // ступенями — без лишних перезапусков
-      if (+a.dataset.q === q && a.dataset.q !== undefined) continue;
-      a.dataset.q = q;
-      if (!q) { try { a.endElement(); } catch (x) { } tx.setAttribute('opacity', '.16'); }
-      else { a.setAttribute('dur', (FLP / q).toFixed(3) + 's'); tx.setAttribute('opacity', lane === 'd' ? '1' : '.8'); try { a.beginElement(); } catch (x) { } }
+      const k = i + lane, L = FL.lanes[k] || (FL.lanes[k] = { tp: svg.querySelector(`#fl${k}p`), tx: svg.querySelector(`#fl${k}t`), sp: 0, ph: Math.random() * FLP, op: .14, up: lane === 'u' });
+      L.tsp = e.off ? 0 : laneSpeed(v); L.top = L.tsp > 0 ? (lane === 'd' ? 1 : .85) : .14;
     }
   });
+  if (!FL.raf) { FL.last = performance.now(); FL.raf = requestAnimationFrame(flowFrame); }
+}
+// цикл отрисовки: скорость стрелок и цифры плавно (экспоненциально, ~0,6 с) подходят к новым значениям
+function flowFrame(now) {
+  if (!FL) return;
+  const dt = Math.min(0.1, (now - FL.last) / 1000); FL.last = now;
+  if (!document.hidden && FL.svg.isConnected) {
+    const ks = 1 - Math.exp(-dt / 0.6), kv = 1 - Math.exp(-dt / 0.4);
+    for (const k in FL.lanes) {
+      const L = FL.lanes[k]; if (!L.tp) continue;
+      L.sp += (L.tsp - L.sp) * ks; L.op += (L.top - L.op) * ks;
+      L.ph = (L.ph + L.sp * dt) % FLP;
+      L.tp.setAttribute('startOffset', (L.up ? L.ph - FLP : -L.ph).toFixed(2));
+      L.tx.setAttribute('opacity', L.op.toFixed(3));
+    }
+    FL.tick = (FL.tick || 0) + dt;
+    if (FL.tick >= 0.05) {                        // цифры — 20 раз в секунду
+      FL.tick = 0;
+      for (const id in FL.nodes) {
+        const st = FL.nodes[id]; if (!st.el) continue;
+        if (!st.t) { if (st.txt) { st.el.innerHTML = ''; st.txt = ''; } continue; }
+        st.v = st.v.map((x, j) => Math.abs(st.t[j] - x) < 1 ? st.t[j] : x + (st.t[j] - x) * Math.min(1, kv * 3));
+        const html = `<tspan class="frx">↓ ${mbs(st.v[0])}</tspan>  <tspan class="ftx">↑ ${mbs(st.v[1])}</tspan> Мбит/с`;
+        if (html !== st.txt) { st.el.innerHTML = html; st.txt = html; }
+      }
+    }
+  }
+  FL.raf = requestAnimationFrame(flowFrame);
 }
 function flowMount() {
   const host = $('#flowhost'); if (!host || !S) return;
   const m = flowModel();
-  if (!FL || FL.key !== m.key) FL = { key: m.key, svg: flowBuild(m) };
+  if (!FL || FL.key !== m.key) { if (FL && FL.raf) cancelAnimationFrame(FL.raf); FL = { key: m.key, svg: flowBuild(m) }; }
   if (FL.svg.parentNode !== host) host.appendChild(FL.svg);
   flowUpdate(m);
 }
 function flowBlock() {
   return `<div class="sec">Схема трафика — кто с кем соединён и сколько пропускает</div><div class="card flow"><div id="flowhost"></div>
-    <div class="legend" style="flex-wrap:wrap;margin-top:8px"><span><b style="background:var(--vpn)"></b>через VPN</span><span><b style="background:var(--zp)"></b>мимо VPN через zapret</span><span><b style="background:var(--accent)"></b>клиенты WG-Server</span><span>&gt;&gt;&gt; отдача · &lt;&lt;&lt; загрузка · чем быстрее стрелки, тем больше трафика · цифры: <span class="frx">↓ загрузка</span> <span class="ftx">↑ отдача</span>, Мбит/с</span></div></div>`;
+    <div class="legend" style="flex-wrap:wrap;margin-top:8px"><span><b style="background:var(--vpn)"></b>через VPN</span><span><b style="background:var(--zp)"></b>мимо VPN через zapret</span><span><b style="background:var(--accent)"></b>клиенты WG-Server</span><span><span class="ftx">&gt;&gt;&gt; ↑ отдача</span> · <span class="frx">&lt;&lt;&lt; ↓ загрузка</span> · чем быстрее стрелки, тем больше трафика · Мбит/с</span></div></div>`;
 }
 // живые скорости раз в 2 с — только на главной и пока вкладка видна
 async function liveTick() {
