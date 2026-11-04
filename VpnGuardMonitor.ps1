@@ -675,7 +675,15 @@ function Update-PeerRates {
 
 # предупреждения и ошибки за сегодня — дочитываем только новый хвост файла журнала
 $script:LogCnt = @{ File = ''; Pos = 0; Warn = 0; Err = 0 }
-function Get-LogFiles { @(Get-ChildItem $LogDir -Filter 'vpnguard-*.log' -ErrorAction SilentlyContinue | Sort-Object Name -Descending) }
+# список файлов журнала — раз в 10 с (окно спрашивает каждую секунду); у сегодняшнего обновляется размер
+$script:LogFilesAt = [datetime]::MinValue; $script:LogFilesList = @()
+function Get-LogFiles {
+    if (((Get-Date) - $script:LogFilesAt).TotalSeconds -ge 10) {
+        $script:LogFilesList = @(Get-ChildItem $LogDir -Filter 'vpnguard-*.log' -ErrorAction SilentlyContinue | Sort-Object Name -Descending); $script:LogFilesAt = Get-Date
+    }
+    if ($script:LogFilesList.Count) { try { $script:LogFilesList[0].Refresh() } catch { } }
+    return $script:LogFilesList
+}
 function Update-LogCounts {
     $todayName = 'vpnguard-{0}.log' -f (Get-Date -Format 'yyyyMMdd')
     $fp = Join-Path $LogDir $todayName
@@ -1900,11 +1908,28 @@ function Write-ColoredLines($Box, [string[]]$Lines) {
 
 # хвост сегодняшнего журнала — читается только когда файл изменился, общий для всех вкладок
 $script:tail = @{ Sig = ''; Lines = @() }
+# последние 3000 строк сегодняшнего журнала; дочитывается только новое (раньше файл перечитывался при каждой новой строке)
 function Get-TodayTail($files) {
-    $sig = '{0}|{1}' -f $files[0].FullName, $files[0].Length
-    if ($sig -ne $script:tail.Sig) {
-        $script:tail = @{ Sig = $sig; Lines = @(Get-Content $files[0].FullName -Tail 3000 -Encoding UTF8 -ErrorAction SilentlyContinue) }
-    }
+    $lf = $files[0]; $sig = '{0}|{1}' -f $lf.FullName, $lf.Length
+    $t = $script:tail
+    if ($sig -eq $t.Sig) { return $t }
+    $full = ($t.File -ne $lf.FullName -or $lf.Length -lt $t.Pos)
+    try {
+        $fs = [IO.File]::Open($lf.FullName, 'Open', 'Read', 'ReadWrite')
+        try {
+            if ($full) { $fs.Position = [Math]::Max(0, $fs.Length - 600000) } else { $fs.Position = $t.Pos }
+            $skipFirst = ($full -and $fs.Position -gt 0)
+            $txt = (New-Object IO.StreamReader($fs, [Text.Encoding]::UTF8)).ReadToEnd(); $pos = $fs.Position
+        } finally { $fs.Dispose() }
+    } catch { return $t }
+    $parts = ($(if ($full) { '' } else { $t.Rest }) + $txt) -split "`r?`n"
+    $new = @($(if ($parts.Count -gt 1) { $parts[0..($parts.Count - 2)] }))
+    if ($skipFirst -and $new.Count) { $new = @($new | Select-Object -Skip 1) }    # первая строка, скорее всего, обрезана
+    $lines = $t.Lines   # не через $(…): пустой список при этом развернётся в $null
+    if ($full -or $lines -isnot [Collections.Generic.List[string]]) { $lines = New-Object Collections.Generic.List[string] }
+    foreach ($l in $new) { if ($l) { $lines.Add($l) } }
+    if ($lines.Count -gt 3000) { $lines.RemoveRange(0, $lines.Count - 3000) }
+    $script:tail = @{ Sig = $sig; File = $lf.FullName; Pos = $pos; Rest = $parts[-1]; Lines = $lines }
     return $script:tail
 }
 

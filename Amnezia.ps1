@@ -42,11 +42,6 @@ function Get-AmneziaActive {
 function Get-AmneziaConfigs { @() }
 function Test-AmneziaAlias([string]$Alias) { if (-not $Alias) { return $false }; return [bool]($Alias -match (Get-AvpnPattern) -or ($State -and $Alias -eq $State.awgAdapter)) }
 
-function Wait-UpAdapter([string]$Name, [int]$Sec = 20) {
-    $deadline = (Get-Date).AddSeconds($Sec)
-    do { if (Get-UpAdapter $Name) { return $true }; Start-Sleep -Seconds 1 } while ((Get-Date) -lt $deadline)
-    return $false
-}
 function Wait-AvpnUp([int]$Sec = 60) {
     $deadline = (Get-Date).AddSeconds($Sec)
     do { $ad = Get-AvpnAdapter; if ($ad -and "$($ad.OperationalStatus)" -eq 'Up') { return $ad.Name }; Start-Sleep -Seconds 2 } while ((Get-Date) -lt $deadline)

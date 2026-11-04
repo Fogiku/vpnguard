@@ -1,18 +1,18 @@
 {
-    "version":  "3.9.1",
-    "build":  "20261104-1331",
+    "version":  "3.9.2",
+    "build":  "20261104-1355",
     "notes":  "",
-    "date":  "2026-11-04T13:31:43.1911873+03:00",
+    "date":  "2026-11-04T13:55:10.7962946+03:00",
     "files":  [
                   {
                       "path":  "Agent.cs",
-                      "sha256":  "86b055f109219d55a6e44ecee81f8da75389fe42f262e33951a219eb2cde822f",
-                      "size":  102568
+                      "sha256":  "f9176566968d90dc91ca1639911405b8597d1a3b3381ab43abaff6b19f4c71e5",
+                      "size":  102380
                   },
                   {
                       "path":  "Amnezia.ps1",
-                      "sha256":  "44402196973364bbeae5fbdeeab7892f855ce7065d8b942b1891b0857bb0ffa0",
-                      "size":  15088
+                      "sha256":  "0905139f42365262b263e2bcfb0939f8a0c29fe6f8a0e4ca9863993bd7c3b5cb",
+                      "size":  14857
                   },
                   {
                       "path":  "ClientZapret.cs",
@@ -86,7 +86,7 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "115d8da9d27976057df9dd4b8db3e7e7843be0ffd03f6bdb1ba62ea4b3d1680b",
+                      "sha256":  "d23400f08c643a9286dcac5ab40369fc3b8190fde5e3cf7f02f05b11539149f3",
                       "size":  143768
                   },
                   {
@@ -96,8 +96,8 @@
                   },
                   {
                       "path":  "VpnGuardMonitor.ps1",
-                      "sha256":  "385749c0d2a9f443b4a0d00c61c77ee918e733e939458b1d4199b0e3bf065f32",
-                      "size":  179396
+                      "sha256":  "7416200631a605941c7d2afa732f4503dc22627e4f6795a079d238a593570694",
+                      "size":  181306
                   },
                   {
                       "path":  "Web.cs",

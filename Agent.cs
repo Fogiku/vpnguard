@@ -610,7 +610,6 @@ namespace VpnGuard
             try { foreach (var s in ServiceController.GetServices().Where(x => x.ServiceName.StartsWith("AmneziaWGTunnel$", StringComparison.OrdinalIgnoreCase) && x.ServiceName.IndexOf("AmneziaVPN", StringComparison.OrdinalIgnoreCase) >= 0 && x.Status == ServiceControllerStatus.Running)) s.Stop(); } catch { }
             SvcRestart(AvpnSvcName());
         }
-        static bool WaitUp(string name, int sec) { var dl = DateTime.Now.AddSeconds(sec); do { if (Up(name)) return true; Thread.Sleep(1000); } while (DateTime.Now < dl); return false; }
         static string WaitAvpnUp(int sec)
         {
             var dl = DateTime.Now.AddSeconds(sec);
