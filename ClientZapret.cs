@@ -45,7 +45,7 @@ namespace VpnGuard
         static TcpListener CzRelay;
         const int CzRelayPort = 34010;
         static uint CzWgIp, CzEthIp; static int CzWgIdx, CzEthIdx; static string CzSig = "", CzError = "";
-        static long CzPkts, CzPass, CzTcpConns, CzUdpPkts, CzBytes, CzErrors, CzTcpUp, CzTcpDown, CzUdpDown, CzUdpSendFail, CzQuicDrop, CzNetRw, CzNetMiss, CzNetBig, CzNetSendFail, CzRelayNoFlow, CzConnFail, CzFwdBig, CzFwdMax, CzNetMax, CzMssClamped, CzDropSum, CzDropMd5, CzDropTtl, CzDropTs, CzDropNoAck, CzSumChecked; static volatile bool CzSumOff; static readonly System.Diagnostics.Stopwatch CzSw = System.Diagnostics.Stopwatch.StartNew(); static int CzActive, CzConnLogged, CzSynLogged, CzTraceLeft = 400, CzAb; static readonly HashSet<ulong> CzTraced = new HashSet<ulong>();
+        static long CzPkts, CzPass, CzTcpConns, CzUdpPkts, CzBytes, CzErrors, CzTcpUp, CzTcpDown, CzUdpDown, CzUdpSendFail, CzQuicDrop, CzNetRw, CzNetMiss, CzNetBig, CzNetSendFail, CzRelayNoFlow, CzConnFail, CzFwdBig, CzFwdMax, CzNetMax, CzMssClamped, CzDropSum, CzDropMd5, CzDropTtl, CzDropTs, CzDropNoAck, CzSumChecked; static volatile bool CzSumOff; static readonly System.Diagnostics.Stopwatch CzSw = System.Diagnostics.Stopwatch.StartNew(); static int CzActive, CzConnLogged, CzSynLogged, CzTraceLeft = 400, CzAb; static readonly HashSet<ulong> CzTraced = new HashSet<ulong>(); static DateTime CzTraceAt = DateTime.MinValue;
         static HashSet<uint> CzHosts = new HashSet<uint>(); static List<uint[]> CzNets = new List<uint[]>(); static string CzSetKey = "";
         static DateTime CzFwAt = DateTime.MinValue, CzCleanAt = DateTime.MinValue; static string CzFwSig = "";
 
@@ -98,6 +98,8 @@ namespace VpnGuard
             var hn = WinDivertOpen(nf, WdLayerNetwork, 0, 0);
             if (hn == WdInvalid) { WinDivertClose(hf); relay.Stop(); throw new Exception("WinDivert (ответы) не открылся, код " + Marshal.GetLastWin32Error()); }
             CzFwd = hf; CzNet = hn; CzRelay = relay;
+            CzRstProbe("tcp and ip.DstAddr >= " + sub + ".0 and ip.DstAddr <= " + sub + ".255 and ip.DstAddr != " + wgIp, WdLayerForward, "транзит");
+            CzRstProbe("tcp and ip.DstAddr >= " + sub + ".0 and ip.DstAddr <= " + sub + ".255 and ip.DstAddr != " + wgIp + " and ip.SrcAddr != " + wgIp, WdLayerNetwork, "сеть");
             new Thread(() => CzFwdLoop(hf)) { IsBackground = true, Name = "cz-fwd" }.Start();
             new Thread(() => CzNetLoop(hn)) { IsBackground = true, Name = "cz-net" }.Start();
             new Thread(() => CzAcceptLoop(relay)) { IsBackground = true, Name = "cz-relay" }.Start();
@@ -105,6 +107,29 @@ namespace VpnGuard
         }
         static readonly List<IntPtr> CzProbes = new List<IntPtr>();
         static readonly Dictionary<string, long> CzProbeStat = new Dictionary<string, long>();
+        // все TCP к клиентам не от ретранслятора: кто шлёт клиенту RST / SYN-ACK мимо нас
+        static int CzRstLogged;
+        static void CzRstProbe(string filter, int layer, string name)
+        {
+            var h = WinDivertOpen(filter, layer, -100, 1 /* SNIFF */);
+            if (h == WdInvalid) { Log("zapret для клиентов: наблюдение «" + name + "» не открылось, код " + Marshal.GetLastWin32Error(), "WARN"); return; }
+            lock (CzProbes) CzProbes.Add(h);
+            new Thread(() => {
+                var p = new byte[65535]; var a = new WdAddr(); uint n;
+                while (WinDivertRecv(h, p, (uint)p.Length, out n, ref a)) {
+                    try {
+                        int ihl = (p[0] & 15) * 4, f = p[ihl + 13];
+                        int sport = (p[ihl] << 8) | p[ihl + 1], dport = (p[ihl + 2] << 8) | p[ihl + 3];
+                        if (sport == CzRelayPort) continue;
+                        uint src = IpH(p, 12); bool inSet = CzInSet(src);
+                        if (!inSet) continue;                      // ответы от адресов zapret, пришедшие не через ретранслятор
+                        string fl = ((f & 2) != 0 ? "S" : "") + ((f & 16) != 0 ? "A" : "") + ((f & 8) != 0 ? "P" : "") + ((f & 1) != 0 ? "F" : "") + ((f & 4) != 0 ? "R" : "");
+                        if (Interlocked.Increment(ref CzRstLogged) <= 60)
+                            Log("наблюдение " + (CzSw.ElapsedMilliseconds % 100000).ToString("00000") + "мс [" + name + "] " + IpS(src) + ":" + sport + " → " + IpS(IpH(p, 16)) + ":" + dport + " " + fl + " ifIdx=" + a.IfIdx + (((a.Flags >> 17) & 1) == 1 ? " исх" : " вх") + " len=" + n + " ttl=" + p[8], "INFO");
+                    } catch { }
+                }
+            }) { IsBackground = true, Name = "cz-rst-" + name }.Start();
+        }
         static void CzProbe(string filter, int layer, string name)
         {
             var h = WinDivertOpen(filter, layer, -100, 1 /* SNIFF */);
@@ -202,7 +227,13 @@ namespace VpnGuard
                 string fake = CzFakeReason(p, ihl, n, key, dst, dport);
                 if (fake != null) { CzTrace(key, "клиент→ ОТБРОШЕН (" + fake + ")", p, ihl, n); return true; }
                 // SYN: уменьшить MSS клиента — ответы ретранслятора не должны быть больше MTU туннеля клиента (часто 1280)
-                if ((p[ihl + 13] & 0x02) != 0) { CzClampMss(p, ihl, n, src, sport); lock (CzTraced) if (CzTraced.Count < 3 && dport == 443) CzTraced.Add(key); }
+                if ((p[ihl + 13] & 0x02) != 0) {
+                    CzClampMss(p, ihl, n, src, sport);
+                    lock (CzTraced) {
+                        if ((DateTime.Now - CzTraceAt).TotalSeconds >= 120) { CzTraced.Clear(); CzTraceAt = DateTime.Now; CzTraceLeft = 150; }
+                        if (CzTraced.Count < 3 && dport == 443) CzTraced.Add(key);
+                    }
+                }
                 CzTrace(key, "клиент→", p, ihl, n);
                 // к ретранслятору на ПК: как будто клиент подключился к адресу ПК в сети wg_server
                 PutIp(p, 16, CzWgIp); p[ihl + 2] = (byte)(CzRelayPort >> 8); p[ihl + 3] = (byte)(CzRelayPort & 0xFF);
