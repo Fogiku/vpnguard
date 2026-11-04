@@ -161,7 +161,7 @@ namespace VpnGuard
                 CzError = why == "off" ? "" : why; return;
             }
             CzUpdateSet(); CzUpdateNoZ();
-            CzQuicRelay = CfgStr("ws4w.clientQuic", "drop") == "relay"; CzMss = Math.Max(536, CfgInt("ws4w.clientMss", 1200));
+            CzQuicRelay = CfgStr("ws4w.clientQuic", "drop") == "relay"; CzQuicReject = CfgBool("ws4w.clientQuicReject", true); CzMss = Math.Max(536, CfgInt("ws4w.clientMss", 1200));
             CzFallbackMs = Math.Max(1500, CfgInt("ws4w.clientFallbackMs", 3000)); CzBypassMin = Math.Max(1, CfgInt("ws4w.clientBypassMin", 5));
             CzVpnHosts = CfgList("ws4w.clientVpnHosts", new[] { "doubleclick.net", "googlesyndication.com", "googleadservices.com", "google-analytics.com" }).Select(x => x.Trim().TrimStart('.')).Where(x => x.Length > 0).ToArray();
             CzVideoVpn = CfgBool("ws4w.clientVideoVpn", true); CzVideoVpnMin = Math.Max(10, CfgInt("ws4w.clientVideoVpnMin", 360));
@@ -353,7 +353,8 @@ namespace VpnGuard
             if (proto == 17) {
                 int ulen = n - ihl - 8; if (ulen < 0) return true;
                 // QUIC (UDP 443): по умолчанию отбрасываем — YouTube и браузеры сразу переходят на TCP, а TCP идёт через ретранслятор и winws
-                if (dport == 443 && !CzQuicRelay) { Interlocked.Increment(ref CzQuicDrop); Interlocked.Increment(ref cl.Quic); return true; }
+                // молча отброшенный QUIC приложение YouTube ждёт несколько секунд — ответить «порт недоступен», чтобы оно сразу перешло на TCP
+                if (dport == 443 && !CzQuicRelay) { Interlocked.Increment(ref CzQuicDrop); Interlocked.Increment(ref cl.Quic); CzIcmpUnreach(b, o, ihl, n); return true; }
                 var key = new CzUdpKey { A = ((ulong)src << 16) | (uint)sport, B = ((ulong)dst << 16) | (uint)dport }; CzUdpFlow f;
                 lock (CzLock) {
                     if (!CzUdp.TryGetValue(key, out f)) {
@@ -415,6 +416,20 @@ namespace VpnGuard
                 if (kind == 2 && l == 4 && ((b[p + 2] << 8) | b[p + 3]) > max) { b[p + 2] = (byte)(max >> 8); b[p + 3] = (byte)(max & 0xFF); Interlocked.Increment(ref CzMssClamped); }
                 p += l;
             }
+        }
+        // ICMP «порт недоступен» клиенту от имени сайта (тип 3, код 3): в ответе — заголовок IP и первые 8 байт исходного пакета
+        static long CzIcmpSent;
+        static void CzIcmpUnreach(byte[] b, int o, int ihl, int n)
+        {
+            if (!CzQuicReject) return;
+            int ql = ihl + Math.Min(8, n - ihl); var p = new byte[28 + ql];
+            p[0] = 0x45; p[2] = (byte)(p.Length >> 8); p[3] = (byte)p.Length; p[8] = 64; p[9] = 1;
+            Buffer.BlockCopy(b, o + 16, p, 12, 4); Buffer.BlockCopy(b, o + 12, p, 16, 4);       // от сайта → клиенту
+            p[20] = 3; p[21] = 3; Buffer.BlockCopy(b, o, p, 28, ql);
+            ushort ic = CsFold(CsAdd(p, 20, 8 + ql, 0)); p[22] = (byte)(ic >> 8); p[23] = (byte)ic;
+            CsFix(p, 0, p.Length);
+            var a = new WdAddr { Flags = WdLayerNetwork | WdOutbound, IfIdx = (uint)CzWgIdx };
+            uint sl; var nh = CzNet; if (nh != WdInvalid && WinDivertSend(nh, p, (uint)p.Length, out sl, ref a)) Interlocked.Increment(ref CzIcmpSent);
         }
         // ответы сайта по UDP → клиенту, пакетом с адреса и порта сайта
         static void CzUdpRecv(CzUdpFlow f)
@@ -608,6 +623,7 @@ namespace VpnGuard
         // открытый сертификат (сообщение Certificate в первом ответе) — значит, отвечает не Google
         static long CzStubs;
         // видео Google через VPN (ws4w.clientVideoVpn): кэш провайдера (адреса не Google) остаётся через zapret
+        static bool CzQuicReject = true;
         static bool CzVideoVpn = true; static int CzVideoVpnMin = 360; static long CzVideoToVpn;
         static readonly ConcurrentDictionary<uint, byte> CzVideoLogged = new ConcurrentDictionary<uint, byte>();
         static CzRanges CzGoogle = new CzRanges { Lo = new uint[0], Hi = new uint[0] }; static DateTime CzGoogleAt = DateTime.MinValue;
@@ -816,7 +832,7 @@ namespace VpnGuard
                 { "packets", Interlocked.Read(ref CzPkts) }, { "passed", Interlocked.Read(ref CzPass) }, { "tcpConns", Interlocked.Read(ref CzTcpConns) }, { "active", CzActive },
                 { "tcpFlows", tcpN }, { "udpFlows", udpN }, { "udpPackets", Interlocked.Read(ref CzUdpPkts) }, { "mb", Math.Round(Interlocked.Read(ref CzBytes) / 1048576.0, 1) },
                 { "errors", Interlocked.Read(ref CzErrors) }, { "relay", CzFwd != WdInvalid ? IpS(CzWgIp) + ":" + CzRelayPort : "" }, { "ifWg", CzWgIdx }, { "ifEth", CzEthIdx },
-                { "ranges", CzSet.Lo.Length }, { "bypass", CzBypass.Count }, { "remap", CzRemap.Count }, { "videoVpn", Interlocked.Read(ref CzVideoToVpn) }, { "hostVpn", Interlocked.Read(ref CzHostToVpn) }, { "badHosts", CzBadHost.Count }, { "stubs", Interlocked.Read(ref CzStubs) }, { "bypassAdded", Interlocked.Read(ref CzBypassAdded) }, { "bypassPkts", Interlocked.Read(ref CzBypassPkts) },
+                { "ranges", CzSet.Lo.Length }, { "bypass", CzBypass.Count }, { "remap", CzRemap.Count }, { "videoVpn", Interlocked.Read(ref CzVideoToVpn) }, { "quicRejected", Interlocked.Read(ref CzIcmpSent) }, { "hostVpn", Interlocked.Read(ref CzHostToVpn) }, { "badHosts", CzBadHost.Count }, { "stubs", Interlocked.Read(ref CzStubs) }, { "bypassAdded", Interlocked.Read(ref CzBypassAdded) }, { "bypassPkts", Interlocked.Read(ref CzBypassPkts) },
                 { "noHost", Interlocked.Read(ref CzNoHost) }, { "winwsProfiles", CzProfs.Count }, { "rate", CzRates() },
                 { "tcpUpKb", Interlocked.Read(ref CzTcpUp) / 1024 }, { "tcpDownKb", Interlocked.Read(ref CzTcpDown) / 1024 }, { "udpDownKb", Interlocked.Read(ref CzUdpDown) / 1024 },
                 { "udpSendFail", Interlocked.Read(ref CzUdpSendFail) }, { "quicDropped", Interlocked.Read(ref CzQuicDrop) }, { "netRewritten", Interlocked.Read(ref CzNetRw) },
