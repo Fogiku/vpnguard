@@ -447,11 +447,11 @@ namespace VpnGuard
                 if (!string.IsNullOrEmpty(tok)) Fail(ip, "Удалённый доступ");
                 Text(ctx, 401, "нужен вход: пароль веб-интерфейса или токен диагностики (X-Token или ?t=)"); return;
             }
-            var readOnly = new[] { "/api/status", "/api/live", "/api/live-hist", "/api/logs", "/api/wg/clients", "/api/wg/conf", "/api/wg/qr", "/api/whoami", "/api/remote", "/api/websettings", "/api/settings", "/api/zlist" };
+            var readOnly = new[] { "/api/status", "/api/live", "/api/live-hist", "/api/logs", "/api/wg/clients", "/api/wg/conf", "/api/wg/qr", "/api/whoami", "/api/remote", "/api/websettings", "/api/settings", "/api/zlist", "/api/wg/backups", "/api/wg/server-conf" };
             bool write = path.StartsWith("/api/") && !readOnly.Contains(path);
             if (write && (req.HttpMethod != "POST" || string.IsNullOrEmpty(req.Headers["X-VG"]))) { Text(ctx, 405, "нужен POST с заголовком X-VG"); return; }
             bool post = req.HttpMethod == "POST";
-            if (post && (path == "/api/remote" || path == "/api/websettings" || path == "/api/settings" || path == "/api/zlist") && string.IsNullOrEmpty(req.Headers["X-VG"])) { Text(ctx, 405, "нужен заголовок X-VG"); return; }
+            if (post && (path == "/api/remote" || path == "/api/websettings" || path == "/api/settings" || path == "/api/zlist" || path == "/api/wg/server-conf") && string.IsNullOrEmpty(req.Headers["X-VG"])) { Text(ctx, 405, "нужен заголовок X-VG"); return; }
 
             Interlocked.Increment(ref Requests); LastReq = DateTime.Now.ToString("dd.MM HH:mm:ss") + " " + ip + " " + path; SaveState(true, "");
             if (role == "diag" && path != "/status") Log("Удалённая диагностика: " + ip + " запросил " + path + (q["c"] != null ? " (" + q["c"] + ")" : ""), "INFO");
