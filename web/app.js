@@ -192,20 +192,14 @@ P.wg = () => {
          ${btn('Выключить', "setCfg('ws4w.clientZapret',false,'zapret для клиентов')")}`
       : `<p class="muted">Клиентам YouTube и Discord сейчас ${zon ? 'не открываются, пока zapret включён (zapret обрабатывает только трафик самого ПК)' : 'идут через VPN'}. Можно пустить их через zapret этого ПК: трафик к адресам zapret (YouTube, Discord …) — через zapret, остальное — через VPN. На устройствах ничего менять не нужно.</p>
          ${btn('Включить', "setCfg('ws4w.clientZapret',true,'zapret для клиентов')", true)}`}</div>`;
-  const sv = wgList && wgList.server;
-  const srvCard = !sv ? '' : `<div class="sec">Сервер</div><div class="card">
-    <table class="kv"><tr><td>Управляет</td><td>${sv.owned ? '<b class="c0">VpnGuard</b> — WS4W не нужен' : '<b class="c1">WS4W</b> — конфиг в его папке'}</td></tr>
-      <tr><td>Адрес сервера</td><td>${esc(sv.address)} · порт UDP ${esc(sv.port)}</td></tr>
-      <tr><td>Адрес для клиентов</td><td>${esc(sv.endpoint || '—')}${sv.endpointSet ? '' : ' <span class="sub">(автоматически)</span>'}</td></tr>
-      <tr><td>DNS для клиентов</td><td>${esc(sv.dns)}${sv.dnsSet ? '' : ' <span class="sub">(автоматически)</span>'}</td></tr>
-      <tr><td>Конфиг</td><td class="sub">${esc(sv.conf)}</td></tr></table>
-    <div class="row" style="margin-top:10px">${btn('Изменить настройки сервера', 'wgServerEdit()')}${sv.owned ? '' : btn('Перенести сервер в VpnGuard (отказаться от WS4W)', 'wgAdopt()', true)}</div>
-    ${sv.owned ? '' : `<p class="sub" style="margin-top:8px">Конфиг сервера и клиентов (${sv.ws4wClients || 0} из WS4W) переносятся в папку VpnGuard, служба туннеля переустанавливается — клиенты отключатся на несколько секунд и подключатся сами. Ключи не меняются, перенастраивать устройства не нужно. Файлы WS4W остаются как есть.</p>`}</div>`;
-  return compHead('wg', btn('＋ Новый клиент', 'addClient()', true) + btn('Перезапустить туннель', "cmd('restart-wg','перезапуск WG-Server')")) + srvCard + czCard +
+  const srv = wgServerSection();
+  if (wgList && wgList.noServer) return compHead('wg', '') + srv + timeline('wg');
+  return compHead('wg', btn('＋ Новый клиент', 'addClient()', true) + btn('Перезапустить туннель', "cmd('restart-wg','перезапуск WG-Server')")) +
     `<div class="sec">Клиенты (зелёный — на связи за 3 минуты)</div><div class="card">${list.length ? `<table><tr><th>Клиент</th><th>IP</th><th class="hide-m">Откуда</th><th>Рукопожатие</th><th class="hide-m">Всего</th><th></th></tr>${rows}</table>` : '<p class="muted">Клиентов нет.</p>'}</div>` +
+    srv + czCard +
     timeline('wg') + '<div class="sec">Подробности</div><div class="card">' + kvTable(comp('wg')) + '</div>' + chartBlock('w', 'Скорость WG-Server — последние 2 часа');
 };
-P.wg.after = async () => { try { const r = await api('/api/wg/clients'); if (r.ok) { const changed = JSON.stringify(r) !== JSON.stringify(wgList); wgList = r; if (changed && page === 'wg') render(true); } } catch (e) { } };
+P.wg.after = async () => { try { const r = await api('/api/wg/clients'); if (r.ok || r.noServer) { const changed = JSON.stringify(r) !== JSON.stringify(wgList); wgList = r; if (changed && page === 'wg') render(true); } } catch (e) { } };
 async function addClient() {
   const n = prompt('Имя нового клиента (например, телефон или ноутбук):'); if (!n) return;
   try { const r = await api('/api/wg/add', { name: n }); wgList = null; toast(`Клиент «${r.name}» создан: ${r.ip}`); showConfText(r.name, r.ip, r.text); P.wg.after(); } catch (e) { toast('Не удалось: ' + e.message, true); }
@@ -218,13 +212,98 @@ async function wgRename(ip, name) {
   const n = prompt(`Новое имя клиента «${name}» (${ip}):`, name); if (!n || n === name) return;
   try { await api('/api/wg/rename', { ip, name: n }); toast(`«${name}» → «${n}»`); wgList = null; await P.wg.after(); load(); } catch (e) { toast(e.message, true); }
 }
-async function wgServerEdit() {
+// ---- раздел «Сервер»: состояние, настройки (форма), ключ, конфиг, резервные копии, создание с нуля
+const wsIn = (id, val, ph, o = {}) => `<input type="text" id="${id}" data-keep value="${esc(val ?? '')}" placeholder="${esc(ph || '')}"${o.dis ? ' disabled' : ''} style="width:100%;max-width:${o.w || 320}px">`;
+const wsRow = (label, hint, field) => `<tr><td>${label}${hint ? `<div class="sub">${hint}</div>` : ''}</td><td>${field}</td></tr>`;
+function wgServerSection() {
+  if (wgList && wgList.noServer) {
+    const d = wgList.defaults || {};
+    return `<div class="sec">Сервер</div><div class="card"><p><b>Сервера WG-Server ещё нет.</b> Его можно создать здесь — VpnGuard сам сделает ключи, конфиг, службу туннеля и правило брандмауэра; WS4W не нужен.</p>
+      ${wgList.installed ? '' : '<p class="c2">Сначала установите WireGuard на вкладке «Компоненты».</p>'}
+      <table class="kv">${wsRow('Адрес сервера', 'подсеть /24; клиенты получат адреса из неё', wsIn('ws_addr', d.address || '10.253.0.1', '10.8.0.1'))}
+        ${wsRow('Порт UDP', 'его нужно пробросить на роутере на этот ПК', wsIn('ws_port', d.port || 51820, '51820', { w: 110 }))}
+        ${wsRow('MTU', 'пусто — автоматически', wsIn('ws_mtu', '', 'авто', { w: 110 }))}
+        ${wsRow('Адрес для клиентов', 'внешний IP или имя (DDNS); пусто — определить автоматически', wsIn('ws_ep', '', 'автоматически'))}
+        ${wsRow('DNS для клиентов', 'пусто — адрес сервера', wsIn('ws_dns', '', 'автоматически'))}</table>
+      <div class="row" style="margin-top:10px">${btn('Создать сервер', 'wgCreate(false)', true)}</div></div>`;
+  }
+  const sv = wgList && wgList.server; if (!sv) return '';
+  const own = sv.owned, dis = { dis: !own };
+  const svc = !sv.running ? '<b class="c2">не работает</b>' : sv.svcOk ? '<span class="c0">работает</span>' : '<b class="c1">работает, но с другим файлом конфига</b>';
+  return `<div class="sec">Сервер</div><div class="card">
+    <table class="kv"><tr><td>Управляет</td><td>${own ? '<b class="c0">VpnGuard</b> — WS4W не нужен' : '<b class="c1">WS4W</b> — конфиг в его папке'}</td></tr>
+      <tr><td>Служба туннеля</td><td>${svc}${sv.svcOk ? '' : `<div class="sub">служба: ${esc(sv.svcConf || 'не установлена')}<br>нужно: ${esc(sv.conf)}</div><div style="margin-top:6px">${btn('Исправить — переустановить службу', 'wgFixService()', true)}</div>`}</td></tr>
+      <tr><td>Адрес · порт</td><td>${esc(sv.address)} · UDP ${esc(sv.port)}${sv.mtu ? ' · MTU ' + sv.mtu : ''}</td></tr>
+      <tr><td>Открытый ключ сервера</td><td><code style="word-break:break-all">${esc(sv.publicKey)}</code></td></tr>
+      <tr><td>Конфиг</td><td class="sub">${esc(sv.conf)}</td></tr></table>
+    <div class="row" style="margin-top:10px">${btn('Конфиг сервера', 'wgConfEdit()')}${btn(`Резервные копии (${sv.backups || 0})`, 'wgBackups()')}${own ? btn('Сменить ключ сервера', 'wgRegenKey()') + btn('Создать сервер заново', 'wgCreate(true)') : btn('Перенести сервер в VpnGuard (отказаться от WS4W)', 'wgAdopt()', true)}</div>
+    ${own ? '' : `<p class="sub" style="margin-top:8px">Конфиг сервера и клиентов (${sv.ws4wClients || 0} из WS4W) переносятся в папку VpnGuard, служба туннеля переустанавливается — клиенты отключатся на несколько секунд и подключатся сами. Ключи не меняются, перенастраивать устройства не нужно. Файлы WS4W остаются как есть.</p>`}</div>
+  <div class="sec">Настройки сервера</div><div class="card"><table class="kv">
+    ${wsRow('Адрес сервера', own ? 'подсеть /24. При смене подсети клиенты переедут в новую (последнее число адреса сохранится)' : 'меняется после переноса в VpnGuard', wsIn('ws_addr', sv.ip, '', dis))}
+    ${wsRow('Порт UDP', own ? 'не забудьте пробросить новый порт на роутере' : '', wsIn('ws_port', sv.port, '', Object.assign({ w: 110 }, dis)))}
+    ${wsRow('MTU', 'пусто — автоматически (1420)', wsIn('ws_mtu', sv.mtu || '', 'авто', Object.assign({ w: 110 }, dis)))}
+    ${wsRow('Адрес для клиентов', 'внешний IP или имя (DDNS), можно с :портом; пусто — автоматически', wsIn('ws_ep', sv.endpointSet, sv.endpoint || 'автоматически'))}
+    ${wsRow('DNS для клиентов', 'IP через запятую; пусто — автоматически', wsIn('ws_dns', sv.dnsSet, sv.dns || 'автоматически'))}
+    ${wsRow('Маршруты клиентов', '0.0.0.0/0 — весь трафик устройства через сервер; или только нужные подсети через запятую', wsIn('ws_allowed', sv.allowed, '0.0.0.0/0', { w: 420 }))}
+    ${wsRow('Keepalive, с', 'клиент шлёт пакет раз в N секунд, чтобы связь не засыпала; 0 — выкл', wsIn('ws_ka', sv.keepalive, '25', { w: 110 }))}
+  </table><div class="row" style="margin-top:10px">${btn('Сохранить', 'wgServerSave()', true)}${btn('Отменить изменения', 'wgFormReset()')}</div>
+  <p class="sub" style="margin-top:8px">Адрес, порт и MTU применяются перезапуском туннеля (клиенты отключатся на несколько секунд). Адрес/DNS/маршруты/keepalive для клиентов и смена адреса или порта записываются в конфиги клиентов, которые хранит VpnGuard${sv.noFile ? ` (у ${sv.noFile} клиент(ов) конфига на ПК нет — их нужно настроить на устройстве вручную)` : ''}; на устройствах такие конфиги нужно загрузить заново (кнопка «QR и настройки»).</p></div>`;
+}
+const wsVal = id => { const e = $('#' + id); return e ? e.value.trim() : undefined; };
+function wgFormReset() { for (const e of document.querySelectorAll('[data-keep]')) e.value = e.defaultValue; }
+async function wgServerSave() {
   const sv = (wgList && wgList.server) || {};
-  const ep = prompt('Адрес для клиентов — внешний IP или имя (можно с :портом). Пусто — определять автоматически:', sv.endpointSet || ''); if (ep === null) return;
-  const dns = prompt('DNS для клиентов — IP через запятую. Пусто — автоматически (адрес сервера):', sv.dnsSet || ''); if (dns === null) return;
-  let port = sv.port;
-  if (sv.owned) { const p = prompt('Порт сервера (UDP). Смена порта перезапустит туннель, и конфиги на устройствах нужно будет загрузить заново:', sv.port); if (p === null) return; port = +p || sv.port; }
-  try { const r = await api('/api/wg/server', { endpoint: ep.trim(), dns: dns.trim(), port }); toast(r.done && r.done.length ? r.done.join('; ') : 'без изменений'); wgList = null; P.wg.after(); } catch (e) { toast(e.message, true); }
+  const b = { endpoint: wsVal('ws_ep'), dns: wsVal('ws_dns'), allowed: wsVal('ws_allowed'), keepalive: wsVal('ws_ka') };
+  if (sv.owned) Object.assign(b, { address: wsVal('ws_addr'), port: wsVal('ws_port'), mtu: wsVal('ws_mtu') });
+  const srvCh = sv.owned && (b.address !== sv.ip || +b.port !== sv.port || (+b.mtu || 0) !== (sv.mtu || 0));
+  const cliCh = (b.endpoint !== (sv.endpointSet || '')) || (b.dns !== (sv.dnsSet || '')) || (b.allowed !== sv.allowed) || (+b.keepalive !== sv.keepalive) || (sv.owned && (b.address !== sv.ip || +b.port !== sv.port));
+  if (!srvCh && !cliCh) { toast('Изменений нет'); return; }
+  if (!confirm((srvCh ? 'Туннель перезапустится — клиенты отключатся на несколько секунд.\n' : '') + (cliCh ? 'Конфиги клиентов, которые хранит VpnGuard, обновятся — на устройствах их нужно будет загрузить заново (QR).\n' : '') + '\nСохранить?')) return;
+  toast('Сохраняю…');
+  try { const r = await api('/api/wg/server', b); wgFormReset(); toast(r.done && r.done.length ? r.done.join('; ') : 'без изменений'); wgList = null; await P.wg.after(); render(true); } catch (e) { toast(e.message, true); }
+}
+async function wgCreate(recreate) {
+  const b = { address: wsVal('ws_addr'), port: wsVal('ws_port'), mtu: wsVal('ws_mtu'), recreate };
+  if (!recreate) Object.assign(b, { endpoint: wsVal('ws_ep'), dns: wsVal('ws_dns') });
+  if (recreate) {
+    if (!confirm(`Создать сервер заново с адресом ${b.address}/24 и портом ${b.port}?\n\nБудут новые ключи. ВСЕ клиенты удаляются — их нужно будет создать и настроить на устройствах заново.\nПрежний конфиг и конфиги клиентов сохранятся в data\\backup.`)) return;
+    if ((prompt('Для подтверждения введите слово ЗАНОВО') || '').trim().toUpperCase() !== 'ЗАНОВО') { toast('Отменено'); return; }
+  }
+  toast('Создаю сервер… (до минуты)');
+  try { await api('/api/wg/create', b); wgFormReset(); toast('Сервер создан и запущен'); wgList = null; await P.wg.after(); render(true); load(); } catch (e) { toast('Не удалось: ' + e.message, true); }
+}
+async function wgFixService() {
+  if (!confirm('Переустановить службу туннеля на конфиг VpnGuard? Клиенты отключатся на несколько секунд.')) return;
+  toast('Переустанавливаю службу…');
+  try { await api('/api/wg/fix-service', {}); toast('Служба туннеля — на нужном конфиге'); wgList = null; await P.wg.after(); render(true); } catch (e) { toast(e.message, true); }
+}
+async function wgRegenKey() {
+  if (!confirm('Сменить ключ сервера?\n\nСтарые конфиги на ВСЕХ устройствах перестанут подключаться. Конфиги клиентов, которые хранит VpnGuard, обновятся сами — их нужно загрузить на устройства заново (QR). Туннель перезапустится.')) return;
+  try { const r = await api('/api/wg/regen-key', {}); toast(`Новый ключ сервера. Обновлено конфигов клиентов: ${r.patched}${r.restart ? ' · туннель: ' + r.restart : ''}`); wgList = null; await P.wg.after(); render(true); } catch (e) { toast(e.message, true); }
+}
+async function wgConfEdit() {
+  let r; try { r = await api('/api/wg/server-conf'); } catch (e) { toast(e.message, true); return; }
+  $('#mbody').innerHTML = `<div class="row" style="justify-content:space-between"><h1>Конфиг сервера</h1>${btn('Закрыть', 'closeModal()')}</div>
+    <p class="sub">${esc(r.conf)}</p><p class="muted">${r.owned ? 'Закрытый ключ скрыт — строку с ним не меняйте. Перед сохранением конфиг проверяется; прежний попадёт в резервные копии, туннель перезапустится.' : 'Сервер под управлением WS4W — здесь только просмотр.'}</p>
+    <textarea class="log" id="wsconf" spellcheck="false" style="height:55vh"${r.owned ? '' : ' readonly'}>${esc(r.text)}</textarea>
+    ${r.owned ? `<div class="row" style="margin-top:8px">${btn('Проверить и сохранить', 'wgConfSave()', true)}</div>` : ''}`;
+  $('#modal').style.display = 'flex';
+}
+async function wgConfSave() {
+  if (!confirm('Сохранить конфиг сервера и перезапустить туннель?')) return;
+  try { const r = await api('/api/wg/server-conf', { text: $('#wsconf').value }); closeModal(); toast('Конфиг сохранён' + (r.restart ? ' · туннель: ' + r.restart : ', туннель перезапущен')); wgList = null; await P.wg.after(); render(true); } catch (e) { toast(e.message, true); }
+}
+async function wgBackups() {
+  let r; try { r = await api('/api/wg/backups'); } catch (e) { toast(e.message, true); return; }
+  const own = wgList && wgList.server && wgList.server.owned;
+  $('#mbody').innerHTML = `<div class="row" style="justify-content:space-between"><h1>Резервные копии конфига сервера</h1>${btn('Закрыть', 'closeModal()')}</div>
+    <p class="muted">Копия делается перед каждым изменением сервера (последние 30). Восстановление перезапустит туннель; конфиги клиентов на устройствах не меняются.</p>
+    ${r.backups.length ? `<table><tr><th>Когда</th><th>Адрес</th><th>Порт</th><th>Клиентов</th><th></th></tr>${r.backups.map(x => `<tr><td>${esc(x.at)}</td><td>${esc(x.address)}</td><td>${esc(x.port)}</td><td>${x.peers}</td><td>${own ? btn('Восстановить', `wgRestore('${esc(x.file)}','${esc(x.at)}')`) : ''}</td></tr>`).join('')}</table>` : '<p class="muted">Копий пока нет.</p>'}`;
+  $('#modal').style.display = 'flex';
+}
+async function wgRestore(file, at) {
+  if (!confirm(`Вернуть конфиг сервера на копию от ${at}? Текущий тоже сохранится в копиях. Туннель перезапустится.`)) return;
+  try { await api('/api/wg/restore', { file }); closeModal(); toast('Конфиг восстановлен'); wgList = null; await P.wg.after(); render(true); } catch (e) { toast(e.message, true); }
 }
 async function wgAdopt() {
   if (!confirm('Перенести сервер WG-Server под управление VpnGuard?\n\nКонфиг сервера и клиентов скопируется в папку VpnGuard, служба туннеля переустановится — клиенты отключатся на несколько секунд и подключатся сами (ключи те же).\nЕсли новый туннель не поднимется, вернётся прежний конфиг WS4W.')) return;
@@ -411,8 +490,10 @@ function render(force) {
   const ae = document.activeElement; if (!force && ae && ['SELECT', 'INPUT', 'TEXTAREA'].includes(ae.tagName) && page !== 'home') return;
   if ((page === 'logs' && $('#log') || page === 'diag' && $('#remote') || page === 'settings' && $('#setbox')) && !force) return;
   const keep = page === 'zapret' && $('#zltext') ? { text: $('#zltext').value, sel: $('#zlsel') && $('#zlsel').value } : null;
+  const dirty = {}; for (const e of document.querySelectorAll('#page [data-keep]')) if (e.id && e.value !== e.defaultValue) dirty[e.id] = e.value;
   if (!force && page === 'home' && $('#hflow')) { $('#htop').innerHTML = P.home.top(); $('#htiles').innerHTML = P.home.tiles(); }   // схему и журнал не трогаем
   else $('#page').innerHTML = (P[page] || P.home)();
+  for (const [id, v] of Object.entries(dirty)) { const e = document.getElementById(id); if (e) e.value = v; }
   for (const cv of document.querySelectorAll('canvas[data-chart]')) drawChart(cv, cv.dataset.chart);
   if (keep && keep.text !== undefined && zl) { loadZListsKeep(keep); } else if (P[page] && P[page].after) P[page].after();
 }

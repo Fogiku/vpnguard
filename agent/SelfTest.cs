@@ -113,6 +113,28 @@ namespace VpnGuard
                 WgLib.RemovePeer(wconf, Path.Combine(Root, "bk"), "KEY2");
                 var wl = File.ReadAllText(wconf);
                 St(libNames() == "KEY1=Мама телефон;KEY4=ноутбук;KEY6=" && wl.Contains("PrivateKey=AAAA") && !wl.Contains("KEY2") && !wl.Contains("# 2"), "WireGuard: удаление клиента не задевает сервер и соседей");
+                // настройки сервера: порт/MTU в [Interface], перенос клиентов в другую подсеть, проверка конфига, скрытый ключ, правка конфига клиента
+                WgLib.SetKeys(wconf, Path.Combine(Root, "bk"), "Interface", new Dictionary<string, string> { { "ListenPort", "51999" }, { "MTU", "1380" }, { "Address", "10.8.0.1/24" } });
+                WgLib.RenumberPeers(wconf, Path.Combine(Root, "bk"), new Dictionary<string, string> { { "192.168.15.4", "10.8.0.4" }, { "192.168.15.10", "10.8.0.10" }, { "192.168.15.12", "10.8.0.12" } });
+                var wi = WgLib.Read(wconf); var wif = wi.Sections.First(x => x.Type == "Interface");
+                St(wif.Keys["ListenPort"] == "51999" && wif.Keys["MTU"] == "1380" && wif.Keys["Address"] == "10.8.0.1/24" && wif.Keys["PrivateKey"] == "AAAA"
+                    && string.Join(";", wi.Sections.Where(x => x.Type == "Peer").Select(x => x.Keys["AllowedIPs"])) == "10.8.0.4/32;10.8.0.10/32;10.8.0.12/32" && libNames() == "KEY1=Мама телефон;KEY4=ноутбук;KEY6=",
+                    "WireGuard: порт, MTU и адрес сервера меняются, клиенты переезжают в новую подсеть с прежними именами");
+                WgLib.SetKeys(wconf, null, "Interface", new Dictionary<string, string> { { "MTU", null } });
+                St(!File.ReadAllText(wconf).Contains("MTU"), "WireGuard: MTU убирается (автоматически)");
+                string k1 = new string('A', 43) + "=", k2 = new string('B', 43) + "=";
+                var good = new List<string> { "[Interface]", "PrivateKey = " + k1, "Address = 10.8.0.1/24", "ListenPort = 51820", "", "[Peer]", "# Name = a", "PublicKey = " + k2, "AllowedIPs = 10.8.0.2/32" };
+                var bad1 = good.Concat(new[] { "[Peer]", "PublicKey = " + k2, "AllowedIPs = 10.8.0.3/32" }).ToList();
+                var bad2 = good.Select(l => l.Replace("10.8.0.2/32", "10.9.0.2/32")).ToList();
+                var bad3 = good.Select(l => l.Replace("10.8.0.1/24", "10.8.0.1/16")).ToList();
+                St(WgLib.Validate(good) == null && WgLib.Validate(bad1) != null && WgLib.Validate(bad2) != null && WgLib.Validate(bad3) != null && WgLib.Validate(good.Concat(new[] { "мусор" }).ToList()) != null,
+                    "WireGuard: проверка конфига сервера (повтор ключа, адрес вне подсети, не /24, мусор — отказ)");
+                St(WgLib.Masked(wconf).Contains(WgLib.KeyMask) && !WgLib.Masked(wconf).Contains("AAAA"), "WireGuard: закрытый ключ сервера в редакторе скрыт");
+                var wcli = Path.Combine(Root, "cli.conf"); WgLib.WriteLines(wcli, WgLib.ClientConf("P", "10.8.0.4", "10.8.0.1", "S", "Q", "1.2.3.4:51820", "0.0.0.0/0", 25));
+                WgLib.PatchClient(wcli, new Dictionary<string, string> { { "DNS", "1.1.1.1" } }, new Dictionary<string, string> { { "Endpoint", "h.example:5000" }, { "AllowedIPs", "192.168.1.0/24" }, { "PersistentKeepalive", null } });
+                var wct = File.ReadAllText(wcli);
+                St(wct.Contains("DNS = 1.1.1.1") && wct.Contains("Endpoint = h.example:5000") && wct.Contains("AllowedIPs = 192.168.1.0/24") && !wct.Contains("PersistentKeepalive") && wct.Contains("PrivateKey = P"),
+                    "WireGuard: конфиг клиента обновляется (DNS, адрес сервера, маршруты, keepalive)");
 
                 // ---- самообновление: из манифеста принимаются только файлы приложения
                 St(AppPathOk("agent/Core.cs") && AppPathOk("web/index.html") && AppPathOk("VpnGuard.ps1") && AppPathOk("config-schema.txt"), "обновление: файлы приложения принимаются");

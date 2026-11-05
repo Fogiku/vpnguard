@@ -620,6 +620,25 @@ namespace VpnGuard
                     if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; }
                     var r = WgAdopt(); JsonOut(ctx, r, (bool)r["ok"] ? 200 : 400); return;
                 }
+                case "/api/wg/regen-key":
+                case "/api/wg/server-conf":
+                case "/api/wg/backups":
+                case "/api/wg/restore":
+                case "/api/wg/create":
+                case "/api/wg/fix-service": {
+                    // сервер целиком (WebWg.cs): ключ, конфиг, резервные копии, создание с нуля, служба туннеля
+                    if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; }
+                    bool isPost = req.HttpMethod == "POST"; var b = isPost ? Body(req) : new Dictionary<string, object>(); Dictionary<string, object> r;
+                    switch (path) {
+                        case "/api/wg/regen-key": if (!isPost) { Text(ctx, 405, "POST"); return; } r = WgRegenKey(); break;
+                        case "/api/wg/server-conf": r = isPost ? WgServerConfSave(BStr(b, "text")) : WgServerConfText(); if (isPost && (bool)r["ok"]) Log("Веб-интерфейс: конфиг сервера WG-Server изменён вручную (" + ip + ")", "WARN"); break;
+                        case "/api/wg/backups": r = WgBackups(); break;
+                        case "/api/wg/restore": if (!isPost) { Text(ctx, 405, "POST"); return; } r = WgRestore(BStr(b, "file")); break;
+                        case "/api/wg/create": if (!isPost) { Text(ctx, 405, "POST"); return; } r = WgCreate(b); if ((bool)r["ok"]) Log("Веб-интерфейс: создан сервер WG-Server (" + ip + ")", "WARN"); break;
+                        default: if (!isPost) { Text(ctx, 405, "POST"); return; } r = WgFixService(); break;
+                    }
+                    JsonOut(ctx, r, (bool)r["ok"] ? 200 : 400); return;
+                }
                 case "/api/wg/client-set": {
                     // настройки клиента: zapret вкл/выкл, клиент вкл/выкл — списки IP в ws4w.clientNoZapret / ws4w.clientOff (применяет агент)
                     if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; }
