@@ -977,7 +977,7 @@ namespace VpnGuard
                 ProbeFailures = 0; DownTicks = 0; LastTraffic = null; AwgProbeFailures = 0; AwgDownTicks = 0; AwgTraffic = null; ForceIcs = true;
                 LastMode = mode;
             }
-            if (mode == "amnezia" || mode == "dual") { try { AvpnGuard(); } catch (Exception e) { Log("Защита AmneziaVPN: " + e.Message, "WARN"); } }
+            if (mode == "amnezia" || mode == "dual") { try { PerfRun("VpnWatch/защита Amnezia", AvpnGuard); } catch (Exception e) { Log("Защита AmneziaVPN: " + e.Message, "WARN"); } }
             if (InetDown() && mode != "zapret") { ProbeFailures = 0; DownTicks = 0; AwgProbeFailures = 0; AwgDownTicks = 0; DualFails = 0; return; }   // нет интернета у провайдера — туннель ни при чём
             if (mode == "meduza") { MeduzaWatch(); AvpnDisable(false); }
             else if (mode == "amnezia") { if (Up(MzAdapterName())) { Log("MeduzaVPN: подключён, но выбран режим AmneziaVPN — отключаю", "WARN"); MzDisconnect(); } AmneziaWatch(); }
@@ -1142,7 +1142,7 @@ namespace VpnGuard
             bool hot = CfgBool("vpn.dualHot", true);
             string act = DualAct(), oth = OtherKind(act);
             // 1. быстрая проверка активного — до долгого восстановления, чтобы клиенты не ждали
-            bool actUp = Up(KindAdapter(act)), actOk = actUp && KindOk(act);
+            bool actUp = Up(KindAdapter(act)), actOk = false; PerfRun("VpnWatch/проверка активного", () => { actOk = actUp && KindOk(act); });
             bool grace = act == "meduza" && (DateTime.Now - MeduzaStartedAt).TotalSeconds < CfgInt("meduza.startupGraceSec", 60);
             if (actOk || grace) DualFails = 0; else DualFails++;
             int need = Math.Max(1, CfgInt("vpn.failoverChecks", 2));
@@ -1161,9 +1161,9 @@ namespace VpnGuard
             act = DualAct();
             try { DualSyncRoutes(); } catch { }
             if (hot) {
-                bool actBad = !KindOk(act);
+                bool actBad = false; PerfRun("VpnWatch/проверка активного 2", () => { actBad = !KindOk(act); });
                 foreach (var k in actBad ? new[] { OtherKind(act), act } : new[] { act, OtherKind(act) }) {
-                    try { KindWatch(k); } catch (Exception e) { Log(ModeNames[k] + ": " + e.Message, "ERROR"); }
+                    try { var kk = k; PerfRun("VpnWatch/" + ModeNames[k], () => KindWatch(kk)); } catch (Exception e) { Log(ModeNames[k] + ": " + e.Message, "ERROR"); }
                     if (actBad && k != act) DualMidCheck();               // резерв в порядке — трафик на него до того, как чинить основной
                 }
             }
