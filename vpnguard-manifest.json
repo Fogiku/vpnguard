@@ -1,8 +1,8 @@
 {
-    "version":  "3.26.0",
-    "build":  "20261105-1432",
+    "version":  "3.26.1",
+    "build":  "20261105-1435",
     "notes":  "",
-    "date":  "2026-11-05T14:32:19.4083375+03:00",
+    "date":  "2026-11-05T14:35:04.6652433+03:00",
     "files":  [
                   {
                       "path":  "Agent.cs",
@@ -21,8 +21,8 @@
                   },
                   {
                       "path":  "agent/ClientZapret.cs",
-                      "sha256":  "6aaf9d0eff32bbfe8646dbeedadd3e51ccd8eba252722b2fda0837f52322a51b",
-                      "size":  96103
+                      "sha256":  "9d8e353c05d6e24d41e47d23182cec90b3ba7e7a69412bcd38e3fb8e8dbbb78c",
+                      "size":  81485
                   },
                   {
                       "path":  "agent/Commands.cs",
@@ -53,6 +53,11 @@
                       "path":  "agent/Inet.cs",
                       "sha256":  "194237ae5e902f9befc82f12ad7175e331559cabe63c8fbd78ba404b77def4a5",
                       "size":  6236
+                  },
+                  {
+                      "path":  "agent/Lan.cs",
+                      "sha256":  "16db019ed38f442a1bff563e0de381fa2a6ef5bd85ceb9be3b590b7dba58f8d3",
+                      "size":  6627
                   },
                   {
                       "path":  "agent/Meduza.cs",
@@ -88,6 +93,11 @@
                       "path":  "agent/TunnelDiag.cs",
                       "sha256":  "ba6959f6ffdfef44064199f3e951ec635ec4535bcb3251aedd618ce1c40ac18e",
                       "size":  9645
+                  },
+                  {
+                      "path":  "agent/WgClients.cs",
+                      "sha256":  "a7a1eb97499f8aef68763e6832a8edf33d23987b3ccca43d49c4aab68e7784ea",
+                      "size":  9232
                   },
                   {
                       "path":  "agent/WgServer.cs",
@@ -176,7 +186,7 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "3d8ce40ef9b7f4a81e008a48533be66c7ae3e2115f1fc604b6b0e831b630977c",
+                      "sha256":  "a3ca9b0321feb810bd705f449d820b47e56eb91aa51f99d285346b36f5cebb13",
                       "size":  82234
                   },
                   {
