@@ -79,23 +79,16 @@ function Invoke-TrayWatch {
     $script:TrayCheckAt = Get-Date
     $t = Get-ScheduledTask -TaskName 'VpnGuardMonitor' -ErrorAction SilentlyContinue
     if (-not $t) { return }
-    $want = -not ($Cfg.ui -and $Cfg.ui.tray -eq $false)
+    $was = [bool](Get-Process VpnGuardTray -ErrorAction SilentlyContinue)
+    if (-not (Build-CsExe $TrayExe @('Tray.cs') 'winexe' @('System.Windows.Forms.dll', 'System.Drawing.dll', 'System.Web.Extensions.dll'))) { return }
     $isTray = "$($t.Actions[0].Execute)" -like '*VpnGuardTray.exe'
-    if ($want) {
-        $was = [bool](Get-Process VpnGuardTray -ErrorAction SilentlyContinue)
-        if (-not (Build-CsExe $TrayExe @('Tray.cs') 'winexe' @('System.Windows.Forms.dll', 'System.Drawing.dll', 'System.Web.Extensions.dll'))) { return }
-        if ($was -and $isTray -and -not (Get-Process VpnGuardTray -ErrorAction SilentlyContinue)) { & schtasks.exe /run /tn VpnGuardMonitor | Out-Null }   # пересобран — запустить снова
-        if (-not $isTray) {
-            $trig = @($t.Triggers | Where-Object { $_ })        # у задачи может не быть триггеров — без пустых элементов
-            if (-not @($trig | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger' }).Count) { $trig += New-ScheduledTaskTrigger -AtLogOn -User $t.Principal.UserId }
-            Set-ScheduledTask -TaskName 'VpnGuardMonitor' -Action (New-ScheduledTaskAction -Execute $TrayExe -Argument "`"$Root`"" -WorkingDirectory $Root) -Trigger $trig | Out-Null
-            Write-Log 'Значок у часов: ярлык VpnGuard и вход в Windows теперь открывают значок (веб-интерфейс по щелчку); классическое окно — в меню значка' 'WARN'
-            if (-not (Get-Process VpnGuardTray -ErrorAction SilentlyContinue)) { & schtasks.exe /run /tn VpnGuardMonitor | Out-Null }
-        }
-    } elseif ($isTray) {
-        Set-ScheduledTask -TaskName 'VpnGuardMonitor' -Action (New-HiddenPsAction (Join-Path $Root 'VpnGuardMonitor.ps1')) | Out-Null
-        Get-Process VpnGuardTray -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-        Write-Log 'Значок у часов выключен (ui.tray = false): ярлык снова открывает классическое окно'
+    if ($was -and $isTray -and -not (Get-Process VpnGuardTray -ErrorAction SilentlyContinue)) { & schtasks.exe /run /tn VpnGuardMonitor | Out-Null }   # пересобран — запустить снова
+    if (-not $isTray) {                                  # задача ещё открывает классическое окно (его больше нет) — переключить на значок
+        $trig = @($t.Triggers | Where-Object { $_ })        # у задачи может не быть триггеров — без пустых элементов
+        if (-not @($trig | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger' }).Count) { $trig += New-ScheduledTaskTrigger -AtLogOn -User $t.Principal.UserId }
+        Set-ScheduledTask -TaskName 'VpnGuardMonitor' -Action (New-ScheduledTaskAction -Execute $TrayExe -Argument "`"$Root`"" -WorkingDirectory $Root) -Trigger $trig | Out-Null
+        Write-Log 'Значок у часов: ярлык VpnGuard и вход в Windows открывают значок (веб-интерфейс по щелчку)' 'WARN'
+        if (-not (Get-Process VpnGuardTray -ErrorAction SilentlyContinue)) { & schtasks.exe /run /tn VpnGuardMonitor | Out-Null }
     }
 }
 
@@ -187,9 +180,6 @@ function Invoke-RemoteWatch {
     if ($wc.enabled -and $wc.requirePassword -ne $false -and "$($wc.token)".Length -lt 6) { Set-ConfigValue 'web.token' (New-WebToken); Write-Log 'Веб-интерфейс: создан пароль для входа с других устройств (виден в окне и в config.json, web.token)' }
     $r.port = [int](Get-WCfg).port
     Sync-RemoteFirewall $r
-    # прежний сервер на PowerShell (до 3.10) — заменить сервером на C#
-    $cur = Get-RemoteProc
-    if ($cur -and $cur.ProcessName -like 'powershell*' -and (Build-WebExe)) { Write-Log 'Веб-сервер: перехожу с PowerShell на C#'; Stop-Process -Id $cur.Id -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1 }
     if (-not (Get-RemoteProc)) {
         if (Start-WebServer) { Write-Log "Веб-сервер VpnGuard: запускаю на порту $($r.port)$(if (Test-RemoteOn $r) { " · удалённая диагностика до $((Get-RemoteUntil $r).ToString('dd.MM HH:mm'))" })" 'WARN' }
         else { Write-Log 'Веб-сервер VpnGuard не собрался (Web.cs) — веб-интерфейс и удалённая диагностика недоступны' 'ERROR' }

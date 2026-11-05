@@ -138,7 +138,7 @@ function Install-Software([string]$Id) {
                 Write-Log "Компоненты: устанавливаю WireGuard $($rel.Version) (туннель wg_server на несколько секунд прервётся)" 'WARN'
                 Install-Package $f 'DO_NOT_LAUNCH=1'
                 Remove-Item $f -Force -ErrorAction SilentlyContinue
-                $State.forceIcs = $true
+                Set-Content (Join-Path $DataDir ('cmd\{0}.cmd' -f [DateTime]::UtcNow.Ticks)) 'reapply-ics' -Encoding ASCII   # раздачу перенастроит агент C#
             }
             default {
                 $d = $SwDefs[$Id]

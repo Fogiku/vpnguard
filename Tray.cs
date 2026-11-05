@@ -1,4 +1,4 @@
-// VpnGuard — значок у часов (вместо окна): цвет — общее состояние, двойной щелчок — веб-интерфейс, меню — основные действия.
+﻿// VpnGuard — значок у часов (вместо окна): цвет — общее состояние, двойной щелчок — веб-интерфейс, меню — основные действия.
 // Собирается агентом встроенным компилятором .NET Framework (C# 5):
 //   csc /target:winexe /out:bin\VpnGuardTray.exe /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll Tray.cs
 // Запуск: VpnGuardTray.exe <папка VpnGuard>. Запускается задачей VpnGuardMonitor (ярлык VpnGuard на рабочем столе).
@@ -59,7 +59,6 @@ namespace VpnGuard
                 miZapret,
                 new ToolStripSeparator(),
                 new ToolStripMenuItem("Перезапустить агент", null, (s, e) => RestartAgent()),
-                new ToolStripMenuItem("Классическое окно", null, (s, e) => Run("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + Path.Combine(Root, "VpnGuardMonitor.ps1") + "\"")),
                 new ToolStripMenuItem("Папка VpnGuard", null, (s, e) => Run("explorer.exe", "\"" + Root + "\"")),
                 new ToolStripSeparator(),
                 new ToolStripMenuItem("Скрыть значок", null, (s, e) => { icon.Visible = false; ExitThread(); }) });

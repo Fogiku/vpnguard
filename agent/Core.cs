@@ -121,7 +121,6 @@ namespace VpnGuard
             LoadCfg(true);
             LoadTrafficDays();
             Log("VpnGuard " + Version + " запущен — агент на C# (PID " + Process.GetCurrentProcess().Id + ")", "INFO");
-            try { CleanupOldAwg(); } catch (Exception e) { Log("AmneziaVPN: очистка старых туннелей AmneziaWG: " + e.Message, "WARN"); }
             MeduzaStartedAt = DateTime.Now;
             new Thread(LiveLoop) { IsBackground = true, Name = "live" }.Start();
             new Thread(InetLoop) { IsBackground = true, Name = "inet" }.Start();

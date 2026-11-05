@@ -29,7 +29,7 @@ param(
     [string]$ConfigPath = ''
 )
 
-$AgentVersion = '3.27.0'
+$AgentVersion = '3.28.0'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -621,85 +621,6 @@ function Get-IcsStatus {
     }
 }
 
-function Set-IcsScope([string]$Address) {
-    if (-not $Address) { return $false }
-    $k = 'HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters'
-    $cur = (Get-ItemProperty $k -ErrorAction SilentlyContinue).ScopeAddress
-    if ($cur -ne $Address) {
-        Set-ItemProperty $k -Name ScopeAddress       -Value $Address
-        Set-ItemProperty $k -Name ScopeAddressBackup -Value $Address
-        Write-Log "ICS: ScopeAddress -> $Address"
-        return $true
-    }
-    return $false
-}
-
-function Invoke-SharingWatch {
-    if (-not $Cfg.sharing.enabled) { return }
-    $up = Get-UplinkName
-    if (-not $up -or -not (Get-UpAdapter $up)) { return }
-    if (-not (Get-UpAdapter $W.interfaceName)) { return }
-
-    $addr = Get-WgServerAddress
-    $st = Get-IcsStatus
-    $wgIp = Get-AdapterIPv4 $W.interfaceName
-    $ipOk = (-not $addr -or $wgIp -eq $addr -or ((Get-Date) - $State.lastIpFix).TotalMinutes -lt 10)
-    if ($st.Ok -and $ipOk -and -not $State.forceIcs) { return }
-    if (-not $State.forceIcs -and ((Get-Date) - $State.lastIcsApply).TotalSeconds -lt 20) { return }
-    $State.forceIcs = $false
-    $State.lastIcsApply = Get-Date
-
-    Write-Log "ICS: настраиваю общий доступ '$up' -> '$($W.interfaceName)'"
-    Set-Activity 'настраиваю раздачу'
-    try {
-        if ((Get-Service SharedAccess).StartType -ne 'Automatic') { Set-Service SharedAccess -StartupType Automatic }
-        $scopeChanged = Set-IcsScope $addr
-        if (-not (Wait-IcsService)) { throw 'служба SharedAccess не запускается' }
-        if ($scopeChanged) {
-            # новый ScopeAddress служба читает только при старте
-            Write-Log 'ICS: перезапуск службы SharedAccess для нового адреса'
-            Restart-Service SharedAccess -Force
-            [void](Wait-IcsService)
-        }
-
-        # записи удалённых адаптеров (старый ULTRA) мешают включить раздачу на новом
-        if ((Clear-StaleIcs) -gt 0) {
-            Write-Log 'ICS: перезапуск службы SharedAccess после очистки старых записей'
-            try { Restart-Service SharedAccess -Force } catch { }
-            [void](Wait-IcsService)
-        }
-
-        # выключаем только то, что настроено неправильно — иначе служба остановится сама
-        foreach ($c in @(Get-IcsConnections)) {
-            if (-not $c.Enabled) { continue }
-            $right = ($c.Name -eq $up -and $c.Type -eq 0) -or ($c.Name -eq $W.interfaceName -and $c.Type -eq 1)
-            if (-not $right) {
-                Write-Log "ICS: снимаю общий доступ с '$($c.Name)' (тип $($c.Type))"
-                $c.Config.DisableSharing()
-                Start-Sleep -Seconds 1
-            }
-        }
-
-        Enable-IcsSide $up 0
-        Enable-IcsSide $W.interfaceName 1
-        Start-Sleep -Seconds 3
-
-        # ICS мог сбросить адрес wg_server — вернуть его
-        $wgIp = Get-AdapterIPv4 $W.interfaceName
-        if ($addr -and $wgIp -ne $addr -and ((Get-Date) - $State.lastIpFix).TotalMinutes -ge 10) {
-            $State.lastIpFix = Get-Date
-            Write-Log "ICS: адрес wg_server стал $wgIp, ожидается $addr — перезапуск туннеля" 'WARN'
-            Restart-Service -Name $W.serviceName -Force
-            (Get-Service -Name $W.serviceName).WaitForStatus('Running', [TimeSpan]::FromSeconds(30))
-        }
-        if ((Get-IcsStatus).Ok) { Write-Log 'ICS: общий доступ включён'; $State.lastIcsFix = Get-Date; $State.icsFixCount++ }
-        else { Write-Log 'ICS: после настройки состояние не подтвердилось, повторю' 'WARN' }
-    } catch {
-        Write-Log "ICS: ошибка: $($_.Exception.Message)" 'ERROR'
-        Write-IcsDiagnostics
-    }
-}
-
 # Записи раздачи в хранилище Windows (WMI root\Microsoft\HomeNet), включая записи удалённых адаптеров.
 # MeduzaVPN создаёт адаптер ULTRA заново (с новым GUID) при каждом подключении; запись старого адаптера
 # остаётся помеченной как «публичный ICS», и Windows отказывается включать новый (0x80040201).
@@ -719,23 +640,6 @@ function Get-HNetIcsEntries {
         }
 }
 
-function Clear-StaleIcs {
-    $n = 0
-    foreach ($e in @(Get-HNetIcsEntries | Where-Object { -not $_.Present })) {
-        Write-Log ("ICS: висячая запись раздачи удалённого адаптера '{0}' {1} (публичный={2}, частный={3}) — очищаю" -f $e.Name, $e.Guid, $e.Public, $e.Private) 'WARN'
-        try {
-            $e.Instance.IsIcsPublic = $false
-            $e.Instance.IsIcsPrivate = $false
-            [void]$e.Instance.Put()
-            $n++
-        } catch {
-            Write-Log "ICS: не удалось очистить запись $($e.Guid): $($_.Exception.Message)" 'ERROR'
-        }
-    }
-    return $n
-}
-
-# снять общий доступ со всех подключений (чтобы начать с чистого состояния)
 function Reset-AllIcs {
     foreach ($c in @(Get-IcsConnections)) {
         if ($c.Enabled) {
@@ -749,7 +653,6 @@ function Reset-AllIcs {
     [void](Wait-IcsService)
 }
 
-# дождаться, пока служба ICS будет в состоянии Running (она сама останавливается, когда раздавать нечего)
 function Wait-IcsService([int]$TimeoutSec = 30) {
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     while ((Get-Date) -lt $deadline) {
@@ -763,7 +666,6 @@ function Wait-IcsService([int]$TimeoutSec = 30) {
     return ((Get-Service SharedAccess).Status -eq 'Running')
 }
 
-# включить общий доступ на одном адаптере (0 = публичный, 1 = частный) с повторами
 function Enable-IcsSide([string]$Name, [int]$Type) {
     $last = $null
     for ($try = 1; $try -le 3; $try++) {
@@ -970,36 +872,16 @@ function Invoke-Diag([switch]$TryFix) {
         Try-Run {
             if (-not (Get-UpAdapter (Get-UplinkName))) { Write-Host "!! '$(Get-UplinkName)' не поднят — раздачу включать некуда" }
             if (-not (Get-UpAdapter $W.interfaceName)) { Write-Host "!! '$($W.interfaceName)' не поднят" }
-            $State.forceIcs = $true
-            Invoke-SharingWatch
-            $st = Get-IcsStatus
+            # раздачу чинит агент на C# (модуль «Раздача») — отправить ему команду и дождаться
+            Set-Content (Join-Path $DataDir ("cmd\{0}.cmd" -f [DateTime]::UtcNow.Ticks)) 'reapply-ics' -Encoding ASCII
+            Write-Host 'Команда агенту: восстановить раздачу — жду до 60 с…'
+            $dl = (Get-Date).AddSeconds(60); do { Start-Sleep -Seconds 3; $st = Get-IcsStatus } while (-not $st.Ok -and (Get-Date) -lt $dl)
             Write-Host ("Итог: '{0}' включён={1} тип={2}; '{3}' включён={4} тип={5}; OK={6}" -f `
                 (Get-UplinkName), $st.Public.Enabled, $st.Public.Type, $W.interfaceName, $st.Private.Enabled, $st.Private.Type, $st.Ok)
         }
     }
     Section 'Конец отчёта'
 }
-function Write-IcsDiagnostics {
-    try {
-        $s = Get-Service SharedAccess
-        Write-Log "ICS диагностика: служба SharedAccess $($s.Status) / $($s.StartType)" 'WARN'
-        foreach ($c in @(Get-IcsConnections)) {
-            if ($c.Enabled -or $c.Name -eq (Get-UplinkName) -or $c.Name -eq $W.interfaceName) {
-                Write-Log ("ICS диагностика: '{0}' включён={1} тип={2}" -f $c.Name, $c.Enabled, $c.Type) 'WARN'
-            }
-        }
-        $p = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters' -ErrorAction SilentlyContinue
-        Write-Log "ICS диагностика: ScopeAddress=$($p.ScopeAddress) wg_server IP=$(Get-AdapterIPv4 $W.interfaceName)" 'WARN'
-        foreach ($e in @(Get-HNetIcsEntries)) {
-            Write-Log ("ICS диагностика: HomeNet {0} '{1}' публичный={2} частный={3} адаптер есть={4}" -f $e.Guid, $e.Name, $e.Public, $e.Private, $e.Present) 'WARN'
-        }
-        $pol = Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Network Connections' -ErrorAction SilentlyContinue
-        if ($pol -and $pol.PSObject.Properties['NC_ShowSharedAccessUI'] -and $pol.NC_ShowSharedAccessUI -eq 0) {
-            Write-Log 'ICS диагностика: общий доступ запрещён групповой политикой (NC_ShowSharedAccessUI=0)' 'ERROR'
-        }
-    } catch { }
-}
-
 # ---------------------------------------------------------------- снимок для монитора
 
 function Format-When([datetime]$d) {
@@ -1188,7 +1070,7 @@ function Invoke-SetupTask([string]$What) {
             $set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
                 -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances Parallel
             $tray = Join-Path $BinDir 'VpnGuardTray.exe'
-            $act = $(if ((Test-Path $tray) -and -not ($Cfg.ui -and $Cfg.ui.tray -eq $false)) { New-ScheduledTaskAction -Execute $tray -Argument "`"$Root`"" -WorkingDirectory $Root } else { New-HiddenPsAction (Join-Path $Root 'VpnGuardMonitor.ps1') })
+            $act = New-ScheduledTaskAction -Execute $tray -Argument "`"$Root`"" -WorkingDirectory $Root      # значок у часов (собирается частью PowerShell)
             $reg = @{ TaskName = $MonitorTask; Action = $act; Settings = $set; Principal = $principal; Force = $true }
             if ($What -eq 'monitor-logon') { $reg.Trigger = New-ScheduledTaskTrigger -AtLogOn -User $user }
             Register-ScheduledTask @reg | Out-Null
@@ -1370,6 +1252,14 @@ function Write-PsStatus {
     $State.lastSnapshot = Get-Date
 }
 
+function Remove-ObsoleteFiles {
+    foreach ($n in 'Agent.cs', 'Zapret.cs', 'ClientZapret.cs', 'VpnGuardMonitor.ps1', 'VpnGuardMonitor.cmd') {
+        $f = Join-Path $Root $n
+        if (-not (Test-Path $f)) { continue }
+        if ($n -like '*.cs' -and -not ("$(Get-Content $f -TotalCount 1 -ErrorAction SilentlyContinue)" -match 'Перенесено в agent')) { continue }   # только заглушки
+        try { Remove-Item $f -Force -ErrorAction Stop; Write-Log "Удалён устаревший файл $n" } catch { }
+    }
+}
 function Invoke-PsPart {
     $mx = New-Object System.Threading.Mutex($false, 'Global\VpnGuardPs')
     $got = $false
@@ -1383,7 +1273,7 @@ function Invoke-PsPart {
     if (-not (Test-Path $CmdDir)) { New-Item -ItemType Directory $CmdDir -Force | Out-Null }
     try {
         # zapret ведёт сам агент на C# (Zapret.cs)
-        foreach ($step in 'Invoke-Commands', 'Invoke-MeduzaUpdate', 'Invoke-SoftwareCheck', 'Invoke-RemoteWatch', 'Invoke-AppUpdateWatch', 'Invoke-TrayWatch') {
+        foreach ($step in 'Remove-ObsoleteFiles', 'Invoke-Commands', 'Invoke-MeduzaUpdate', 'Invoke-SoftwareCheck', 'Invoke-RemoteWatch', 'Invoke-AppUpdateWatch', 'Invoke-TrayWatch') {
             try { & $step } catch { Write-Log "$step : $($_.Exception.Message)" 'ERROR' }
             if (((Get-Date) - $State.lastSnapshot).TotalSeconds -ge 10) { try { Write-PsStatus } catch { } }
         }

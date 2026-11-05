@@ -61,31 +61,11 @@ namespace VpnGuard
             NetworkInterface a = null;
             try {
                 var rx = new Regex(AvpnPattern(), RegexOptions.IgnoreCase);
-                var old = OldAwgNames();
-                a = AllNics().Where(n => (rx.IsMatch(n.Name) || rx.IsMatch(n.Description)) && !old.Contains(n.Name))
+                a = AllNics().Where(n => rx.IsMatch(n.Name) || rx.IsMatch(n.Description))
                     .OrderBy(n => n.OperationalStatus == OperationalStatus.Up ? 0 : 1).FirstOrDefault();
             } catch { }
             if (a != null) AvpnLastAdapter = a.Name;
             return a;
-        }
-        // туннели AmneziaWG, которые раньше создавал сам VpnGuard (data\amnezia\*.conf) — после перехода на AmneziaVPN не нужны
-        static HashSet<string> OldAwgNames()
-        {
-            var h = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var d in new[] { AwgDir, Path.Combine(DataDir, "amnezia-old") }) { try { if (Directory.Exists(d)) foreach (var f in Directory.GetFiles(d, "*.conf")) h.Add(Path.GetFileNameWithoutExtension(f)); } catch { } }
-            return h;
-        }
-        static void CleanupOldAwg()
-        {
-            if (!Directory.Exists(AwgDir)) return;
-            string awgExe = @"C:\Program Files\AmneziaWG\amneziawg.exe";
-            foreach (var n in OldAwgNames()) {
-                var svc = "AmneziaWGTunnel$" + n;
-                if (Svc(svc) == null) continue;
-                Log("AmneziaVPN вместо AmneziaWG: удаляю старый туннель AmneziaWG «" + n + "», созданный VpnGuard", "WARN");
-                if (!File.Exists(awgExe) || Exe(awgExe, "/uninstalltunnelservice \"" + n + "\"", 60).Code != 0) { try { var s = Svc(svc); if (s != null) s.Stop(); } catch { } }
-            }
-            try { var dst = Path.Combine(DataDir, "amnezia-old"); if (!Directory.Exists(dst)) { Directory.Move(AwgDir, dst); Log("AmneziaVPN вместо AmneziaWG: конфиги AmneziaWG перенесены в data\\amnezia-old", "INFO"); } } catch { }
         }
         static string AvpnAdapter() { var a = AvpnNic(); return a != null ? a.Name : AvpnLastAdapter; }
         static bool IsAvpnAlias(string alias)

@@ -91,7 +91,7 @@ namespace VpnGuard
                 string oth = OtherKind(kind); bool othUp = Up(KindAdapter(oth)); bool? othTr = KindTraffic(oth);
                 sb = new Dictionary<string, object> { { "kind", oth }, { "name", ModeNames[oth] }, { "up", othUp }, { "ok", othUp && othTr == true },
                     { "state", !othUp ? "не подключён" : othTr == true ? "готов" : othTr == false ? "нет трафика" : "проверяется" },
-                    { "blocked", oth == "amnezia" && AvpnBlocked() }, { "server", oth == "amnezia" ? AvpnEp : "" }, { "why", oth == "amnezia" && AwgDiag != null && !AwgDiag.Ok ? AwgDiag.Short : "" } };
+                    { "blocked", oth == "amnezia" && AvpnBlocked() }, { "why", oth == "amnezia" && AwgDiag != null && !AwgDiag.Ok ? AwgDiag.Short : "" } };
                 if (oth == "amnezia" && AvpnBlocked()) sb["state"] = "отключён защитой до " + AgBlockedUntil.ToString("HH:mm");
                 if (uL == 0) uS = othUp && othTr == true ? "Подключён · резерв готов" : "Подключён · резерв не готов";
             }

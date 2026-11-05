@@ -58,7 +58,7 @@ foreach ($n in $asts.Keys) {
     foreach ($v in $asts[$n].FindAll({ $args[0] -is [Management.Automation.Language.VariableExpressionAst] -and $args[0].VariablePath.UserPath -like 'script:*' }, $true)) { $nm = $v.VariablePath.UserPath.Substring(7); if ($nm.Length -le 3) { $g[$nm] = 1 } }
     $globalsOf[$n] = $g
 }
-$hostGlobals = @{}; foreach ($h in 'VpnGuard.ps1', 'VpnGuardMonitor.ps1') { if ($globalsOf[$h]) { foreach ($k in $globalsOf[$h].Keys) { $hostGlobals[$k] = 1 } } }
+$hostGlobals = @{}; foreach ($h in 'VpnGuard.ps1') { if ($globalsOf[$h]) { foreach ($k in $globalsOf[$h].Keys) { $hostGlobals[$k] = 1 } } }
 $rules = 0
 $reported = @{}
 foreach ($n in $asts.Keys) {
@@ -247,25 +247,6 @@ else {
     }
     if ($bad) { $bad | Select-Object -Unique | ForEach-Object { Fail "агент C#: $_" } } else { Ok "собран ($([int]((Get-Item $agx).Length / 1KB)) КБ); снимок состояния в четырёх режимах совпадает по форме с агентом PowerShell" }
 }
-Write-Host '6. Окно (отрисовка всех страниц на тестовых данных)'
-$demo = Join-Path $tmp 'demo'; New-Item -ItemType Directory $demo -Force | Out-Null
-$st = [ordered]@{ updated = (Get-Date).ToString('o'); staleAfterSec = 300; agentVersion = 'test'; intervalSec = 30; history = @(); vpn = @{ mode = 'meduza'; name = 'MeduzaVPN' } }
-foreach ($k in 'meduza', 'ultra', 'wg', 'ics', 'zapret', 'amnezia') { $st[$k] = [ordered]@{ level = 0; state = 'Работает'; details = @('тест'); kv = @(, @('Ключ', 'Значение')) } }
-$st | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $demo 'status.json') -Encoding UTF8
-$png = Join-Path $tmp 'pv.png'
-$psi = New-Object Diagnostics.ProcessStartInfo 'powershell.exe'
-$psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$Root\VpnGuardMonitor.ps1`" -Demo -StatusFile `"$demo\status.json`" -Preview `"$png`""
-$psi.UseShellExecute = $false; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true; $psi.CreateNoWindow = $true
-$enc = [Text.Encoding]::GetEncoding((Get-Culture).TextInfo.OEMCodePage); $psi.StandardOutputEncoding = $enc; $psi.StandardErrorEncoding = $enc
-$p = [Diagnostics.Process]::Start($psi); $o = $p.StandardOutput.ReadToEndAsync(); $e = $p.StandardError.ReadToEndAsync()
-if (-not $p.WaitForExit(150000)) { try { $p.Kill() } catch { }; Fail 'окно: таймаут отрисовки' }
-else {
-    $pages = @([regex]::Matches($o.Result, 'страница (\w+)') | ForEach-Object { $_.Groups[1].Value })
-    if ($e.Result.Trim()) { Fail "окно: $(($e.Result -split "`n" | Select-Object -First 3) -join ' ')" }
-    elseif ($pages.Count -lt 8) { Fail "окно: отрисовано страниц $($pages.Count) ($($o.Result.Trim()))" }
-    else { Ok "окно: отрисованы страницы $($pages -join ', ')" }
-}
-
 Write-Host '7. Имена клиентов WG-Server (формат WS4W «# 1» над [Peer] и VpnGuard «# Name =» внутри; агент C# и список одинаково)'
 $pr = Join-Path $tmp 'peers'; New-Item -ItemType Directory (Join-Path $pr 'srv\server_wg'), (Join-Path $pr 'srv\clients_wg\c1'), (Join-Path $pr 'data\logs') -Force | Out-Null
 $pconf = Join-Path $pr 'srv\server_wg\wg_server.conf'
