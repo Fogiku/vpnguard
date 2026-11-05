@@ -212,6 +212,45 @@ namespace VpnGuard
                 } catch { return false; }
             }
         }
+        // ---------------------------------------------------------------- диагностика туннеля: может ли он в принципе пропускать трафик и где обрыв
+        // Шлём через адаптер туннеля (адрес источника — его) TCP к нескольким узлам и DNS-запрос и смотрим счётчики адаптера:
+        //  отправлено 0      — Windows не кладёт пакеты в туннель (адаптер/маршруты/приложение);
+        //  отправлено, 0 пришло — пакеты уходят, сервер VPN не отвечает (сервер лежит, его блокирует провайдер, ключ/подписка не принимаются);
+        //  пришло, но сайты не открываются — сервер отвечает, но дальше в интернет не выпускает (нет выхода/DNS на сервере).
+        class TunDiagRes { public bool Ok; public string Short = "", Text = ""; public long Tx, Rx; public int TcpOk, TcpAll; public bool Dns; public DateTime At = DateTime.Now; }
+        static TunDiagRes TunDiag(string name)
+        {
+            var r = new TunDiagRes();
+            var nic = Nic(name);
+            if (nic == null) { r.Short = "адаптера нет"; r.Text = "адаптер туннеля не найден — туннель не подключён"; return r; }
+            if (nic.OperationalStatus != OperationalStatus.Up) { r.Short = "адаптер не поднят"; r.Text = "адаптер «" + name + "» есть, но не поднят (" + nic.OperationalStatus + ") — туннель не подключён"; return r; }
+            string ip = Ipv4(name);
+            if (ip == null) { r.Short = "нет адреса"; r.Text = "у адаптера «" + name + "» нет IPv4-адреса — приложение не настроило туннель"; return r; }
+            Func<long[]> st = () => { try { var x = Nic(name).GetIPStatistics(); return new[] { x.BytesSent, x.BytesReceived }; } catch { return new long[2]; } };
+            var a = st();
+            var hosts = CfgList("vpn.diagHosts", new[] { "1.1.1.1:443", "8.8.8.8:443", "77.88.8.8:443", "9.9.9.9:443" });
+            r.TcpAll = hosts.Length; int ok = 0;
+            var ts = hosts.Select(h => System.Threading.Tasks.Task.Run(() => { if (TcpVia(ip, h, 5000)) Interlocked.Increment(ref ok); })).ToArray();
+            try {                                                         // DNS-запрос «google.com A» к 8.8.8.8 через туннель
+                using (var u = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)) {
+                    u.Bind(new IPEndPoint(IPAddress.Parse(ip), 0)); u.ReceiveTimeout = 4000;
+                    var q = new byte[] { 0x12, 0x34, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 6, (byte)'g', (byte)'o', (byte)'o', (byte)'g', (byte)'l', (byte)'e', 3, (byte)'c', (byte)'o', (byte)'m', 0, 0, 1, 0, 1 };
+                    u.SendTo(q, new IPEndPoint(IPAddress.Parse("8.8.8.8"), 53));
+                    var buf = new byte[512]; EndPoint ep = new IPEndPoint(IPAddress.Any, 0);
+                    r.Dns = u.ReceiveFrom(buf, ref ep) > 12 && buf[0] == 0x12 && buf[1] == 0x34;
+                }
+            } catch { }
+            System.Threading.Tasks.Task.WaitAll(ts, 7000);
+            var b = st(); r.Tx = Math.Max(0, b[0] - a[0]); r.Rx = Math.Max(0, b[1] - a[1]); r.TcpOk = ok;
+            string cnt = " (через адаптер ушло " + r.Tx + " Б, пришло " + r.Rx + " Б; сайтов открылось " + ok + "/" + r.TcpAll + ", DNS " + (r.Dns ? "работает" : "не отвечает") + ")";
+            if (ok > 0) { r.Ok = true; r.Short = "трафик проходит"; r.Text = "туннель пропускает трафик" + cnt; }
+            else if (r.Tx < 100) { r.Short = "пакеты не уходят в туннель"; r.Text = "Windows не отправляет пакеты в туннель — адаптер или маршруты настроены не так, либо приложение VPN не обрабатывает трафик" + cnt; }
+            else if (r.Rx < 40) { r.Short = "сервер VPN не отвечает"; r.Text = "пакеты уходят в туннель, но от сервера VPN ничего не приходит — сервер недоступен, его блокирует провайдер или он не принимает подключение (ключ, подписка, протокол)" + cnt; }
+            else if (r.Dns) { r.Short = "DNS есть, сайты нет"; r.Text = "сервер VPN отвечает и DNS работает, но соединения с сайтами не проходят — сервер не выпускает TCP в интернет" + cnt; }
+            else { r.Short = "сервер без выхода в интернет"; r.Text = "сервер VPN отвечает, но дальше в интернет не выпускает — на сервере нет выхода или DNS" + cnt; }
+            return r;
+        }
+
         static bool ProbeVia(string adapter, int timeoutMs, List<long> times)
         {
             string ip = Ipv4(adapter); if (ip == null) return false; bool ok = false;
@@ -690,7 +729,18 @@ namespace VpnGuard
             do { var a = AvpnNic(); if (a != null && a.OperationalStatus == OperationalStatus.Up) return a.Name; Thread.Sleep(2000); } while (DateTime.Now < dl);
             return null;
         }
-        static bool AwgTrafficOk(string name) { bool ok = ProbeVia(name, 4000, null); AwgTraffic = ok; AwgTrafficAt = DateTime.Now; return ok; }
+        static TunDiagRes AwgDiag; static string AwgDiagLogged = "";
+        static bool AwgTrafficOk(string name)
+        {
+            bool ok = ProbeVia(name, 4000, null);
+            if (!ok || AwgDiag == null || (DateTime.Now - AwgDiag.At).TotalMinutes >= 10) {
+                try {
+                    var d = TunDiag(name); AwgDiag = d; ok = ok || d.Ok;
+                    if (d.Short != AwgDiagLogged) { Log("AmneziaVPN: диагностика туннеля — " + d.Text, d.Ok ? "INFO" : "WARN"); AwgDiagLogged = d.Short; }
+                } catch (Exception e) { Log("AmneziaVPN: диагностика: " + e.Message, "WARN"); }
+            }
+            AwgTraffic = ok; AwgTrafficAt = DateTime.Now; return ok;
+        }
         static void AwgRestart(string reason)
         {
             if (InetDown()) { Log("AmneziaVPN: перезапуск отменён — нет интернета (" + InetWhy + ")", "INFO"); return; }
@@ -1451,7 +1501,7 @@ namespace VpnGuard
                 string oth = OtherKind(kind); bool othUp = Up(KindAdapter(oth)); bool? othTr = KindTraffic(oth);
                 sb = new Dictionary<string, object> { { "kind", oth }, { "name", ModeNames[oth] }, { "up", othUp }, { "ok", othUp && othTr == true },
                     { "state", !othUp ? "не подключён" : othTr == true ? "готов" : othTr == false ? "нет трафика" : "проверяется" },
-                    { "blocked", oth == "amnezia" && AvpnBlocked() }, { "server", oth == "amnezia" ? AvpnEp : "" } };
+                    { "blocked", oth == "amnezia" && AvpnBlocked() }, { "server", oth == "amnezia" ? AvpnEp : "" }, { "why", oth == "amnezia" && AwgDiag != null && !AwgDiag.Ok ? AwgDiag.Short : "" } };
                 if (oth == "amnezia" && AvpnBlocked()) sb["state"] = "отключён защитой до " + AgBlockedUntil.ToString("HH:mm");
                 if (uL == 0) uS = othUp && othTr == true ? "Подключён · резерв готов" : "Подключён · резерв не готов";
             }
@@ -1522,7 +1572,8 @@ namespace VpnGuard
             long avMem = 0; try { if (avProc != null) avMem = avProc.WorkingSet64 / 1048576; } catch { }
             var awg = Comp(aL, aS, new[] { inst ? "AmneziaVPN " + aVer + " · " + (avProc != null ? "PID " + avProc.Id : "не запущен") : "AmneziaVPN не установлен",
                 "Туннель: " + (aUp ? avNic.Name + " · IP " + aIp : avNic != null ? avNic.Name + " — " + avNic.OperationalStatus : "не подключён"),
-                "Трафик: " + aTr + ", проверка " + When(AwgTrafficAt), "Перезапуски: " + AwgRestarts.Count(d => d > DateTime.Now.AddMinutes(-30)) + " за 30 мин, посл. " + When(AwgLastRestart), agTxt }, new List<object[]> {
+                "Трафик: " + aTr + ", проверка " + When(AwgTrafficAt) + (AwgDiag != null && !AwgDiag.Ok ? " — " + AwgDiag.Short : ""), "Перезапуски: " + AwgRestarts.Count(d => d > DateTime.Now.AddMinutes(-30)) + " за 30 мин, посл. " + When(AwgLastRestart), agTxt }, new List<object[]> {
+                Kv("Диагностика туннеля", AwgDiag == null ? "ещё не было" : AwgDiag.At.ToString("HH:mm:ss") + " — " + AwgDiag.Text),
                 Kv("Защита локальной сети", agTxt + (AgBaseAt != DateTime.MinValue ? " · без AmneziaVPN: роутер " + (AgGwBase ? "отвечал" : "не отвечал") + ", клиентов WG на связи " + Math.Max(0, AgPeersBase) : "")),
                 Kv("Приложение AmneziaVPN", inst ? "установлено · версия " + aVer : "не установлено (" + avExe + ")"),
                 Kv("Процесс", avProc != null ? "PID " + avProc.Id + " · " + avMem + " МБ" : "не запущен"),

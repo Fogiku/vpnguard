@@ -335,7 +335,7 @@ function flowModel() {
   if (mode === 'dual') {
     const sb = (comp('ultra') || {}).standby || {}, rd = sb.ok === true;
     N.push({ id: 'vpn2', col: 3, href: '#' + other, dot: sb.blocked ? 2 : rd ? 0 : sb.up ? 1 : 2, dim: true, c: 'var(--vpn)', t1: KN[other], r: null,
-      t3: 'резерв: ' + (sb.state ? (rd ? 'готов, трафик проходит' : sb.state === 'нет трафика' ? 'НЕ пропускает трафик' : sb.state) : 'нет данных') });
+      t3: 'резерв: ' + (sb.state ? (rd ? 'готов, трафик проходит' : sb.state === 'нет трафика' ? (sb.why || 'НЕ пропускает трафик') : sb.state) : 'нет данных') });
   }
   if (lanOn) N.push({ id: 'lan', col: 3, dot: 0, c: 'var(--lan)', t1: 'Локальная сеть', r: l, t3: (lanI.net || 'домашняя сеть') + ' · не интернет' });
   N.push({ id: 'zp', col: 3, href: '#zapret', dot: lvl(comp('zapret')), c: 'var(--zp)', t1: vpnOn ? 'Мимо VPN · zapret' : 'Напрямую', r: byp, t3: vpnOn ? 'YouTube, Discord …' : '' });
