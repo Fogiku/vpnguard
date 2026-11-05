@@ -1,13 +1,13 @@
 {
-    "version":  "3.21.1",
-    "build":  "20261105-1259",
+    "version":  "3.22.0",
+    "build":  "20261105-1336",
     "notes":  "",
-    "date":  "2026-11-05T12:59:15.5449740+03:00",
+    "date":  "2026-11-05T13:36:19.2457061+03:00",
     "files":  [
                   {
                       "path":  "Agent.cs",
-                      "sha256":  "cf0784665f89bd5584f8fb22a4864e4710ffb448204852afb1b6095d33046e65",
-                      "size":  153586
+                      "sha256":  "9c981286596d16a3c133323d1359b21a76cd71c5a597398ad1c5a1312ca11140",
+                      "size":  157566
                   },
                   {
                       "path":  "Amnezia.ps1",
@@ -86,7 +86,7 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "13652b1538f75efc9835a006f2c36944a2b36bb93cbdce549b166edf37efc4b6",
+                      "sha256":  "ac6808f8b6603d8ea2e390931d5f4e65667f46a0251fd439d19ce5e540f6f555",
                       "size":  82021
                   },
                   {
@@ -101,13 +101,13 @@
                   },
                   {
                       "path":  "Web.cs",
-                      "sha256":  "0da72bd53603f63b57ca9c69385b5449f17c365f59a61c48b0e394be8985a8c0",
-                      "size":  56778
+                      "sha256":  "70637329ff2c855aee8d6fe96aa994b4f41e66431fb579f6f9d6095b1be82161",
+                      "size":  58047
                   },
                   {
                       "path":  "web/index.html",
-                      "sha256":  "bc2ab0f82521cce516774be8d083ae2b7532155b0f4b347310a1e0e66968afa7",
-                      "size":  91524
+                      "sha256":  "8ca80d8e18f9dc486ac4c6b88d600548321954efa1bb09ad520ec4ae6d217de7",
+                      "size":  92673
                   },
                   {
                       "path":  "Wg.ps1",

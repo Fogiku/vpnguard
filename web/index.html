@@ -524,7 +524,7 @@ function flowBlock() {
     <div class="legend" style="flex-wrap:wrap;margin-top:8px"><span><b style="background:var(--vpn)"></b>через VPN</span><span><b style="background:var(--zp)"></b>мимо VPN через zapret</span><span><b style="background:var(--accent)"></b>клиенты WG-Server</span><span><b style="background:var(--lan)"></b>локальная сеть (не интернет)</span><span><span class="ftx">&gt;&gt;&gt; ↑ отдача</span> · <span class="frx">&lt;&lt;&lt; ↓ загрузка</span> · чем быстрее стрелки, тем больше трафика · Мбит/с</span></div></div>`;
 }
 // живые скорости раз в секунду — только на главной и пока вкладка видна
-const SPK = {}, SPN = 90;
+const SPK = {}, SPN = 180;
 async function liveTick() {
   if (page !== 'home' || document.hidden || !S) return;
   try { LIVE = await api('/api/live'); if (!LIVE || !LIVE.rate) LIVE = null; } catch (e) { LIVE = null; }
@@ -534,7 +534,24 @@ async function liveTick() {
   for (const n of flowModel().N) { const h = SPK[n.id] || (SPK[n.id] = []); h.push(n.r ? [+n.r[0] || 0, +n.r[1] || 0] : [0, 0]); if (h.length > SPN) h.shift(); }
   flowSpark();
 }
-// мини-график под скоростью: ↓ загрузка и ↑ отдача за последние 90 с, масштаб — по максимуму окна (не меньше 100 Кбит/с)
+// история скоростей из агента (он пишет её всегда) — при открытии главной графики сразу показывают последние 3 мин
+async function sparkHist() {
+  let h; try { h = await api('/api/live-hist'); } catch (e) { return; }
+  if (!h || !h.t || !h.s || !S || !FL) return;
+  const keep = LIVE, s = h.s, out = {};
+  try {
+    for (let i = 0; i < h.t.length; i++) {
+      const rate = {}, peers = {};
+      for (const k in s) { const v = s[k][i]; if (!v) continue; if (k.startsWith('r:')) rate[k.slice(2)] = v; else if (k.startsWith('p:')) peers[k.slice(2)] = { rx: v[0], tx: v[1] }; }
+      if (!rate.p) continue;
+      LIVE = { rate, peers, cz: (s.cz && s.cz[i]) || [0, 0] };
+      for (const n of flowModel().N) (out[n.id] = out[n.id] || []).push(n.r ? [+n.r[0] || 0, +n.r[1] || 0] : [0, 0]);
+    }
+  } finally { LIVE = keep; }
+  for (const id in out) SPK[id] = out[id].slice(-SPN);
+  flowSpark();
+}
+// мини-график под скоростью: ↓ загрузка и ↑ отдача за последние 3 мин, масштаб — по максимуму окна (не меньше 100 Кбит/с)
 function flowSpark() {
   const svg = FL && FL.svg; if (!svg) return;
   for (const id in SPK) {
@@ -593,7 +610,7 @@ P.home.tiles = () => {
   </div>
 `;
 };
-P.home.after = async () => { flowMount(); if (Date.now() - (P.home.evAt || 0) < 60000) return; P.home.evAt = Date.now(); try { const t = await api('/api/logs?minutes=720&lines=3000'); const l = t.split('\n').filter(s => /\[(WARN|ERROR)\]/.test(s)).slice(-15).reverse(); P.home.ev = l.join('\n') || 'за 12 часов — ничего'; if ($('#events')) $('#events').textContent = P.home.ev; } catch (e) { } };
+P.home.after = async () => { flowMount(); if (!P.home.histAt || Date.now() - P.home.histAt > 600000) { P.home.histAt = Date.now(); setTimeout(sparkHist, 2500); } if (Date.now() - (P.home.evAt || 0) < 60000) return; P.home.evAt = Date.now(); try { const t = await api('/api/logs?minutes=720&lines=3000'); const l = t.split('\n').filter(s => /\[(WARN|ERROR)\]/.test(s)).slice(-15).reverse(); P.home.ev = l.join('\n') || 'за 12 часов — ничего'; if ($('#events')) $('#events').textContent = P.home.ev; } catch (e) { } };
 async function setZVer() {
   const v = $('#zver').value;
   if (!confirm(v ? `Установить zapret ${v} и закрепить эту версию?` : 'Вернуться к последней версии zapret (обновляется сама)?')) return;
@@ -816,7 +833,7 @@ function go() {
   page = (location.hash || '#home').slice(1); if (!P[page]) page = 'home';
   $('#title').textContent = NAMES[page];
   for (const a of document.querySelectorAll('nav a')) a.classList.toggle('sel', a.dataset.p === page);
-  nav.classList.remove('open'); logCache = ''; render(true);
+  nav.classList.remove('open'); logCache = ''; if (page === 'home') P.home.histAt = 0; render(true);
 }
 const nav = $('#nav');
 window.addEventListener('hashchange', go);

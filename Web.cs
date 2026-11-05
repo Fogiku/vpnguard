@@ -25,6 +25,7 @@ namespace VpnGuard
 {
     public static class Web
     {
+        static DateTime LiveWantAt = DateTime.MinValue;
         static string Root, DataDir, LogDir, CmdDir, ConfigPath, StatusPath, StatePath, VersionText = "";
         static readonly object CfgLock = new object(), StateLock = new object(), LogLock = new object();
         static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue, RecursionLimit = 200 };
@@ -430,7 +431,7 @@ namespace VpnGuard
                 if (!string.IsNullOrEmpty(tok)) Fail(ip, "Удалённый доступ");
                 Text(ctx, 401, "нужен вход: пароль веб-интерфейса или токен диагностики (X-Token или ?t=)"); return;
             }
-            var readOnly = new[] { "/api/status", "/api/live", "/api/logs", "/api/wg/clients", "/api/wg/conf", "/api/wg/qr", "/api/whoami", "/api/remote", "/api/websettings", "/api/settings", "/api/zlist" };
+            var readOnly = new[] { "/api/status", "/api/live", "/api/live-hist", "/api/logs", "/api/wg/clients", "/api/wg/conf", "/api/wg/qr", "/api/whoami", "/api/remote", "/api/websettings", "/api/settings", "/api/zlist" };
             bool write = path.StartsWith("/api/") && !readOnly.Contains(path);
             if (write && (req.HttpMethod != "POST" || string.IsNullOrEmpty(req.Headers["X-VG"]))) { Text(ctx, 405, "нужен POST с заголовком X-VG"); return; }
             bool post = req.HttpMethod == "POST";
@@ -444,7 +445,12 @@ namespace VpnGuard
             switch (path) {
                 case "/api/status": case "/status": { string s = ReadShared(StatusPath); RawJson(ctx, HideSecrets(s ?? "{}")); return; }
                 // «живые» скорости агента (data\live.json, раз в 2 с)
-                case "/api/live": { string s = ReadShared(Path.Combine(DataDir, "live.json")); RawJson(ctx, s ?? "{}"); return; }
+                case "/api/live": {
+                    // страница открыта — агенту: считать живые скорости часто (см. LiveLoop); отметка не чаще раза в 3 с
+                    if ((DateTime.UtcNow - LiveWantAt).TotalSeconds >= 3) { LiveWantAt = DateTime.UtcNow; try { File.WriteAllText(Path.Combine(DataDir, "live-wanted"), ""); } catch { } }
+                    string s = ReadShared(Path.Combine(DataDir, "live.json")); RawJson(ctx, s ?? "{}"); return;
+                }
+                case "/api/live-hist": { string s = ReadShared(Path.Combine(DataDir, "live-hist.json")); RawJson(ctx, s ?? "{}"); return; }
                 case "/api/logs": Text(ctx, 200, HideSecrets(Logs(qi("days", 1), qi("minutes", 0), qi("lines", 3000)))); return;
                 case "/logs": Text(ctx, 200, HideSecrets(Logs(qi("days", 2), qi("minutes", 0), qi("lines", 5000)))); return;
                 case "/api/cmd": {

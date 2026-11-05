@@ -1455,23 +1455,42 @@ namespace VpnGuard
         // ---------------------------------------------------------------- «живые» скорости раз в 2 с (для схемы трафика в веб-интерфейсе): data\live.json
         // адаптеры (туннель, wg_server, физический) и ретранслятор zapret — каждые 2 с; клиенты WG-Server (wg show) — каждые 4 с
         static volatile Dictionary<string, string> LiveNames;
+        // История скоростей пишется всегда (раз в секунду, последние LiveHistN секунд, в памяти) — открытая страница сразу рисует, что было.
+        // Дёшево, пока никто не смотрит: адаптеры — из запомненного списка (полный перечень Windows — раз в 10 с), клиенты WG (wg.exe) —
+        // раз в 10 с, файлы для браузера — раз в 30 с. Страница открыта (веб-сервер трогает data\live-wanted при /api/live) —
+        // клиенты раз в 2 с, live.json каждую секунду, история — раз в 2 с.
+        const int LiveHistN = 180;
+        static readonly List<long> LiveT = new List<long>();
+        static readonly Dictionary<string, List<long[]>> LiveH = new Dictionary<string, List<long[]>>();
+        static void LivePush(string k, long[] v)
+        {
+            List<long[]> l; if (!LiveH.TryGetValue(k, out l)) { l = new List<long[]>(); for (int i = 0; i < LiveT.Count - 1; i++) l.Add(null); LiveH[k] = l; }
+            l.Add(v);
+        }
         static void LiveLoop()
         {
-            string path = Path.Combine(DataDir, "live.json"), tmp = path + ".tmp"; int tick = 0; object peers = null;
+            string path = Path.Combine(DataDir, "live.json"), hpath = Path.Combine(DataDir, "live-hist.json"), want = Path.Combine(DataDir, "live-wanted");
+            int tick = 0; Dictionary<string, object> peers = null; DateTime peersAt = DateTime.MinValue, nicsAt = DateTime.MinValue, histAt = DateTime.MinValue, liveAt = DateTime.MinValue;
+            var nicByName = new Dictionary<string, NetworkInterface>();
             while (true) {
                 try {
                     Thread.Sleep(1000); tick++;
                     var names = LiveNames; if (names == null) continue;
-                    var nics = NetworkInterface.GetAllNetworkInterfaces();
+                    bool watched = false; try { watched = File.Exists(want) && (DateTime.UtcNow - File.GetLastWriteTimeUtc(want)).TotalSeconds < 15; } catch { }
+                    // адаптеры: перечень — раз в 10 с или когда нужного нет; счётчики берутся у запомненного объекта (это быстро)
+                    if ((DateTime.UtcNow - nicsAt).TotalSeconds >= 10 || names.Values.Any(n => n.Length > 0 && !nicByName.ContainsKey(n))) {
+                        nicByName.Clear(); nicsAt = DateTime.UtcNow;
+                        try { foreach (var n in NetworkInterface.GetAllNetworkInterfaces()) nicByName[n.Name] = n; } catch { }
+                    }
                     var ad = new Dictionary<string, object>();
                     foreach (var kv in names) {
-                        var n = kv.Value.Length > 0 ? nics.FirstOrDefault(x => x.Name == kv.Value) : null;
-                        if (n == null) { ad[kv.Key] = new long[2]; continue; }
-                        long rx = 0, tx = 0; try { var st = n.GetIPStatistics(); rx = st.BytesReceived; tx = st.BytesSent; } catch { }
+                        NetworkInterface n; if (kv.Value.Length == 0 || !nicByName.TryGetValue(kv.Value, out n)) { ad[kv.Key] = new long[2]; continue; }
+                        long rx = 0, tx = 0; try { var st = n.GetIPStatistics(); rx = st.BytesReceived; tx = st.BytesSent; } catch { nicsAt = DateTime.MinValue; }
                         ad[kv.Key] = RateOf("live:" + kv.Key + ":" + n.Id, rx, tx);
                     }
                     ad["l"] = LanRate("live:l");
-                    if (tick % 2 == 1 || peers == null) {
+                    if (peers == null || (DateTime.UtcNow - peersAt).TotalSeconds >= (watched ? 2 : 10)) {
+                        peersAt = DateTime.UtcNow;
                         var wg = Path.Combine(Path.GetDirectoryName(CfgStr("ws4w.wireguardExe", @"C:\Program Files\WireGuard\wireguard.exe")), "wg.exe");
                         var pr = new Dictionary<string, object>();
                         var r = File.Exists(wg) ? Exe(wg, "show " + WgIf() + " dump", 5) : null;
@@ -1484,9 +1503,28 @@ namespace VpnGuard
                         }
                         peers = pr;
                     }
-                    var o = new Dictionary<string, object> { { "t", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }, { "rate", ad }, { "cz", RateOf("live:cz", Interlocked.Read(ref CzTcpDown), Interlocked.Read(ref CzTcpUp)) }, { "peers", peers }, { "inet", InetState } };
-                    File.WriteAllText(tmp, Json.Serialize(o), Encoding.UTF8);
-                    try { File.Copy(tmp, path, true); } catch { }
+                    var czRate = RateOf("live:cz", Interlocked.Read(ref CzTcpDown), Interlocked.Read(ref CzTcpUp));
+                    long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                    // история: точка в секунду
+                    lock (LiveH) {
+                        LiveT.Add(now);
+                        foreach (var kv in ad) LivePush("r:" + kv.Key, (long[])kv.Value);
+                        foreach (var kv in peers) { var d = (Dictionary<string, object>)kv.Value; LivePush("p:" + kv.Key, new[] { Convert.ToInt64(d["rx"]), Convert.ToInt64(d["tx"]) }); }
+                        LivePush("cz", czRate);
+                        foreach (var l in LiveH.Values) while (l.Count < LiveT.Count) l.Add(null);           // ряд без новой точки (клиент пропал)
+                        while (LiveT.Count > LiveHistN) { LiveT.RemoveAt(0); foreach (var l in LiveH.Values) l.RemoveAt(0); }
+                        foreach (var k in LiveH.Where(x => x.Value.All(v => v == null)).Select(x => x.Key).ToList()) LiveH.Remove(k);
+                    }
+                    if (watched || (DateTime.UtcNow - liveAt).TotalSeconds >= 30) {
+                        liveAt = DateTime.UtcNow;
+                        var o = new Dictionary<string, object> { { "t", now }, { "rate", ad }, { "cz", czRate }, { "peers", peers }, { "inet", InetState } };
+                        File.WriteAllText(path + ".tmp", Json.Serialize(o), Encoding.UTF8); try { File.Copy(path + ".tmp", path, true); } catch { }
+                    }
+                    if ((DateTime.UtcNow - histAt).TotalSeconds >= (watched ? 2 : 30)) {
+                        histAt = DateTime.UtcNow; string js;
+                        lock (LiveH) js = Json.Serialize(new Dictionary<string, object> { { "t", LiveT.ToArray() }, { "s", LiveH.ToDictionary(x => x.Key, x => (object)x.Value.ToArray()) } });
+                        File.WriteAllText(hpath + ".tmp", js, Encoding.UTF8); try { File.Copy(hpath + ".tmp", hpath, true); } catch { }
+                    }
                 } catch { Thread.Sleep(5000); }
             }
         }
