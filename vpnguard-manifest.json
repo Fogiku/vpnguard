@@ -1,8 +1,8 @@
 {
-    "version":  "3.46.0",
-    "build":  "20261106-0148",
+    "version":  "3.46.1",
+    "build":  "20261106-0151",
     "notes":  "",
-    "date":  "2026-11-06T01:48:02.4107700+03:00",
+    "date":  "2026-11-06T01:51:16.2448354+03:00",
     "files":  [
                   {
                       "path":  "agent/Amnezia.cs",
@@ -266,8 +266,8 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "35402d66828a3339323e4509d371c36283699509fb6e54eba0bf754097fbfe41",
-                      "size":  31186
+                      "sha256":  "816d4c0e312142e5282a0abea9ae7a51301eafea3bc2b5073a43e0e12a55affe",
+                      "size":  31379
                   },
                   {
                       "path":  "Web.cs",

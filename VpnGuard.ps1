@@ -28,7 +28,7 @@ param(
     [string]$ConfigPath = ''
 )
 
-$AgentVersion = '3.46.0'
+$AgentVersion = '3.46.1'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -181,7 +181,7 @@ if (Test-Path $StatePath) {
         $s = Get-Content $StatePath -Raw | ConvertFrom-Json
         if ($s.lastUpdateCheck) { $State.lastUpdateCheck = [datetime]$s.lastUpdateCheck }
         if ($s.cliSha256)       { $State.cliSha256 = $s.cliSha256 }
-        if ($s.wgConfPath)      { $State.wgConfPath = $s.wgConfPath }
+        if ($s.wgConfPath -and (Test-Path $s.wgConfPath)) { $State.wgConfPath = $s.wgConfPath }      # прежний путь (файла уже нет) — забыть
     } catch { }
 }
 function Save-State {
@@ -536,7 +536,7 @@ function Remove-ObsoleteFiles {
     foreach ($n in 'Agent.cs', 'Zapret.cs', 'ClientZapret.cs', 'VpnGuardMonitor.ps1', 'VpnGuardMonitor.cmd', 'Software.ps1', 'Zapret.ps1', 'Wg.ps1', 'agent\Ws4w.cs') {
         $f = Join-Path $Root $n
         if (-not (Test-Path $f)) { continue }
-        if ($n -like '*.cs' -and -not ("$(Get-Content $f -TotalCount 1 -ErrorAction SilentlyContinue)" -match 'Перенесено в agent')) { continue }   # только заглушки
+        if ($n -like '*.cs' -and $n -notlike 'agent\*' -and -not ("$(Get-Content $f -TotalCount 1 -ErrorAction SilentlyContinue)" -match 'Перенесено в agent')) { continue }   # в корне — только заглушки; agent\… — удалённые модули
         try { Remove-Item $f -Force -ErrorAction Stop; Write-Log "Удалён устаревший файл $n" } catch { }
     }
 }
