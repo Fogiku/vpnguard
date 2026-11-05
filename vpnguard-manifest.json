@@ -1,8 +1,8 @@
 {
-    "version":  "3.34.0",
-    "build":  "20261105-1529",
+    "version":  "3.35.0",
+    "build":  "20261105-1534",
     "notes":  "",
-    "date":  "2026-11-05T15:29:40.0993086+03:00",
+    "date":  "2026-11-05T15:34:45.4140972+03:00",
     "files":  [
                   {
                       "path":  "agent/Amnezia.cs",
@@ -23,6 +23,11 @@
                       "path":  "agent/Commands.cs",
                       "sha256":  "95a43ee4db75137f26b734d9a71bbb96e1d504c002e22307d9807a311ad10cad",
                       "size":  4818
+                  },
+                  {
+                      "path":  "agent/Config.cs",
+                      "sha256":  "259539c4d0aa79222fb14bb0a55d401ad66d136ed5a508efcf17113b0a56071b",
+                      "size":  3796
                   },
                   {
                       "path":  "agent/Core.cs",
@@ -90,6 +95,11 @@
                       "size":  16597
                   },
                   {
+                      "path":  "agent/Net.cs",
+                      "sha256":  "7fbc29ee68b145eccebb84896c599bd9f99105ade7ecc6da3823ac6925d28bc8",
+                      "size":  6711
+                  },
+                  {
                       "path":  "agent/PsPart.cs",
                       "sha256":  "d7c0a123311270f3b9fd219ddb3153384276679184b265e2f0bef6d870b1dab9",
                       "size":  4040
@@ -121,8 +131,28 @@
                   },
                   {
                       "path":  "agent/Zapret.cs",
-                      "sha256":  "e21810365d3966e6abb56504a730a2da5de5b5b0c1cc72a9e37ad358193aa7f3",
-                      "size":  72296
+                      "sha256":  "29f4b053a90c6127531d8ea4bd41f0c6e03b90908a974b327bcdcb780820ea8c",
+                      "size":  23855
+                  },
+                  {
+                      "path":  "agent/ZInstall.cs",
+                      "sha256":  "44442515f00ef2f76ba79fcb665bd98f39818d4df768cce4ebccc8744745fb64",
+                      "size":  9704
+                  },
+                  {
+                      "path":  "agent/ZRoutes.cs",
+                      "sha256":  "fb6ad3114a1a10d0c6f24c7630510fdc4c689dbc072e5318a3de0761b334b49c",
+                      "size":  9436
+                  },
+                  {
+                      "path":  "agent/ZTest.cs",
+                      "sha256":  "733096214cc4f7222cf7253082fca4990f95a76500543407c734ab6ef0815cd5",
+                      "size":  17227
+                  },
+                  {
+                      "path":  "agent/ZWinws.cs",
+                      "sha256":  "c55f6c42b5e1b6b0b326b37ddbc893ac52bf62d7ae901b6e78e9ab8db4f61c8f",
+                      "size":  5778
                   },
                   {
                       "path":  "Amnezia.ps1",
@@ -135,6 +165,11 @@
                       "size":  16204
                   },
                   {
+                      "path":  "Diag.ps1",
+                      "sha256":  "178217a38d4497d722342b8e091cc5bdc5f3dab5e60362efdc3426ebd6391885",
+                      "size":  19806
+                  },
+                  {
                       "path":  "Install.cmd",
                       "sha256":  "fb21d30c7d3bb8d8c0522b6b7d934ef98c1de3baf85008e160a069ca3fa22d87",
                       "size":  77
@@ -143,6 +178,11 @@
                       "path":  "Install.ps1",
                       "sha256":  "a15e7a47c345f697bdf011b17b79d345cc726887dc9533dc9e3fa25cec25c3a7",
                       "size":  2871
+                  },
+                  {
+                      "path":  "Meduza.ps1",
+                      "sha256":  "0171443b7d6bb83d39c51b2e20f4c87229cf443693022df37a78c2f8713f61d0",
+                      "size":  10821
                   },
                   {
                       "path":  "Publish.ps1",
@@ -168,6 +208,11 @@
                       "path":  "RemoteDiag.ps1",
                       "sha256":  "276fd402a8bfecb5e9e952a670486b70b7423cfc27136b5cd32be482a198089e",
                       "size":  3167
+                  },
+                  {
+                      "path":  "Setup.ps1",
+                      "sha256":  "f18686c41ed26d11f003970fb99d4c9b6baaf6eb1cb276a535b41b6a49dfe30e",
+                      "size":  4039
                   },
                   {
                       "path":  "Software.ps1",
@@ -201,8 +246,8 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "7ca4061d86516914305e52da099ff6269fda845ba596951eea68c98396536316",
-                      "size":  66491
+                      "sha256":  "85d2533e27c3744cbe793df30976697c79f1a4a7b502523b002dc4f44f145dfe",
+                      "size":  33074
                   },
                   {
                       "path":  "Web.cs",
