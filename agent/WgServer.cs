@@ -132,5 +132,27 @@ namespace VpnGuard
             try { list.AddRange(WgOffPeers(new HashSet<string>(list.Select(x => (string)((Dictionary<string, object>)x)["ip"])))); } catch { }
             return list;
         }
+
+        // для окна и веба (сводка): часть «WG-Server»
+        static Dictionary<string, object> WgComp(object clientZapret)
+        {
+            var wa = Nic(WgIf()); var wgSvc = Svc(CfgStr("ws4w.serviceName", "WireGuardTunnel$wg_server"));
+            bool wUp = wgSvc != null && wgSvc.Status == ServiceControllerStatus.Running && wa != null && wa.OperationalStatus == OperationalStatus.Up;
+            if (wUp) { if (WgUpSince == DateTime.MinValue) WgUpSince = DateTime.Now; } else WgUpSince = DateTime.MinValue;
+            string wIp = wa != null ? Ipv4(WgIf()) : null;
+            // wg_server
+            int wL; string wS; int activeN = 0; string port = "";
+            if (wgSvc == null) { wL = 2; wS = "Служба не найдена"; } else if (wgSvc.Status != ServiceControllerStatus.Running) { wL = 2; wS = "Служба: " + wgSvc.Status; } else if (!wUp) { wL = 1; wS = "Адаптер не поднят"; } else { wL = 0; wS = "Работает"; }
+            var peers = wUp ? WgPeers(out activeN, out port) : null; if (peers == null) { activeN = 0; port = ""; }
+            string addr = WgServerAddress(); string sm = wgSvc != null ? StartMode(wgSvc.ServiceName) : "";
+            var wg = Comp(wL, wS, new[] { "Служба: " + (wgSvc != null ? wgSvc.Status + " / " + sm : "нет"), "IP: " + (wIp ?? "—") + (addr != null ? " (нужен " + addr + ")" : ""), peers != null ? "Клиенты: " + activeN + " активных из " + peers.Count : "Клиенты: —" }, new List<object[]> {
+                Kv("Служба", wgSvc != null ? wgSvc.ServiceName + " · " + wgSvc.Status + " / " + sm : "не найдена"), Kv("Адаптер", wa != null ? wa.OperationalStatus.ToString() : "отсутствует"),
+                Kv("IP", (wIp ?? "—") + (addr != null && addr != wIp ? " (нужен " + addr + ")" : "")), Kv("Порт", port.Length > 0 ? port + " UDP" : "—"), Kv("Работает с", WgUpSince == DateTime.MinValue ? "—" : When(WgUpSince)),
+                Kv("Клиенты", peers != null ? activeN + " активных из " + peers.Count : "—"), Kv("Конфиг", WgConf() ?? "—"),
+                Kv("zapret для клиентов", CzSummary()) });
+            wg["peers"] = peers != null ? peers.ToArray() : new object[0];
+            wg["clientZapret"] = clientZapret;
+            return wg;
+        }
     }
 }

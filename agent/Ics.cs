@@ -162,5 +162,24 @@ namespace VpnGuard
                 else Log("ICS: после настройки состояние не подтвердилось, повторю", "WARN");
             } catch (Exception e) { Log("ICS: ошибка: " + (e.InnerException ?? e).Message, "ERROR"); }
         }
+
+        // для окна и веба (сводка): часть «Раздача»
+        static Dictionary<string, object> IcsComp(string mode)
+        {
+            bool uUp = mode == "zapret" || Up(KindAdapter(TunnelKind())), wUp = Up(WgIf());
+            // ICS
+            IcsState ics = IcsLast != null && (DateTime.UtcNow - IcsLastAt).TotalSeconds < 45 ? IcsLast : null; if (ics == null) try { ics = IcsStatus(); } catch { }
+            var icsSvc = Svc("SharedAccess"); int iL; string iS;
+            if (!CfgBool("sharing.enabled", true)) { iL = 1; iS = "Отключено в config"; } else if (ics == null) { iL = 1; iS = "Нет данных"; } else if (ics.Ok) { iL = 0; iS = "Включена"; } else if ((!uUp && mode != "zapret") || !wUp) { iL = 1; iS = "Ждёт адаптеры"; } else { iL = 2; iS = "Не настроена"; }
+            Func<IcsConn, int, string> fi = (c, want) => c == null ? "не найдено" : !c.Enabled ? c.Name + ": общий доступ выключен" : c.Type != want ? c.Name + ": НЕВЕРНАЯ роль" : c.Name + ": OK";
+            string upN = UplinkName();
+            var icsOther = ics != null ? ics.All.Where(c => c.Enabled && c.Name != upN && c.Name != WgIf()).Select(c => c.Name).ToList() : new List<string>();
+            var icsC = Comp(iL, iS, new[] { upN + " → " + WgIf(), "Служба ICS: " + (icsSvc != null ? icsSvc.Status.ToString() : "нет"), "Восстановлена: " + When(LastIcsFix) }, new List<object[]> {
+                Kv("Схема", upN + " (публичный) → " + WgIf() + " (домашняя сеть)"), Kv("Управление раздачей", CfgBool("sharing.enabled", true) ? "включено" : "выключено в настройках"),
+                Kv("Служба ICS (SharedAccess)", icsSvc != null ? icsSvc.Status + " / " + StartMode("SharedAccess") : "нет"), Kv("Публичное подключение", ics != null ? fi(ics.Pub, 0) : "—"),
+                Kv("Частное подключение", ics != null ? fi(ics.Priv, 1) : "—"), Kv("Лишние подключения с ICS", icsOther.Count > 0 ? string.Join(", ", icsOther) : "нет"),
+                Kv("Восстановлена", When(LastIcsFix)), Kv("Восстановлений с запуска агента", IcsFixCount) });
+            return icsC;
+        }
     }
 }

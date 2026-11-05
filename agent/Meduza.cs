@@ -265,5 +265,34 @@ namespace VpnGuard
             if (DownTicks >= 2 && MzProtoFallback("туннель не подключается")) { DownTicks = 0; return; }
             if (DownTicks >= 3) { DownTicks = 0; MzRestart("туннель не подключается"); }
         }
+
+        // для окна и веба (сводка): часть «MeduzaVPN»
+        static Dictionary<string, object> MeduzaComp(string mode, string kind, Dictionary<string, object> ps)
+        {
+            var proc = MzProc(); bool pipe = MzPipe(); string ver = MzVersion(); bool updating = MzUpdating();
+            // MeduzaVPN
+            int mL; string mS; bool responding = true; try { if (proc != null) responding = proc.Responding; } catch { }
+            if (updating) { mL = 1; mS = "Обновляется"; } else if (proc == null) { mL = 2; mS = "Не запущен"; } else if (!responding) { mL = 1; mS = "Не отвечает"; } else { mL = 0; mS = "Работает"; }
+            if (mode != "meduza" && mode != "dual" && !updating) { mL = -1; mS = proc != null ? "Не используется (запущен)" : "Не используется"; }
+            else if (mode == "dual" && mL == 0) {
+                if (!Up(MzAdapterName())) { mL = 1; mS = "Туннель не подключён"; } else if (LastTraffic == false) { mL = 1; mS = "Нет трафика"; } else mS = kind == "meduza" ? "Работает · активный" : "Работает · резерв";
+            }
+            string remoteVer = ps.ContainsKey("meduzaRemoteVersion") ? Convert.ToString(ps["meduzaRemoteVersion"]) : "";
+            string started = ""; try { if (proc != null) started = proc.StartTime.ToString("dd.MM HH:mm"); } catch { }
+            var meduza = Comp(mL, mS, new[] { "Версия " + ver + (remoteVer.Length > 0 && remoteVer != ver ? " (есть " + remoteVer + ")" : ""), proc != null ? "PID " + proc.Id + (started.Length > 0 ? ", с " + started : "") : "процесс отсутствует",
+                "Канал CLI: " + (pipe ? "доступен" : "нет") + " · протокол " + MzProtocol() + (MzOverride.Length > 0 ? " (запасной вместо " + CfgStr("meduza.protocol", "ultra") + ")" : ""),
+                "Перезапуски: " + Restarts.ToArray().Count(d => d > DateTime.Now.AddMinutes(-30)) + " за 30 мин, посл. " + When(LastRestart) }, new List<object[]> {
+                Kv("Версия", ver), Kv("Доступная версия", remoteVer.Length > 0 ? remoteVer : "—"), Kv("Последняя проверка обновлений", ps.ContainsKey("meduzaLastCheck") ? ps["meduzaLastCheck"] : "—"),
+                Kv("Процесс", proc != null ? "PID " + proc.Id + (responding ? "" : " (не отвечает)") : "не запущен"), Kv("Память", proc != null ? (proc.WorkingSet64 / 1048576) + " МБ" : "—"),
+                Kv("Канал CLI", pipe ? "доступен" : "нет — включите управление из командной строки"),
+                Kv("VPN (страна)", CfgStr("meduza.serviceId", "").Length > 0 ? CfgStr("meduza.serviceId", "") : "по умолчанию (единственный на аккаунте)"),
+                Kv("Протокол", MzProtocol() + (MzOverride.Length > 0 ? " — запасной, выбранный " + CfgStr("meduza.protocol", "ultra") + " не работал (с " + When(MzProtoSince) + ")" : "") + " · адаптер «" + MzAdapterName() + "»"),
+                Kv("Автоподбор протокола", CfgBool("meduza.autoProtocol", true) ? "включён — при потере связи пробует другие протоколы" : "выключен"),
+                Kv("Перезапусков за 30 мин", Restarts.ToArray().Count(d => d > DateTime.Now.AddMinutes(-30)) + " из " + CfgInt("meduza.maxRestartsPer30Min", 5) + " допустимых"),
+                Kv("Перезапусков с запуска агента", RestartCount), Kv("Последний перезапуск", When(LastRestart)), Kv("Причина", LastRestartReason.Length > 0 ? LastRestartReason : "—") });
+            meduza["serviceId"] = CfgStr("meduza.serviceId", ""); meduza["protocol"] = CfgStr("meduza.protocol", "ultra"); meduza["adapter"] = MzAdapterName();
+            meduza["catalog"] = Catalog; meduza["protoTest"] = ProtoTest; meduza["protocolNow"] = MzProtocol(); meduza["protocolOverride"] = MzOverride;
+            return meduza;
+        }
     }
 }

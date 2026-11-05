@@ -796,6 +796,11 @@ namespace VpnGuard
             return n;
         }
         static string Dt(DateTime d) { return d == DateTime.MinValue ? "—" : d.ToString("dd.MM.yyyy HH:mm:ss"); }
+        static object ZSnapshotSafe()
+        {
+            try { return ZSnapshot(); }
+            catch (Exception e) { return new Dictionary<string, object> { { "level", 2 }, { "state", "Ошибка" }, { "details", new[] { e.Message } }, { "kv", new object[0] }, { "enabled", CfgBool("zapret.enabled", false) } }; }
+        }
         static Dictionary<string, object> ZSnapshot()
         {
             if (Z == null) ZLoad();

@@ -40,8 +40,8 @@ namespace VpnGuard
             Func<long[]> st = () => { try { var x = Nic(name).GetIPStatistics(); return new[] { x.BytesSent, x.BytesReceived }; } catch { return new long[2]; } };
             var a = st();
             var hosts = CfgList("vpn.diagHosts", new[] { "1.1.1.1:443", "8.8.8.8:443", "77.88.8.8:443", "9.9.9.9:443" });
-            r.TcpAll = hosts.Length; int ok = 0;
-            var ts = hosts.Select(h => System.Threading.Tasks.Task.Run(() => { if (TcpVia(ip, h, 5000)) Interlocked.Increment(ref ok); })).ToArray();
+            r.TcpAll = hosts.Length;
+            var pt = System.Threading.Tasks.Task.Run(() => Probe(ip, hosts, 5000, true));
             try {                                                         // DNS-запрос «google.com A» к 8.8.8.8 через туннель
                 using (var u = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)) {
                     u.Bind(new IPEndPoint(IPAddress.Parse(ip), 0)); u.ReceiveTimeout = 4000;
@@ -51,7 +51,7 @@ namespace VpnGuard
                     r.Dns = u.ReceiveFrom(buf, ref ep) > 12 && buf[0] == 0x12 && buf[1] == 0x34;
                 }
             } catch { }
-            System.Threading.Tasks.Task.WaitAll(ts, 7000);
+            int ok = pt.Wait(7000) ? pt.Result.OkCount : 0;
             var b = st(); r.Tx = Math.Max(0, b[0] - a[0]); r.Rx = Math.Max(0, b[1] - a[1]); r.TcpOk = ok;
             string cnt = " (через адаптер ушло " + r.Tx + " Б, пришло " + r.Rx + " Б; сайтов открылось " + ok + "/" + r.TcpAll + ", DNS " + (r.Dns ? "работает" : "не отвечает") + ")";
             if (ok > 0) { r.Ok = true; r.Short = "трафик проходит"; r.Text = "туннель пропускает трафик" + cnt; }
@@ -62,31 +62,11 @@ namespace VpnGuard
             return r;
         }
 
-        // хотя бы один узел открывается через адрес ip — все сразу, ответ по первому успеху (не дольше timeoutMs)
-        static bool AnyVia(string ip, string[] hosts, int timeoutMs)
-        {
-            if (ip == null || hosts.Length == 0) return false;
-            using (var done = new ManualResetEvent(false)) {
-                int left = hosts.Length, ok = 0;
-                foreach (var h in hosts) {
-                    var hh = h;
-                    ThreadPool.QueueUserWorkItem(_ => {
-                        bool r = TcpVia(ip, hh, timeoutMs);
-                        if (r) Interlocked.Exchange(ref ok, 1);
-                        if (r || Interlocked.Decrement(ref left) == 0) { try { done.Set(); } catch { } }
-                    });
-                }
-                done.WaitOne(timeoutMs + 1500);
-                return ok == 1;
-            }
-        }
         static bool ProbeVia(string adapter, int timeoutMs, List<long> times)
         {
             string ip = Ipv4(adapter); if (ip == null) return false;
-            if (times == null) return AnyVia(ip, ProbeHosts(), timeoutMs);
-            bool ok = false;
-            foreach (var h in ProbeHosts()) { var sw = Stopwatch.StartNew(); if (TcpVia(ip, h, timeoutMs)) { ok = true; if (times != null) times.Add(sw.ElapsedMilliseconds); else break; } }
-            return ok;
+            if (times == null) return Probe(ip, ProbeHosts(), timeoutMs).Ok;
+            var pr = ProbeAll(ip, ProbeHosts(), timeoutMs); lock (pr.Ms) times.AddRange(pr.Ms); return pr.Ok;
         }
         static ServiceController Svc(string name)
         {
@@ -120,5 +100,30 @@ namespace VpnGuard
             } catch { }
             return "";
         }
+
+        // ---------------------------------------------------------------- проверка узлов (одна для всех модулей)
+        // TCP-соединения с адреса srcIp ко всем узлам сразу. all = false — ответ по первому успеху; true — дождаться всех (сколько
+        // открылось, время каждого). Не дольше timeoutMs (+1,5 с запаса).
+        class ProbeRes { public bool Ok; public long FirstMs = -1; public int OkCount, Total; public readonly List<long> Ms = new List<long>(); }
+        static ProbeRes Probe(string srcIp, string[] hosts, int timeoutMs, bool all = false)
+        {
+            var r = new ProbeRes { Total = hosts == null ? 0 : hosts.Length };
+            if (srcIp == null || r.Total == 0) return r;
+            var sw = Stopwatch.StartNew(); int left = r.Total; var lk = new object();
+            var done = new ManualResetEvent(false);
+            try {
+                foreach (var h in hosts) {
+                    var hh = h;
+                    ThreadPool.QueueUserWorkItem(_ => {
+                        long t0 = sw.ElapsedMilliseconds; bool ok = TcpVia(srcIp, hh, timeoutMs);
+                        lock (lk) if (ok) { r.Ok = true; r.OkCount++; r.Ms.Add(sw.ElapsedMilliseconds - t0); if (r.FirstMs < 0) r.FirstMs = sw.ElapsedMilliseconds; }
+                        if ((ok && !all) | Interlocked.Decrement(ref left) == 0) { try { done.Set(); } catch { } }
+                    });
+                }
+                done.WaitOne(timeoutMs + 1500);
+            } finally { done.Close(); }
+            lock (lk) { var c = new ProbeRes { Ok = r.Ok, FirstMs = r.FirstMs, OkCount = r.OkCount, Total = r.Total }; c.Ms.AddRange(r.Ms); return c; }
+        }
+        static ProbeRes ProbeAll(string srcIp, string[] hosts, int timeoutMs) { return Probe(srcIp, hosts, timeoutMs, true); }
     }
 }

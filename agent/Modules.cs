@@ -26,6 +26,10 @@ namespace VpnGuard
             public readonly ConcurrentQueue<KeyValuePair<string, Action>> Jobs = new ConcurrentQueue<KeyValuePair<string, Action>>();   // реакции на события
             public volatile bool Busy; public DateTime BusySince = DateTime.MinValue, LastEnd = DateTime.MinValue;
             public long Runs, Errors; public string LastError = "", Doing = ""; public bool Warned;
+            public volatile bool TickNow = true;          // проверить при следующем пробуждении (а не только по ритму)
+            public DateTime NextTick = DateTime.MinValue;
+            public Func<object> State;                   // своё состояние для сводки — строится в потоке модуля
+            public volatile object Published; public DateTime PublishedAt = DateTime.MinValue;
         }
         static readonly List<Module> Mods = new List<Module>();
         static volatile bool Stopping;
@@ -54,7 +58,7 @@ namespace VpnGuard
             List<KeyValuePair<Module, Action<string>>> l; lock (Subs) l = Subs.ContainsKey(evt) ? Subs[evt].ToList() : new List<KeyValuePair<Module, Action<string>>>();
             var e = new AgentEvent { At = DateTime.Now, Name = evt, Info = info ?? "", From = EventFrom(), To = l.Select(x => x.Key.Title).Distinct().ToArray() };
             lock (EventLog) { EventLog.Add(e); if (EventLog.Count > 100) EventLog.RemoveAt(0); }
-            foreach (var s in l) { var h = s.Value; var inf = e.Info; s.Key.Jobs.Enqueue(new KeyValuePair<string, Action>(evt, () => h(inf))); s.Key.Wake.Set(); }
+            foreach (var s in l) { var h = s.Value; var inf = e.Info; s.Key.Jobs.Enqueue(new KeyValuePair<string, Action>(evt, () => h(inf))); s.Key.TickNow = true; s.Key.Wake.Set(); }
             Wake("status");
         }
         static string EventFrom()
@@ -93,7 +97,8 @@ namespace VpnGuard
             AddModule("wg", "WG-Server", () => 15000, () => { WgWatch(); WgClientsWatch(); }, c => { if (c == "restart-wg") { SvcRestart(CfgStr("ws4w.serviceName", "")); Emit("wg.restarted"); } }, "restart-wg");
             AddModule("ics", "Раздача", () => 10000, SharingWatch, c => { if (c == "reapply-ics") ForceIcs = true; }, "reapply-ics");
             AddModule("zapret", "zapret", CheckMs, () => { ZapretWatch(); ClientZapretWatch(); LanWatch(); }, c => ZCommand(c),
-                "zapret-on", "zapret-off", "zapret-check", "zapret-releases", "zapret-update", "zapret-reload", "zapret-test");
+                "zapret-on", "zapret-off", "zapret-check", "zapret-releases", "zapret-update", "zapret-reload", "zapret-test")
+                .State = () => new Dictionary<string, object> { { "zapret", ZSnapshotSafe() }, { "cz", CzSnapshot() } };
             AddModule("ps", "Часть PowerShell", () => 10000, PsPartWatch);
             AddModule("status", "Сводка", () => 10000, Snapshot);
             AddModule("failover", "Быстрое переключение", () => Math.Max(2, CfgInt("vpn.fastCheckSec", 5)) * 1000, FailoverTick);
@@ -115,18 +120,42 @@ namespace VpnGuard
                     try { PerfRun(m.Name + "/" + c, () => m.OnCmd(c)); }
                     catch (Exception e) { Log("Модуль «" + m.Title + "»: команда " + c + ": " + e.Message, "ERROR"); }
                     finally { m.Busy = false; if (ActivityBy == m.Name) Activity = ""; }
-                    Wake("status");
+                    m.TickNow = true; Wake("status");
                 }
-                m.Busy = true; m.BusySince = DateTime.Now; m.Doing = ""; m.Warned = false;
-                try { PerfRun(m.Name, m.Tick); m.LastError = ""; }
-                catch (Exception e) { m.Errors++; m.LastError = e.Message; Log("Модуль «" + m.Title + "»: " + e.Message, "ERROR"); }
-                finally { m.Busy = false; m.LastEnd = DateTime.Now; m.Runs++; if (ActivityBy == m.Name && Activity.Length > 0) { Activity = ""; Wake("status"); } }
-                int iv = 10000; try { iv = m.IntervalMs(); } catch { }
-                m.Wake.WaitOne(Math.Max(500, iv));
+                int iv = 10000; try { iv = Math.Max(500, m.IntervalMs()); } catch { }
+                if (m.TickNow || DateTime.Now >= m.NextTick) {
+                    m.TickNow = false; m.NextTick = DateTime.Now.AddMilliseconds(iv);
+                    m.Busy = true; m.BusySince = DateTime.Now; m.Doing = ""; m.Warned = false;
+                    try { PerfRun(m.Name, m.Tick); m.LastError = ""; }
+                    catch (Exception e) { m.Errors++; m.LastError = e.Message; Log("Модуль «" + m.Title + "»: " + e.Message, "ERROR"); }
+                    finally { m.Busy = false; m.LastEnd = DateTime.Now; m.Runs++; if (ActivityBy == m.Name && Activity.Length > 0) { Activity = ""; Wake("status"); } }
+                    PublishState(m);
+                }
+                var wait = m.NextTick - DateTime.Now;
+                m.Wake.WaitOne(Math.Max(100, Math.Min(iv, (int)wait.TotalMilliseconds)));
             }
         }
         // разбудить модуль (проверить сейчас, не дожидаясь своего ритма)
-        static void Wake(string name) { var m = FindModule(name); if (m != null) m.Wake.Set(); }
+        static void Wake(string name) { var m = FindModule(name); if (m != null) { m.TickNow = true; m.Wake.Set(); } }
+        // состояние модуля для сводки: строится в его потоке (без гонок с его же изменениями)
+        static void PublishState(Module m)
+        {
+            if (m.State == null) return;
+            try { m.Published = m.State(); m.PublishedAt = DateTime.Now; } catch (Exception e) { Log("Модуль «" + m.Title + "»: состояние: " + e.Message, "WARN"); }
+        }
+        // свежая копия состояния модуля: попросить модуль (он сделает это между своими действиями) и подождать до 1,5 с;
+        // занят долгим действием — последняя опубликованная
+        static object Published(string name)
+        {
+            var m = FindModule(name); if (m == null || m.State == null) return null;
+            var ready = new ManualResetEvent(false);
+            try {
+                m.Jobs.Enqueue(new KeyValuePair<string, Action>("публикация", () => { PublishState(m); try { ready.Set(); } catch { } }));
+                m.Wake.Set();
+                ready.WaitOne(1500);
+            } finally { ready.Close(); }
+            return m.Published;
+        }
         // раздаче — перенастроиться сейчас
         static void RequestIcs() { Emit("ics.reapply"); }
 
@@ -139,7 +168,7 @@ namespace VpnGuard
                 if (a == "check-now") {
                     try { File.Delete(f); } catch { }
                     Log("Команда из монитора: check-now", "INFO");
-                    lock (Mods) foreach (var m in Mods) m.Wake.Set();
+                    lock (Mods) foreach (var m in Mods) { m.TickNow = true; m.Wake.Set(); }
                     continue;
                 }
                 Module to; lock (Mods) to = Mods.FirstOrDefault(m => m.Commands.Contains(a));
@@ -149,7 +178,7 @@ namespace VpnGuard
                 }
                 try { File.Delete(f); } catch { }
                 Log("Команда из монитора: " + a + (to.Busy ? " (модуль «" + to.Title + "» сейчас занят: " + (to.Doing.Length > 0 ? to.Doing : "проверка") + " — выполню следом)" : ""), "INFO");
-                to.Cmds.Enqueue(a); to.Wake.Set();
+                to.Cmds.Enqueue(a); to.TickNow = true; to.Wake.Set();
             }
         }
         // модуль слишком долго делает одно действие — в журнал (один раз за действие)

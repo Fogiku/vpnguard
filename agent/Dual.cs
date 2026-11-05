@@ -38,7 +38,7 @@ namespace VpnGuard
         {
             var n = KindAdapter(k); if (string.IsNullOrEmpty(n) || !Up(n)) return false;
             string ip = Ipv4(n); if (ip == null) return false;
-            return AnyVia(ip, ProbeHosts(), 3000);
+            return Probe(ip, ProbeHosts(), 3000).Ok;
         }
         static void KindWatch(string k) { if (k == "meduza") MeduzaWatch(); else AmneziaWatch(); }
         static void StopKind(string k)
@@ -155,6 +155,45 @@ namespace VpnGuard
                 else if ((DateTime.Now - DualOkSince).TotalMinutes >= fb) DualSwitch(prim, "основной туннель работает уже " + fb + " мин");
             }
             try { DualSyncRoutes(); } catch { }
+        }
+
+        // для окна и веба (сводка): часть «Туннель»
+        static Dictionary<string, object> TunnelComp(string mode, string kind)
+        {
+            string tun = mode == "zapret" ? "" : KindAdapter(kind); var ma = Nic(tun);
+            bool uUp = ma != null && ma.OperationalStatus == OperationalStatus.Up;
+            if (uUp) { if (UltraUpSince == DateTime.MinValue) UltraUpSince = DateTime.Now; } else UltraUpSince = DateTime.MinValue;
+            string uIp = ma != null ? Ipv4(tun) : null;
+            // Туннель
+            bool amz = kind == "amnezia"; bool? tTr = amz ? AwgTraffic : LastTraffic; DateTime tTrAt = amz ? AwgTrafficAt : LastTrafficAt; int tFail = amz ? AwgProbeFailures : ProbeFailures; string tWhy = amz ? AwgLastReason : LastRestartReason;
+            int uL; string uS;
+            if (mode == "zapret") { uL = 0; uS = "VPN выключен — напрямую"; } else if (amz && tun.Length == 0) { uL = 2; uS = "AmneziaVPN не подключён"; } else if (!uUp) { uL = 2; uS = "Отключён"; } else if (tTr == false) { uL = 1; uS = "Нет трафика"; } else { uL = 0; uS = "Подключён"; }
+            if (InetDown() && mode != "zapret") { uL = 2; uS = "Нет интернета — жду связь"; }
+            string kindTitle = amz ? "AmneziaVPN" : "MeduzaVPN · " + MzProtocol();
+            string trTxt = (tTr == true ? "OK" : tTr == false ? "НЕТ" : "—");
+            Dictionary<string, object> sb = null;
+            if (mode == "dual") {
+                string oth = OtherKind(kind); bool othUp = Up(KindAdapter(oth)); bool? othTr = KindTraffic(oth);
+                sb = new Dictionary<string, object> { { "kind", oth }, { "name", ModeNames[oth] }, { "up", othUp }, { "ok", othUp && othTr == true },
+                    { "state", !othUp ? "не подключён" : othTr == true ? "готов" : othTr == false ? "нет трафика" : "проверяется" },
+                    { "blocked", oth == "amnezia" && AvpnBlocked() }, { "why", oth == "amnezia" && AwgDiag != null && !AwgDiag.Ok ? AwgDiag.Short : "" } };
+                if (oth == "amnezia" && AvpnBlocked()) sb["state"] = "отключён защитой до " + AgBlockedUntil.ToString("HH:mm");
+                if (uL == 0) uS = othUp && othTr == true ? "Подключён · резерв готов" : "Подключён · резерв не готов";
+            }
+            var dualKv = mode != "dual" ? new List<object[]>() : new List<object[]> {
+                Kv("Трафик идёт через", ModeNames[kind] + (kind == DualPrimary() ? " (основной)" : " (резервный)")),
+                Kv("Переключений", DualSwitches + (DualSwitches > 0 ? " · последнее " + When(DualSwitchAt) + ": " + DualReason : "")),
+                Kv("Резерв", (CfgBool("vpn.dualHot", true) ? "горячий — оба туннеля подняты" : "холодный — поднимается при сбое") + (CfgInt("vpn.failbackMin", 5) > 0 ? ", возврат на основной через " + CfgInt("vpn.failbackMin", 5) + " мин" : "")) };
+            var ultra = Comp(uL, uS, new[] { mode == "zapret" ? "Выход: " + PhysAlias() + " · YouTube/Discord — через zapret" : "",
+                sb != null ? "Резерв: " + sb["name"] + " — " + sb["state"] + " · переключений: " + DualSwitches : "",
+                "Адаптер: " + (ma != null ? tun + " · " + ma.OperationalStatus + ", IP " + uIp : mode == "zapret" ? "не нужен" : "отсутствует"),
+                "Трафик: " + trTxt + ", проверка " + When(tTrAt), "Сбоев проверки подряд: " + tFail, tWhy.Length > 0 ? "Последняя причина: " + tWhy : "" }, new List<object[]> {
+                Kv("Режим", ModeNames[mode]), dualKv.Count > 0 ? dualKv[0] : null, dualKv.Count > 1 ? dualKv[1] : null, dualKv.Count > 2 ? dualKv[2] : null, Kv("Адаптер", ma != null ? tun + " · " + ma.OperationalStatus + " · " + ma.Description : "отсутствует"), Kv("IP", uIp ?? "—"),
+                Kv("Скорость канала", ma != null ? (ma.Speed / 1000000) + " Мбит/с" : "—"), Kv("Подключён с", UltraUpSince == DateTime.MinValue ? "—" : When(UltraUpSince)),
+                Kv("Протокол", kind == "meduza" ? MzProtocol() : amz ? "выбран в AmneziaVPN" : "—"), Kv("Проверка трафика", trTxt + " · " + When(tTrAt)), Kv("Узлы проверки", string.Join(", ", ProbeHosts())),
+                Kv("Сбоев проверки подряд", tFail + " (переподключение после " + CfgInt("meduza.probeFailuresBeforeReconnect", 3) + ")"), Kv("Переподключений с запуска агента", ReconnectCount) });
+            ultra["title"] = mode == "zapret" ? "Без VPN (только zapret)" : "Туннель: " + kindTitle; ultra["kind"] = kind; ultra["standby"] = sb; ultra["switches"] = DualSwitches;
+            return ultra;
         }
     }
 }

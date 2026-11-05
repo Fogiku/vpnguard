@@ -41,20 +41,6 @@ namespace VpnGuard
             }
         }
         // хватит ответа одного узла (все — параллельно)
-        static long AnyTcp(string srcIp, string[] hosts, int timeoutMs)
-        {
-            var done = new ManualResetEvent(false); var sw = Stopwatch.StartNew(); long[] ms = { -1 }; int left = hosts.Length;
-            foreach (var h in hosts) {
-                var hh = h;
-                ThreadPool.QueueUserWorkItem(_ => {
-                    bool ok = TcpVia(srcIp, hh, timeoutMs);
-                    if (ok && Interlocked.CompareExchange(ref ms[0], sw.ElapsedMilliseconds, -1) == -1) done.Set();
-                    if (Interlocked.Decrement(ref left) == 0) done.Set();
-                });
-            }
-            done.WaitOne(timeoutMs + 500);
-            return Interlocked.Read(ref ms[0]);
-        }
         static void InetCheck()
         {
             string why = null, via = PhysAlias(), gw = ""; long ms = -1;
@@ -62,11 +48,11 @@ namespace VpnGuard
             else {
                 try { var g = Nic(via).GetIPProperties().GatewayAddresses.FirstOrDefault(x => x.Address.AddressFamily == AddressFamily.InterNetwork && x.Address.ToString() != "0.0.0.0"); if (g != null) gw = g.Address.ToString(); } catch { }
                 string ip = Ipv4(via);
-                ms = ip == null ? -1 : AnyTcp(ip, InetHosts(), 2500);
+                ms = ip == null ? -1 : Probe(ip, InetHosts(), 2500).FirstMs;
                 if (ms < 0) {
                     // напрямую не открывается, а через туннель — да: интернет есть (провайдер режет только прямые адреса)
                     string tn = KindAdapter(TunnelKind()), tip = tn.Length > 0 && Up(tn) ? Ipv4(tn) : null;
-                    if (tip != null && AnyTcp(tip, ProbeHosts(), 2500) >= 0) ms = 0;
+                    if (tip != null && Probe(tip, ProbeHosts(), 2500).Ok) ms = 0;
                     else {
                         bool gwOk = false; if (gw.Length > 0) { try { using (var p = new Ping()) gwOk = p.Send(gw, 1000).Status == IPStatus.Success; } catch { } }
                         why = gw.Length == 0 ? "нет шлюза у " + via : gwOk ? "провайдер не пропускает трафик (роутер " + gw + " отвечает)" : "роутер " + gw + " не отвечает";
@@ -91,6 +77,22 @@ namespace VpnGuard
                     Emit("inet.lost", why);
                 }
             }
+        }
+
+        // для окна и веба (сводка): часть «Интернет»
+        static Dictionary<string, object> InetComp()
+        {
+            // интернет вообще (InetLoop)
+            int nL = InetState == 0 ? 0 : InetState == 1 ? 2 : -1;
+            string nS = InetState == 0 ? "Есть" + (InetMs > 0 ? " · " + InetMs + " мс" : "") : InetState == 1 ? "Нет · " + Dur(DateTime.Now - InetSince) : InetFails > 0 ? "Проверяется" : "Нет данных";
+            string lastDown = InetDowns == 0 ? "не пропадал" : When(InetLastDown) + (InetState == 1 ? " — сейчас" : " на " + Dur(InetLastLen));
+            var inet = Comp(nL, nS, new[] { InetState == 1 ? InetWhy : "Напрямую через " + (InetVia.Length > 0 ? InetVia : "—") + (InetGw.Length > 0 ? " · роутер " + InetGw : ""),
+                "Пропадал: " + InetDowns + " раз с запуска агента" + (InetDowns > 0 ? ", последний " + lastDown : "") }, new List<object[]> {
+                Kv("Состояние", nS), Kv("Причина", InetState == 1 ? InetWhy : "—"), Kv("Физический адаптер", InetVia.Length > 0 ? InetVia : "нет"), Kv("Роутер (шлюз)", InetGw.Length > 0 ? InetGw : "—"),
+                Kv("Узлы проверки", string.Join(", ", InetHosts()) + " — напрямую, мимо VPN, раз в 5 с"), Kv("Пропадал с запуска агента", InetDowns + " раз"), Kv("Последний раз", lastDown),
+                Kv("Пока интернета нет", "VPN не переподключается и не перезапускается, zapret не переподбирается") });
+            inet["since"] = InetSince == DateTime.MinValue ? "" : InetSince.ToString("o"); inet["downs"] = InetDowns;
+            return inet;
         }
     }
 }
