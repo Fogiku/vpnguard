@@ -126,6 +126,9 @@ namespace VpnGuard
                     File.WriteAllText(Path.Combine(stage, "agent", "Bad.cs"), "static class P { static void Main() { int x = ; } }");
                     var be = AppTryBuild(stage, "t2", new[] { Path.Combine("agent", "Bad.cs") }, "exe", new string[0]);
                     St(be != null && be.Contains("error"), "обновление: новый код с ошибкой не проходит пробную сборку");
+                    File.WriteAllText(Path.Combine(stage, "agent", "WebHost.cs"), "static readonly string[] WebSources = { \"Web.cs\", \"New.cs\", @\"agent\\Lib.cs\" }, WebRefs = { };");
+                    var ws = AppWebSources(stage);
+                    St(string.Join(";", ws) == @"Web.cs;New.cs;agent\Lib.cs", "обновление: исходники веб-сервера берутся из новой версии (" + string.Join(";", ws) + ")");
                 }
 
                 // ---- подпись установщиков (компоненты, MeduzaVPN): неподписанный файл — «не подписан»; подписанный — с верным издателем

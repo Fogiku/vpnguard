@@ -78,6 +78,18 @@ namespace VpnGuard
             AppSave();
             if (install) AppInstall(l);
         }
+        // исходники веб-сервера в новой версии: строка WebSources = { ... } из её agent\WebHost.cs
+        static string[] AppWebSources(string stage)
+        {
+            foreach (var f in new[] { Path.Combine(stage, "agent", "WebHost.cs"), Path.Combine(Root, "agent", "WebHost.cs") }) {
+                if (!File.Exists(f)) continue;
+                var m = Regex.Match(File.ReadAllText(f), @"WebSources\s*=\s*\{([^}]*)\}");
+                if (!m.Success) continue;
+                var list = Regex.Matches(m.Groups[1].Value, "@?\"([^\"]+)\"").Cast<Match>().Select(x => x.Groups[1].Value.Replace("\\\\", "\\")).ToArray();
+                if (list.Length > 0) return list;
+            }
+            return WebSources;
+        }
         // пробная сборка программы на C# из новых исходников (остальные — текущие): не собралась — обновление не ставить
         static string AppTryBuild(string stage, string name, IEnumerable<string> sources, string target, string[] refs)
         {
@@ -119,8 +131,10 @@ namespace VpnGuard
                     var err = AppTryBuild(stage, "agent", names, "winexe", new[] { "System.Web.Extensions.dll", "System.ServiceProcess.dll", "System.Management.dll", "System.Core.dll", "Microsoft.CSharp.dll", "System.IO.Compression.dll", "System.IO.Compression.FileSystem.dll" });
                     if (err != null) throw new Exception("новый агент не собирается: " + err);
                 }
-                if (paths.Any(p => WebSources.Contains(p.Replace('/', '\\'), StringComparer.OrdinalIgnoreCase))) {
-                    var err = AppTryBuild(stage, "web", WebSources, "exe", WebRefs);
+                // список исходников веб-сервера — из новой версии (в ней могли появиться новые файлы), иначе — текущий
+                var webSrc = AppWebSources(stage);
+                if (paths.Any(p => webSrc.Contains(p.Replace('/', '\\'), StringComparer.OrdinalIgnoreCase))) {
+                    var err = AppTryBuild(stage, "web", webSrc, "exe", WebRefs);
                     if (err != null) throw new Exception("новый веб-сервер не собирается: " + err);
                 }
                 // 3. резервная копия заменяемых файлов (5 последних)
