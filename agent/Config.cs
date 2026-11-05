@@ -35,18 +35,30 @@ namespace VpnGuard
             }
             }
         }
+        // прежнее имя раздела настроек WG-Server — «ws4w»: перенести в «wg» (значения «wg» главнее). true — что-то перенесли
+        static bool CfgRenameOld(Dictionary<string, object> o)
+        {
+            object old; if (o == null || !o.TryGetValue("ws4w", out old)) return false;
+            var od = old as Dictionary<string, object>; object nw; var nd = o.TryGetValue("wg", out nw) ? nw as Dictionary<string, object> : null;
+            if (nd == null) { nd = new Dictionary<string, object>(); o["wg"] = nd; }
+            if (od != null) foreach (var kv in od) if (!nd.ContainsKey(kv.Key)) nd[kv.Key] = kv.Value;
+            o.Remove("ws4w"); return true;
+        }
         static void CfgWrite(string path, object value)
         {
             {
                 Dictionary<string, object> o = null;
                 try { if (File.Exists(ConfigPath)) o = Json.DeserializeObject(File.ReadAllText(ConfigPath, Encoding.UTF8)) as Dictionary<string, object>; } catch { }
                 if (o == null) o = new Dictionary<string, object>();
+                CfgRenameOld(o);
+                if (path == null) goto write;                         // только перенос прежнего раздела
                 var parts = path.Split('.'); var cur = o;
                 for (int i = 0; i < parts.Length - 1; i++) {
                     object nx; if (!cur.TryGetValue(parts[i], out nx) || !(nx is Dictionary<string, object>)) { nx = new Dictionary<string, object>(); cur[parts[i]] = nx; }
                     cur = (Dictionary<string, object>)nx;
                 }
                 cur[parts[parts.Length - 1]] = value;
+                write:
                 string tmp = ConfigPath + "." + Process.GetCurrentProcess().Id + ".tmp";
                 File.WriteAllText(tmp, Pretty(Json.Serialize(o)), Bom);
                 try { if (File.Exists(ConfigPath)) File.Replace(tmp, ConfigPath, null); else File.Move(tmp, ConfigPath); } catch { File.Copy(tmp, ConfigPath, true); File.Delete(tmp); }

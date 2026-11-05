@@ -22,7 +22,7 @@ namespace VpnGuard
         // (и адресов из ipset). Соединение к сайту вне списков пошло бы к провайдеру без обхода и, скорее всего, заглохло бы.
         // Ретранслятор читает имя сайта из первого пакета (TLS ClientHello — SNI, HTTP — Host) и проверяет его так же, как winws
         // (по профилям из командной строки winws): обработает — напрямую через zapret, нет — через VPN. Сайт не ответил за
-        // ws4w.clientFallbackMs — один повтор через другой путь; удачный путь для имени запоминается на 30 мин.
+        // wg.clientFallbackMs — один повтор через другой путь; удачный путь для имени запоминается на 30 мин.
         class CzProf { public List<int[]> Ports = new List<int[]>(); public HashSet<string> Hosts, HostEx; public CzRanges Ips, IpEx; }
         static volatile List<CzProf> CzProfs = new List<CzProf>(); static string CzProfKey = ""; static int CzWArgsPid; static string CzWArgs = "";
         static readonly Dictionary<string, KeyValuePair<DateTime, object>> CzListCache = new Dictionary<string, KeyValuePair<DateTime, object>>();

@@ -1,8 +1,8 @@
 {
-    "version":  "3.45.2",
-    "build":  "20261106-0128",
+    "version":  "3.46.0",
+    "build":  "20261106-0148",
     "notes":  "",
-    "date":  "2026-11-06T01:28:07.2273641+03:00",
+    "date":  "2026-11-06T01:48:02.4107700+03:00",
     "files":  [
                   {
                       "path":  "agent/Amnezia.cs",
@@ -11,8 +11,8 @@
                   },
                   {
                       "path":  "agent/AmneziaGuard.cs",
-                      "sha256":  "37b5127ad760cb71b50c5aadaf01d81873aa180f7f8a919a3936a673d15261cb",
-                      "size":  7669
+                      "sha256":  "09474f059f6ed60ffee904aa05edc599d73608f498be56c935f02b01b1d0a593",
+                      "size":  10382
                   },
                   {
                       "path":  "agent/AppUpdate.cs",
@@ -21,8 +21,8 @@
                   },
                   {
                       "path":  "agent/ClientZapret.cs",
-                      "sha256":  "de7eaa5c865fc6ee396d13398b956c871d94680580a70d3109953c339dd3b51f",
-                      "size":  37972
+                      "sha256":  "829447822617f9ddc4c2f9787ae0f2d8649b42af4cf7098e09768f26d10f40bc",
+                      "size":  37940
                   },
                   {
                       "path":  "agent/Commands.cs",
@@ -31,18 +31,18 @@
                   },
                   {
                       "path":  "agent/Config.cs",
-                      "sha256":  "259539c4d0aa79222fb14bb0a55d401ad66d136ed5a508efcf17113b0a56071b",
-                      "size":  3796
+                      "sha256":  "affc6319b606782ae3b25e6797d7650cf5ad1184759c67672849e02c87946335",
+                      "size":  4746
                   },
                   {
                       "path":  "agent/Core.cs",
-                      "sha256":  "073d823edbbbf7e254717fc5f622a0a905b0acbb6f9d4151b989d3895bc5437f",
-                      "size":  21902
+                      "sha256":  "374dea622e859fc0618f6ffb48dc7d3be3fd91fd1f874a50ce695af4f017394e",
+                      "size":  22403
                   },
                   {
                       "path":  "agent/CzHosts.cs",
-                      "sha256":  "f1920bff8c00d1f79d44537a69e30ef39a21d628d5c226a0affd450a397355c7",
-                      "size":  11574
+                      "sha256":  "8a58c424597d7d8778477eba9c3ce3a6bcb44d6f1052473f5198758d2a47e2ae",
+                      "size":  11572
                   },
                   {
                       "path":  "agent/CzRelay.cs",
@@ -51,8 +51,8 @@
                   },
                   {
                       "path":  "agent/CzRoute.cs",
-                      "sha256":  "08333961ded3cbad9e8dd230823b6bbf39a5721cb8c4fc3304041736297f282e",
-                      "size":  13070
+                      "sha256":  "b61c82b115e0d633c36aaec8b37e8ba966feea22d395cb24a1726cccfcc4fbf4",
+                      "size":  13066
                   },
                   {
                       "path":  "agent/Divert.cs",
@@ -71,8 +71,8 @@
                   },
                   {
                       "path":  "agent/Ics.cs",
-                      "sha256":  "40408d0466394487dcb1dcc8f6d055ffe1b2b5325c7734df993571d9d60a6ce8",
-                      "size":  14334
+                      "sha256":  "7eeb34ed48677ef8551f1e63570e034607b74ec19a1903fce6278af5d637901f",
+                      "size":  14374
                   },
                   {
                       "path":  "agent/Inet.cs",
@@ -86,8 +86,8 @@
                   },
                   {
                       "path":  "agent/Meduza.cs",
-                      "sha256":  "5968a3099cf35de9f9455e993379b2db63f3fa1d33b599bb9e4c2daf5ed515d6",
-                      "size":  26317
+                      "sha256":  "7f0af8e54953440808a24806695dd04c668902f5d3c9f7bb08b5572819a06794",
+                      "size":  26373
                   },
                   {
                       "path":  "agent/Mode.cs",
@@ -96,8 +96,8 @@
                   },
                   {
                       "path":  "agent/Modules.cs",
-                      "sha256":  "4fbd9973e60a5d0b10259a048bc2ddc687686285cff629c6317a219fe7e73a0f",
-                      "size":  17909
+                      "sha256":  "f08e2cc352f6055c7de3146c9fb173b37f0fa196d536643b957ac5dc68253617",
+                      "size":  17879
                   },
                   {
                       "path":  "agent/Net.cs",
@@ -111,8 +111,8 @@
                   },
                   {
                       "path":  "agent/SelfTest.cs",
-                      "sha256":  "c2e917afa5c6c21f06934a612b9fd786a80890a8efcff0e95807561bf205c96a",
-                      "size":  19247
+                      "sha256":  "a58ad2a8ae15f3a1bf1b284238d318ab34fd800a57a7fed133a2c1e5335edb01",
+                      "size":  19932
                   },
                   {
                       "path":  "agent/Snapshot.cs",
@@ -121,8 +121,8 @@
                   },
                   {
                       "path":  "agent/Software.cs",
-                      "sha256":  "3f0c0ac6b51585859024967a029646b00db3ace40b24336229dd7aab8c39ed6a",
-                      "size":  24188
+                      "sha256":  "2bbeb7b1382c905deb7f35c1476cb9de320f77df12e75698bfcf5367b421be4c",
+                      "size":  23472
                   },
                   {
                       "path":  "agent/Traffic.cs",
@@ -141,23 +141,18 @@
                   },
                   {
                       "path":  "agent/WgClients.cs",
-                      "sha256":  "7d4263866b05ad05c39b56460a80b4cdd8f036de265019b580acced8515482a3",
-                      "size":  9300
+                      "sha256":  "9dd5a4fa2776b28047c868128435fd7005315971670207359eca528f854c9335",
+                      "size":  9262
                   },
                   {
                       "path":  "agent/WgLib.cs",
-                      "sha256":  "f5fc56ae81a0b3568e5b99cc3a1a11f59453eb50c1b12959c15bbb1b1a992e34",
-                      "size":  29399
+                      "sha256":  "569e4c508ad6a4aaef86e450a8dc93f5b6d0851efd6395808d0a91f0e9e7812c",
+                      "size":  29492
                   },
                   {
                       "path":  "agent/WgServer.cs",
-                      "sha256":  "374256b94e15af1933b3098b0b36108adda7d720ecfdbaff97a7ab1ff5cef43d",
-                      "size":  18432
-                  },
-                  {
-                      "path":  "agent/Ws4w.cs",
-                      "sha256":  "1744dd62708f6d0a148a91e88375265e171a3f55833eb16284165bc233f6ab8d",
-                      "size":  21211
+                      "sha256":  "bc80790ac88c49feac6fd02c2cf5002c426b0ec39d631c535b1ef02f49a65051",
+                      "size":  18031
                   },
                   {
                       "path":  "agent/Zapret.cs",
@@ -191,13 +186,13 @@
                   },
                   {
                       "path":  "config-schema.txt",
-                      "sha256":  "52c20ced26399add4cb7148328825fabe81bad6ded90570e76cdabc39309cc70",
-                      "size":  16342
+                      "sha256":  "df2ac71a84d0d6ca2925029052a333d3bc2db06bcc122b16bb5fc8b1cc04eb70",
+                      "size":  16318
                   },
                   {
                       "path":  "Diag.ps1",
-                      "sha256":  "e24bce420a67256bb91f459c3c9b3a5d839802b12fee6de84d60421230373c44",
-                      "size":  21134
+                      "sha256":  "dce0f9133e401519bf914861be05a6e79901bfc93c37d55aadddbf9ad553d1be",
+                      "size":  21087
                   },
                   {
                       "path":  "Install.cmd",
@@ -206,8 +201,8 @@
                   },
                   {
                       "path":  "Install.ps1",
-                      "sha256":  "a15e7a47c345f697bdf011b17b79d345cc726887dc9533dc9e3fa25cec25c3a7",
-                      "size":  2871
+                      "sha256":  "4c6430dc665779bc2e087ccd27601584d942b0abaed4914d7a4eeddfa047adaa",
+                      "size":  2875
                   },
                   {
                       "path":  "Meduza.ps1",
@@ -226,8 +221,8 @@
                   },
                   {
                       "path":  "README.md",
-                      "sha256":  "ed40fe5c1ce28c977a3369b6b28301c8cb9285a0de3cfc129b5bf495f10c852b",
-                      "size":  31902
+                      "sha256":  "ca7f3ab97de59f6bffa92110a749c028bbf9a60b61ba51c3b905c0955ce83ecd",
+                      "size":  33025
                   },
                   {
                       "path":  "Remote.ps1",
@@ -241,8 +236,8 @@
                   },
                   {
                       "path":  "Setup.ps1",
-                      "sha256":  "f18686c41ed26d11f003970fb99d4c9b6baaf6eb1cb276a535b41b6a49dfe30e",
-                      "size":  4039
+                      "sha256":  "9beadc8198a1ca8e2e877bd86885b481a3bce48fb05abfca5493a1cf0009e14e",
+                      "size":  4038
                   },
                   {
                       "path":  "Test.ps1",
@@ -261,8 +256,8 @@
                   },
                   {
                       "path":  "Uninstall.ps1",
-                      "sha256":  "374a0a4ef8f7431b6260f80609c9cbb2f87b3f55d0e2d55a49f9ff8cd5987385",
-                      "size":  2273
+                      "sha256":  "e77af316a9faf8d336320ea10fc836d76cfa5cadb8aa949e25388817d1c730cc",
+                      "size":  2290
                   },
                   {
                       "path":  "Update.ps1",
@@ -271,18 +266,18 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "da7124911c4ed9071c92f09244ddae65c04fc6ee1def630c142127282d53d7d8",
-                      "size":  30497
+                      "sha256":  "35402d66828a3339323e4509d371c36283699509fb6e54eba0bf754097fbfe41",
+                      "size":  31186
                   },
                   {
                       "path":  "Web.cs",
-                      "sha256":  "53bdd65959ccfb60ca2d9039cf81cd002548c518db2b2610a63100865d001d93",
-                      "size":  57344
+                      "sha256":  "c8252ea08abfc95d7edef2f402f5273728eefc365471b838e7295859ceb6c2bc",
+                      "size":  58291
                   },
                   {
                       "path":  "web/app.js",
-                      "sha256":  "6e01624e974dda1466f892c231b39a5b4239b4d8e4eaafdce897013da4b395c7",
-                      "size":  72889
+                      "sha256":  "7fbf3603c2afcdd151710ce7f11518a688a782ecaea2ae75fa565184c154a9ac",
+                      "size":  72442
                   },
                   {
                       "path":  "web/flow.js",
@@ -301,13 +296,13 @@
                   },
                   {
                       "path":  "WebDiag.cs",
-                      "sha256":  "b4b285b6fb9990f134f226b2d3006ae40fb39088767d81eb54f95ce458630552",
-                      "size":  31771
+                      "sha256":  "9066417a23f88996b2fb698c6896ed5ae2fbd5e021febef095b05893b25bbcb4",
+                      "size":  31750
                   },
                   {
                       "path":  "WebWg.cs",
-                      "sha256":  "3bbb72d2bb25f2394768843107391777e90ccbb97385f0febcf416af23d8ea8c",
-                      "size":  40218
+                      "sha256":  "ea753b51cef2710df2c5dd0221bbabcd471f6f8cb088248d184cad7f8d168c98",
+                      "size":  39720
                   }
               ]
 }

@@ -183,15 +183,15 @@ P.wg = () => {
     const p = peers.find(x => x.ip === c.ip) || {}, off = !!p.off, zap = p.zapret !== false, s = p.cz || {}, ip = esc(c.ip), nm = esc(c.name);
     const zInfo = !cz.enabled ? '' : off ? '' : !zap ? '<div class="sub">zapret выкл — всё через VPN</div>'
       : `<div class="sub">через zapret: ${s.conns || 0} соед. · ↓ ${fmtB((s.downKb || 0) * 1024)}${s.fail ? ' · не подключилось ' + s.fail : ''}${s.lastAgo >= 0 ? ' · ' + ago(s.lastAgo) : (p.active ? ' · пока не было' : '')}</div>`;
-    return `<tr${off ? ' style="opacity:.6"' : ''}><td><span class="dot l${!off && p.active ? 0 : -1}"></span> ${nm}${c.source === 'WS4W' ? ' <span class="sub">WS4W</span>' : ''}${off ? ' <b>отключён</b>' : ''}${zInfo}</td><td>${ip}</td><td class="hide-m">${esc(p.endpoint || '—')}</td><td>${off ? '—' : p.hsAgo !== undefined ? ago(p.hsAgo) : '—'}</td><td class="hide-m">↓ ${fmtB(p.tx)} ↑ ${fmtB(p.rx)}</td>
+    return `<tr${off ? ' style="opacity:.6"' : ''}><td><span class="dot l${!off && p.active ? 0 : -1}"></span> ${nm}${c.source && c.source !== 'VpnGuard' ? ` <span class="sub">${esc(c.source)}</span>` : ''}${off ? ' <b>отключён</b>' : ''}${zInfo}</td><td>${ip}</td><td class="hide-m">${esc(p.endpoint || '—')}</td><td>${off ? '—' : p.hsAgo !== undefined ? ago(p.hsAgo) : '—'}</td><td class="hide-m">↓ ${fmtB(p.tx)} ↑ ${fmtB(p.rx)}</td>
     <td class="row" style="flex-wrap:nowrap">${cz.enabled && !off ? btn(zap ? 'zapret: вкл' : 'zapret: выкл', `cliSet('${ip}',{zapret:${!zap}},'${nm}')`, zap) : ''}${btn(off ? 'Включить' : 'Отключить', `cliSet('${ip}',{off:${!off}},'${nm}')`, off)}${c.hasConf ? btn('QR и настройки', `showConf('${ip}')`) : ''}${btn('Переименовать', `wgRename('${ip}','${nm}')`)}${btn('Удалить', `delClient('${ip}','${nm}')`)}</td></tr>`; }).join('');
   const czCard = `<div class="sec">zapret для клиентов</div><div class="card">${cz.enabled
       ? `<p><span class="dot l${cz.running ? 0 : 2}"></span> <b>${cz.running ? 'Работает' : 'Не работает'}</b>${cz.error ? ' · ' + esc(cz.error) : ''}</p>
          <p>Трафик клиентов к адресам zapret (YouTube, Discord, видеосерверы провайдера, свои списки) идёт через zapret этого ПК, остальное — через VPN. На устройствах ничего менять не нужно. Для отдельного клиента zapret можно выключить в таблице ниже.</p>
          <p class="sub">TCP-соединений через zapret: ${cz.tcpConns || 0} (сейчас ${cz.active || 0}), UDP-потоков ${cz.udpFlows || 0} · ${cz.mb || 0} МБ · перехвачено пакетов ${cz.packets || 0}${cz.errors ? ' · ошибок ' + cz.errors : ''}</p>
-         ${btn('Выключить', "setCfg('ws4w.clientZapret',false,'zapret для клиентов')")}`
+         ${btn('Выключить', "setCfg('wg.clientZapret',false,'zapret для клиентов')")}`
       : `<p class="muted">Клиентам YouTube и Discord сейчас ${zon ? 'не открываются, пока zapret включён (zapret обрабатывает только трафик самого ПК)' : 'идут через VPN'}. Можно пустить их через zapret этого ПК: трафик к адресам zapret (YouTube, Discord …) — через zapret, остальное — через VPN. На устройствах ничего менять не нужно.</p>
-         ${btn('Включить', "setCfg('ws4w.clientZapret',true,'zapret для клиентов')", true)}`}</div>`;
+         ${btn('Включить', "setCfg('wg.clientZapret',true,'zapret для клиентов')", true)}`}</div>`;
   const srv = wgServerSection();
   if (wgList && wgList.noServer) return compHead('wg', '') + srv + timeline('wg');
   return compHead('wg', btn('＋ Новый клиент', 'addClient()', true) + btn('Перезапустить туннель', "cmd('restart-wg','перезапуск WG-Server')")) +
@@ -218,7 +218,7 @@ const wsRow = (label, hint, field) => `<tr><td>${label}${hint ? `<div class="sub
 function wgServerSection() {
   if (wgList && wgList.noServer) {
     const d = wgList.defaults || {};
-    return `<div class="sec">Сервер</div><div class="card"><p><b>Сервера WG-Server ещё нет.</b> Его можно создать здесь — VpnGuard сам сделает ключи, конфиг, службу туннеля и правило брандмауэра; WS4W не нужен.</p>
+    return `<div class="sec">Сервер</div><div class="card"><p><b>Сервера WG-Server ещё нет.</b> Его можно создать здесь — VpnGuard сам сделает ключи, конфиг, службу туннеля и правило брандмауэра.</p>
       ${wgList.installed ? '' : '<p class="c2">Сначала установите WireGuard на вкладке «Компоненты».</p>'}
       <table class="kv">${wsRow('Адрес сервера', 'подсеть /24; клиенты получат адреса из неё', wsIn('ws_addr', d.address || '10.253.0.1', '10.8.0.1'))}
         ${wsRow('Порт UDP', 'его нужно пробросить на роутере на этот ПК', wsIn('ws_port', d.port || 51820, '51820', { w: 110 }))}
@@ -231,13 +231,13 @@ function wgServerSection() {
   const own = sv.owned, dis = { dis: !own };
   const svc = !sv.running ? '<b class="c2">не работает</b>' : sv.svcOk ? '<span class="c0">работает</span>' : '<b class="c1">работает, но с другим файлом конфига</b>';
   return `<div class="sec">Сервер</div><div class="card">
-    <table class="kv"><tr><td>Управляет</td><td>${own ? '<b class="c0">VpnGuard</b> — WS4W не нужен' : '<b class="c1">WS4W</b> — конфиг в его папке'}</td></tr>
+    <table class="kv"><tr><td>Конфиг</td><td>${own ? '<span class="c0">в папке VpnGuard</span>' : '<b class="c1">вне папки VpnGuard</b> — адрес, порт и ключ меняются после переноса'}</td></tr>
       <tr><td>Служба туннеля</td><td>${svc}${sv.svcOk ? '' : `<div class="sub">служба: ${esc(sv.svcConf || 'не установлена')}<br>нужно: ${esc(sv.conf)}</div><div style="margin-top:6px">${btn('Исправить — переустановить службу', 'wgFixService()', true)}</div>`}</td></tr>
       <tr><td>Адрес · порт</td><td>${esc(sv.address)} · UDP ${esc(sv.port)}${sv.mtu ? ' · MTU ' + sv.mtu : ''}</td></tr>
       <tr><td>Открытый ключ сервера</td><td><code style="word-break:break-all">${esc(sv.publicKey)}</code></td></tr>
       <tr><td>Конфиг</td><td class="sub">${esc(sv.conf)}</td></tr></table>
-    <div class="row" style="margin-top:10px">${btn('Конфиг сервера', 'wgConfEdit()')}${btn(`Резервные копии (${sv.backups || 0})`, 'wgBackups()')}${own ? btn('Сменить ключ сервера', 'wgRegenKey()') + btn('Создать сервер заново', 'wgCreate(true)') : btn('Перенести сервер в VpnGuard (отказаться от WS4W)', 'wgAdopt()', true)}</div>
-    ${own ? '' : `<p class="sub" style="margin-top:8px">Конфиг сервера и клиентов (${sv.ws4wClients || 0} из WS4W) переносятся в папку VpnGuard, служба туннеля переустанавливается — клиенты отключатся на несколько секунд и подключатся сами. Ключи не меняются, перенастраивать устройства не нужно. Файлы WS4W остаются как есть.</p>`}</div>
+    <div class="row" style="margin-top:10px">${btn('Конфиг сервера', 'wgConfEdit()')}${btn(`Резервные копии (${sv.backups || 0})`, 'wgBackups()')}${own ? btn('Сменить ключ сервера', 'wgRegenKey()') + btn('Создать сервер заново', 'wgCreate(true)') : btn('Перенести конфиг в VpnGuard', 'wgAdopt()', true)}</div>
+    ${own ? '' : `<p class="sub" style="margin-top:8px">Конфиг сервера и клиентов (${sv.extClients || 0}) копируются в папку VpnGuard, служба туннеля переустанавливается — клиенты отключатся на несколько секунд и подключатся сами. Ключи не меняются, перенастраивать устройства не нужно. Прежние файлы остаются как есть.</p>`}</div>
   <div class="sec">Настройки сервера</div><div class="card"><table class="kv">
     ${wsRow('Адрес сервера', own ? 'подсеть /24. При смене подсети клиенты переедут в новую (последнее число адреса сохранится)' : 'меняется после переноса в VpnGuard', wsIn('ws_addr', sv.ip, '', dis))}
     ${wsRow('Порт UDP', own ? 'не забудьте пробросить новый порт на роутере' : '', wsIn('ws_port', sv.port, '', Object.assign({ w: 110 }, dis)))}
@@ -284,7 +284,7 @@ async function wgRegenKey() {
 async function wgConfEdit() {
   let r; try { r = await api('/api/wg/server-conf'); } catch (e) { toast(e.message, true); return; }
   $('#mbody').innerHTML = `<div class="row" style="justify-content:space-between"><h1>Конфиг сервера</h1>${btn('Закрыть', 'closeModal()')}</div>
-    <p class="sub">${esc(r.conf)}</p><p class="muted">${r.owned ? 'Закрытый ключ скрыт — строку с ним не меняйте. Перед сохранением конфиг проверяется; прежний попадёт в резервные копии, туннель перезапустится.' : 'Сервер под управлением WS4W — здесь только просмотр.'}</p>
+    <p class="sub">${esc(r.conf)}</p><p class="muted">${r.owned ? 'Закрытый ключ скрыт — строку с ним не меняйте. Перед сохранением конфиг проверяется; прежний попадёт в резервные копии, туннель перезапустится.' : 'Конфиг вне папки VpnGuard — здесь только просмотр.'}</p>
     <textarea class="log" id="wsconf" spellcheck="false" style="height:55vh"${r.owned ? '' : ' readonly'}>${esc(r.text)}</textarea>
     ${r.owned ? `<div class="row" style="margin-top:8px">${btn('Проверить и сохранить', 'wgConfSave()', true)}</div>` : ''}`;
   $('#modal').style.display = 'flex';
@@ -306,9 +306,9 @@ async function wgRestore(file, at) {
   try { await api('/api/wg/restore', { file }); closeModal(); toast('Конфиг восстановлен'); wgList = null; await P.wg.after(); render(true); } catch (e) { toast(e.message, true); }
 }
 async function wgAdopt() {
-  if (!confirm('Перенести сервер WG-Server под управление VpnGuard?\n\nКонфиг сервера и клиентов скопируется в папку VpnGuard, служба туннеля переустановится — клиенты отключатся на несколько секунд и подключатся сами (ключи те же).\nЕсли новый туннель не поднимется, вернётся прежний конфиг WS4W.')) return;
+  if (!confirm('Перенести конфиг сервера WG-Server в папку VpnGuard?\n\nКонфиг сервера и клиентов скопируется в папку VpnGuard, служба туннеля переустановится — клиенты отключатся на несколько секунд и подключатся сами (ключи те же).\nЕсли новый туннель не поднимется, вернётся прежний конфиг.')) return;
   toast('Переношу сервер… (до минуты)');
-  try { const r = await api('/api/wg/adopt', {}); toast(`Сервер под управлением VpnGuard. Клиентов из WS4W перенесено: ${r.imported}`); wgList = null; P.wg.after(); load(); } catch (e) { toast('Не удалось: ' + e.message, true); }
+  try { const r = await api('/api/wg/adopt', {}); toast(`Конфиг перенесён в VpnGuard. Конфигов клиентов перенесено: ${r.imported}`); wgList = null; P.wg.after(); load(); } catch (e) { toast('Не удалось: ' + e.message, true); }
 }
 async function delClient(ip, name) {
   if (!confirm(`Удалить клиента «${name}» (${ip})? Он сразу перестанет подключаться.`)) return;
@@ -393,7 +393,7 @@ P.system = () => {
       ${app.error ? `<br><span class="c2">${esc(app.error)}</span>` : app.pending > 0 ? `<br><span class="c1">Доступна ${esc(app.latestVersion)} (${esc(app.latestBuild)}), файлов: ${app.pending}</span>` : app.checkedAt ? '<br><span class="c0">Актуальная версия</span>' : ''}</p>
       <div class="row">${btn('Обновить сейчас', "cmd('app-update','обновление VpnGuard')", true)}${btn('Проверить', "cmd('app-check','проверка обновления')")}
       <label class="row" style="gap:6px"><input type="checkbox" ${app.auto ? 'checked' : ''} onchange="setCfg('update.auto', this.checked, 'автообновление')"> ставить обновления само</label></div></div>
-    <div class="sec">Компоненты</div><div class="card"><table><tr><th>Компонент</th><th>Установлено</th><th class="hide-m">Последняя</th><th>Состояние</th><th></th></tr>${sw.map(s => `<tr><td>${esc(s.name)}<div class="sub">${esc(s.purpose)}</div></td><td>${esc(s.installed || '—')}</td><td class="hide-m">${esc(s.latest || '—')}</td><td class="${s.error ? 'c2' : s.update ? 'c1' : ''}">${esc(s.error || s.status || (s.update ? 'есть обновление' : s.installed ? 'установлен' : s.needed ? 'нужен' : 'не нужен'))}</td><td>${s.id === 'ws4w' ? (s.installed ? btn('Удалить WS4W', "cmd('ws4w-remove','удаление WS4W','Удалить WS4W? Сервер WG-Server останется — им управляет VpnGuard. Программа, её автозапуск и задачи будут удалены, данные WS4W — сохранены в архив в data\backup.')", true) : btn('Проверить следы', "cmd('ws4w-scan','поиск WS4W')")) : btn(s.installed ? (s.update ? 'Обновить' : 'Переустановить') : 'Установить', `cmd('install ${esc(s.id)}','установка ${esc(s.name)}','Установить или обновить «${esc(s.name)}»?')`)}</td></tr>`).join('')}</table>
+    <div class="sec">Компоненты</div><div class="card"><table><tr><th>Компонент</th><th>Установлено</th><th class="hide-m">Последняя</th><th>Состояние</th><th></th></tr>${sw.map(s => `<tr><td>${esc(s.name)}<div class="sub">${esc(s.purpose)}</div></td><td>${esc(s.installed || '—')}</td><td class="hide-m">${esc(s.latest || '—')}</td><td class="${s.error ? 'c2' : s.update ? 'c1' : ''}">${esc(s.error || s.status || (s.update ? 'есть обновление' : s.installed ? 'установлен' : s.needed ? 'нужен' : 'не нужен'))}</td><td>${btn(s.installed ? (s.update ? 'Обновить' : 'Переустановить') : 'Установить', `cmd('install ${esc(s.id)}','установка ${esc(s.name)}','Установить или обновить «${esc(s.name)}»?')`)}</td></tr>`).join('')}</table>
       <div class="row" style="margin-top:10px">${btn('Установить всё нужное', "cmd('install-missing','установка недостающих','Установить всё, что нужно для текущего режима?')")}${btn('Проверить версии', "cmd('software-check','проверка версий')")}</div></div>
     <div class="sec">Удалённая диагностика</div><div class="card"><p class="muted">${rm.enabled ? 'Включена до ' + new Date(rm.until).toLocaleString() + ` · запросов: ${rm.requests}` : 'Выключена. Включается в окне VpnGuard на этом ПК (вкладка «Диагностика»).'}</p></div>`;
 };

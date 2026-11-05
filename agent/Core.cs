@@ -184,6 +184,9 @@ namespace VpnGuard
             CfgStamp = st;
             try { Cfg = st == DateTime.MinValue ? new Dictionary<string, object>() : (Json.DeserializeObject(File.ReadAllText(ConfigPath, Encoding.UTF8)) as Dictionary<string, object>) ?? new Dictionary<string, object>(); if (!force) Log("Настройки перечитаны из config.json", "INFO"); }
             catch (Exception e) { Log("config.json с ошибкой, оставляю прежние настройки: " + e.Message, "ERROR"); }
+            if (CfgRenameOld(Cfg)) {                                     // прежний раздел «ws4w» — переписать файл с «wg»
+                try { CfgSet(null, null); CfgStamp = File.GetLastWriteTimeUtc(ConfigPath); Log("Настройки: раздел «ws4w» переименован в «wg»", "INFO"); } catch (Exception e) { Log("Настройки: не удалось переименовать раздел «ws4w»: " + e.Message, "WARN"); }
+            }
         }
         static object CfgGet(string path)
         {
@@ -203,7 +206,7 @@ namespace VpnGuard
         static string Mode() { var m = CfgStr("vpn.mode", "meduza"); return new[] { "meduza", "amnezia", "dual", "zapret" }.Contains(m) ? m : "meduza"; }
         static string[] ProbeHosts() { return CfgList("meduza.probeHosts", new[] { "1.1.1.1:443", "8.8.8.8:443", "9.9.9.9:443" }); }
         static string MzAdapterName() { return MzAdapter.Length > 0 ? MzAdapter : CfgStr("meduza.adapterName", "MeduzaVPN ULTRA"); }
-        static string WgIf() { return CfgStr("ws4w.interfaceName", "wg_server"); }
+        static string WgIf() { return CfgStr("wg.interfaceName", "wg_server"); }
 
         // ---------------------------------------------------------------- журнал
         public static void Log(string msg, string level)

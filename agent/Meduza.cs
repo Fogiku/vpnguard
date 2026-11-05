@@ -76,7 +76,7 @@ namespace VpnGuard
             string a = "connect" + (sid.Length > 0 ? " \"" + sid + "\"" : "") + (proto.Length > 0 ? " --protocol " + proto : "") + " --wait";
             SetActivity("подключаю MeduzaVPN (" + proto + ")"); ReconnectCount++;
             Log("MeduzaVPN: meduzavpn " + a, "INFO");
-            var r = MzCli(a, timeoutSec > 0 ? timeoutSec : CfgInt("meduza.connectTimeoutSec", 90) + 30);
+            NetChanged(); var r = MzCli(a, timeoutSec > 0 ? timeoutSec : CfgInt("meduza.connectTimeoutSec", 90) + 30); NetChanged();
             if (r.Code != 0) Log("MeduzaVPN: connect завершился с кодом " + r.Code + ": " + r.Out + " " + r.Err, "WARN");
             var dl = DateTime.Now.AddSeconds(15);
             while (DateTime.Now < dl) {
@@ -86,7 +86,7 @@ namespace VpnGuard
             }
             return Up(MzAdapterName());
         }
-        static void MzDisconnect() { if (MzPipe()) { var r = MzCli("disconnect", 30); Log("MeduzaVPN: disconnect (код " + r.Code + ")", "INFO"); } }
+        static void MzDisconnect() { if (MzPipe()) { NetChanged(); var r = MzCli("disconnect", 30); NetChanged(); Log("MeduzaVPN: disconnect (код " + r.Code + ")", "INFO"); } }
         static void MzStart()
         {
             string exe = MzExe();

@@ -151,10 +151,10 @@ namespace VpnGuard
             sb.AppendLine("===== правила брандмауэра VpnGuard / WireGuard");
             try {
                 dynamic fw = Activator.CreateInstance(Type.GetTypeFromProgID("HNetCfg.FwPolicy2")); var rows = new List<string[]>();
-                foreach (dynamic r in fw.Rules) { string n = r.Name; if (Regex.IsMatch(n ?? "", "VpnGuard|WireGuard|WS4W|wg_server")) rows.Add(new[] { n, ((bool)r.Enabled).ToString(), (int)r.Direction == 1 ? "Inbound" : "Outbound", (int)r.Action == 1 ? "Allow" : "Block" }); }
+                foreach (dynamic r in fw.Rules) { string n = r.Name; if (Regex.IsMatch(n ?? "", "VpnGuard|WireGuard|wg_server")) rows.Add(new[] { n, ((bool)r.Enabled).ToString(), (int)r.Direction == 1 ? "Inbound" : "Outbound", (int)r.Action == 1 ? "Allow" : "Block" }); }
                 sb.Append(Table(new[] { "DisplayName", "Enabled", "Direction", "Action" }, rows));
             } catch (Exception e) { sb.AppendLine("нет доступа: " + e.Message); }
-            int newPort = CfgInt("ws4w.newServerPort", 51820);
+            int newPort = CfgInt("wg.newServerPort", 51820);
             sb.AppendLine("===== прослушиваемые UDP-порты WireGuard");
             foreach (var l in J("udp").Split('\n').Where(l => Regex.IsMatch(l, @":(51820|51821|" + newPort + @")\s"))) sb.AppendLine(l.TrimEnd());
             return sb.ToString();
@@ -173,7 +173,7 @@ namespace VpnGuard
             }
             sb.AppendLine("Агент VpnGuard: " + VersionText + " · папка " + Root);
             sb.AppendLine("===== процессы").Append(Table(new[] { "Id", "ProcessName", "CPU,с", "МБ", "StartTime", "Responding" },
-                Process.GetProcesses().Where(p => Regex.IsMatch(p.ProcessName, "medusa|meduza|winws|wireguard|amnezia|awg|ws4w|WgServer|powershell|VpnGuardWeb|VpnGuardTray|VpnGuardAgent", RegexOptions.IgnoreCase))
+                Process.GetProcesses().Where(p => Regex.IsMatch(p.ProcessName, "medusa|meduza|winws|wireguard|amnezia|awg|powershell|VpnGuardWeb|VpnGuardTray|VpnGuardAgent", RegexOptions.IgnoreCase))
                     .OrderBy(p => p.ProcessName).Select(p => {
                         string cpu = "", st = "", resp = ""; try { cpu = ((int)p.TotalProcessorTime.TotalSeconds).ToString(); st = p.StartTime.ToString("dd.MM.yyyy HH:mm:ss"); resp = p.Responding.ToString(); } catch { }
                         return new[] { p.Id.ToString(), p.ProcessName, cpu, (p.WorkingSet64 / 1048576).ToString(), st, resp }; })));

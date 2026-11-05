@@ -1,4 +1,4 @@
-﻿// Модуль «Компоненты»: версии и установка нужного софта (MeduzaVPN и его CLI, WireGuard, AmneziaVPN, WS4W, zapret) и автообновление MeduzaVPN.
+﻿// Модуль «Компоненты»: версии и установка нужного софта (MeduzaVPN и его CLI, WireGuard, AmneziaVPN, zapret) и автообновление MeduzaVPN.
 // Раньше — часть PowerShell (Software.ps1, обновление в Meduza.ps1). Источники официальные: сервер сборок MeduzaVPN, download.wireguard.com,
 // релизы GitHub. Проверка: sha256 (из release.json / GitHub) и подпись Authenticode известного издателя.
 using System;
@@ -47,7 +47,6 @@ namespace VpnGuard
             new SwDef { Id = "meduzacli", Name = "MeduzaVPN CLI", Purpose = "управление MeduzaVPN из агента" },
             new SwDef { Id = "wireguard", Name = "WireGuard", Purpose = "туннель WG-Server для клиентов" },
             new SwDef { Id = "amneziavpn", Name = "AmneziaVPN", Purpose = "VPN (режим AmneziaVPN)", Repo = "amnezia-vpn/amnezia-client", Asset = @"_windows_x64\.exe$", Reg = "^AmneziaVPN" },
-            new SwDef { Id = "ws4w", Name = "WS4W", Purpose = "прежняя программа настройки сервера — не нужна, сервером управляет VpnGuard", Repo = "micahmo/WgServerforWindows", Asset = @"\.(msi|exe)$", Reg = "^(WS4W|WireGuard Server For Windows)" },
             new SwDef { Id = "zapret", Name = "zapret-discord-youtube", Purpose = "YouTube и Discord мимо блокировок" },
         };
         static Version Ver2(string s) { var m = Regex.Match(s ?? "", @"\d+(\.\d+){0,3}"); System.Version v; return m.Success && System.Version.TryParse(m.Value.Contains(".") ? m.Value : m.Value + ".0", out v) ? v : new Version(0, 0); }
@@ -56,9 +55,8 @@ namespace VpnGuard
             switch (id) {
                 case "meduza": { var v = MzVersion(); return Ver2(v) > new Version(0, 0) ? v : ""; }
                 case "meduzacli": { if (!File.Exists(Cli())) return ""; var v = FileVersionInfo.GetVersionInfo(Cli()).ProductVersion; return string.IsNullOrEmpty(v) ? "есть" : v; }
-                case "wireguard": { var v = AppUninstall("^WireGuard$", "DisplayVersion"); return !string.IsNullOrEmpty(v) ? v : File.Exists(CfgStr("ws4w.wireguardExe", @"C:\Program Files\WireGuard\wireguard.exe")) ? "есть" : ""; }
+                case "wireguard": { var v = AppUninstall("^WireGuard$", "DisplayVersion"); return !string.IsNullOrEmpty(v) ? v : File.Exists(CfgStr("wg.wireguardExe", @"C:\Program Files\WireGuard\wireguard.exe")) ? "есть" : ""; }
                 case "amneziavpn": { var v = AppUninstall("^AmneziaVPN", "DisplayVersion"); if (!string.IsNullOrEmpty(v)) return v; if (File.Exists(AwgExe())) { var fv = FileVersionInfo.GetVersionInfo(AwgExe()).ProductVersion; return string.IsNullOrEmpty(fv) ? "есть" : fv; } return ""; }
-                case "ws4w": return AppUninstall(SwDefs.First(d => d.Id == "ws4w").Reg, "DisplayVersion") ?? Ws4wInstalled();
                 case "zapret": return ZLocalVersion();
             }
             return "";
@@ -267,14 +265,12 @@ namespace VpnGuard
                     { "needed", SwNeeded(d.Id) }, { "status", it.ContainsKey("status") ? it["status"] : "" }, { "error", it.ContainsKey("error") ? it["error"] : "" } };
             }).ToArray();
         }
-        static DateTime Ws4wScanAt = DateTime.MinValue;
-        static void ComponentsTick() { SwCheck(false); MzUpdate(false); if ((DateTime.Now - Ws4wScanAt).TotalMinutes >= 30) { Ws4wScanAt = DateTime.Now; try { Ws4wScan(); } catch { } } }
+        static void ComponentsTick() { SwCheck(false); MzUpdate(false); }
         static void ComponentsCmd(string c)
         {
             if (c == "software-check") SwCheck(true);
             else if (c == "install-missing") { SwInstallMissing(); SwCheck(true); }
             else if (c == "check-update") MzUpdate(true);
-            else if (c == "ws4w-scan" || c == "ws4w-remove") { Ws4wCmd(c); Ws4wScanAt = DateTime.Now; }
             else if (c.StartsWith("install ")) { SwInstall(c.Substring(8).Trim()); SwCheck(true); }
         }
     }

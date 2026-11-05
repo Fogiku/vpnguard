@@ -1,4 +1,4 @@
-﻿// VpnGuard — агент на C#: zapret и для клиентов WG-Server (ws4w.clientZapret), разделение по IP, прозрачно.
+﻿// VpnGuard — агент на C#: zapret и для клиентов WG-Server (wg.clientZapret), разделение по IP, прозрачно.
 // winws обрабатывает только трафик, который начинается на самом ПК. Трафик клиентов wg_server к адресам из маршрутов zapret
 // (YouTube, Discord, видеосерверы провайдера, свои списки) агент перехватывает (WinDivert, тот же драйвер, что у zapret) и делает «своим»:
 //   TCP — заворачивает на свой ретранслятор на ПК (адрес ПК в сети wg_server : 34010), тот соединяется с тем же адресом
@@ -49,7 +49,7 @@ namespace VpnGuard
         static volatile bool CzSumOff, CzQuicRelay; static int CzActive, CzMss = 1200;
         static volatile CzRanges CzSet = new CzRanges(); static string CzSetKey = "";
         static DateTime CzFwAt = DateTime.MinValue, CzCleanAt = DateTime.MinValue; static string CzFwSig = "";
-        // по клиентам: кому zapret не нужен (ws4w.clientNoZapret — их трафик целиком через VPN, как без этой функции) и счётчики
+        // по клиентам: кому zapret не нужен (wg.clientNoZapret — их трафик целиком через VPN, как без этой функции) и счётчики
         class CzCli { public long Pkts, ZPkts, Conns, Up, Down, Quic, Fail, Leak; public int Logged, FailLogged; public DateTime LastZ = DateTime.MinValue; }
         static readonly ConcurrentDictionary<uint, CzCli> CzClients = new ConcurrentDictionary<uint, CzCli>();
         static readonly Func<uint, CzCli> CzNewCli = k => new CzCli();
@@ -58,7 +58,7 @@ namespace VpnGuard
         static void CzUpdateNoZ()
         {
             var s = new HashSet<uint>(); IPAddress a;
-            foreach (var x in CfgList("ws4w.clientNoZapret", new string[0]).Concat(CfgList("ws4w.clientOff", new string[0])))
+            foreach (var x in CfgList("wg.clientNoZapret", new string[0]).Concat(CfgList("wg.clientOff", new string[0])))
                 if (IPAddress.TryParse(x.Trim(), out a) && a.AddressFamily == AddressFamily.InterNetwork) s.Add(IpH(a.GetAddressBytes(), 0));
             if (!s.SetEquals(CzNoZ)) {
                 var was = CzNoZ; CzNoZ = s;
@@ -66,7 +66,7 @@ namespace VpnGuard
                 foreach (var v in was.Except(s)) Log("zapret для клиентов: " + IpS(v) + " — снова через zapret", "INFO");
             }
         }
-        static bool CzClientZapret(string ip) { return !CfgList("ws4w.clientNoZapret", new string[0]).Any(x => x.Trim() == ip); }
+        static bool CzClientZapret(string ip) { return !CfgList("wg.clientNoZapret", new string[0]).Any(x => x.Trim() == ip); }
         static Dictionary<string, object> CzClientStat(string ip)
         {
             IPAddress a; CzCli c; if (!IPAddress.TryParse(ip, out a) || !CzClients.TryGetValue(IpH(a.GetAddressBytes(), 0), out c)) return null;
@@ -77,7 +77,7 @@ namespace VpnGuard
 
         // ретранслятор (через zapret): [↓, ↑], байт/с
         static long[] CzRates() { return RateOf("cz", Interlocked.Read(ref CzTcpDown), Interlocked.Read(ref CzTcpUp)); }
-        static bool CzWanted() { return CfgBool("ws4w.clientZapret", false); }
+        static bool CzWanted() { return CfgBool("wg.clientZapret", false); }
 
         static void ClientZapretWatch()
         {
@@ -95,10 +95,10 @@ namespace VpnGuard
                 CzError = why == "off" ? "" : why; return;
             }
             CzUpdateSet(); CzUpdateNoZ();
-            CzQuicRelay = CfgStr("ws4w.clientQuic", "drop") == "relay"; CzQuicReject = CfgBool("ws4w.clientQuicReject", true); CzMss = Math.Max(536, CfgInt("ws4w.clientMss", 1200));
-            CzFallbackMs = Math.Max(1500, CfgInt("ws4w.clientFallbackMs", 3000)); CzBypassMin = Math.Max(1, CfgInt("ws4w.clientBypassMin", 5));
-            CzVpnHosts = CfgList("ws4w.clientVpnHosts", new[] { "doubleclick.net", "googlesyndication.com", "googleadservices.com", "google-analytics.com" }).Select(x => x.Trim().TrimStart('.')).Where(x => x.Length > 0).ToArray();
-            CzVideoVpn = CfgBool("ws4w.clientVideoVpn", true); CzVideoVpnMin = Math.Max(10, CfgInt("ws4w.clientVideoVpnMin", 360));
+            CzQuicRelay = CfgStr("wg.clientQuic", "drop") == "relay"; CzQuicReject = CfgBool("wg.clientQuicReject", true); CzMss = Math.Max(536, CfgInt("wg.clientMss", 1200));
+            CzFallbackMs = Math.Max(1500, CfgInt("wg.clientFallbackMs", 3000)); CzBypassMin = Math.Max(1, CfgInt("wg.clientBypassMin", 5));
+            CzVpnHosts = CfgList("wg.clientVpnHosts", new[] { "doubleclick.net", "googlesyndication.com", "googleadservices.com", "google-analytics.com" }).Select(x => x.Trim().TrimStart('.')).Where(x => x.Length > 0).ToArray();
+            CzVideoVpn = CfgBool("wg.clientVideoVpn", true); CzVideoVpnMin = Math.Max(10, CfgInt("wg.clientVideoVpnMin", 360));
             if (CzVideoVpn) { try { CzLoadGoogle(); } catch (Exception e) { Log("zapret для клиентов: диапазоны Google: " + e.Message, "WARN"); } }
             try { CzUpdateProfiles(CzWinwsArgs()); } catch (Exception e) { Log("zapret для клиентов: профили winws: " + e.Message, "WARN"); }
             string sig = wgIp + "|" + IfIndexOf(WgIf()) + "|" + phys.IfIndex + "|" + phys.Ip;
@@ -355,12 +355,12 @@ namespace VpnGuard
         // ICMP «порт недоступен» клиенту от имени сайта (тип 3, код 3): в ответе — заголовок IP и первые 8 байт исходного пакета
         static long CzIcmpSent, CzDbgN;
         // подробный журнал ретранслятора — первый час после запуска агента (не больше 1500 строк)
-        static bool CzDbg() { return CfgBool("ws4w.clientDebug", true) && (DateTime.UtcNow - CzStartedAt).TotalMinutes < 60 && Interlocked.Increment(ref CzDbgN) <= 1500; }
+        static bool CzDbg() { return CfgBool("wg.clientDebug", true) && (DateTime.UtcNow - CzStartedAt).TotalMinutes < 60 && Interlocked.Increment(ref CzDbgN) <= 1500; }
         static readonly ConcurrentDictionary<ulong, DateTime> CzDbgSeen = new ConcurrentDictionary<ulong, DateTime>();
         // UDP/QUIC и обход через VPN не проходят через ретранслятор — записать раз в минуту на пару клиент → адрес
         static void CzDbgPkt(uint src, uint dst, int dport, string what)
         {
-            if (!CfgBool("ws4w.clientDebug", true) || (DateTime.UtcNow - CzStartedAt).TotalMinutes >= 60) return;
+            if (!CfgBool("wg.clientDebug", true) || (DateTime.UtcNow - CzStartedAt).TotalMinutes >= 60) return;
             ulong k = ((ulong)src << 32) | dst; DateTime t;
             if (CzDbgSeen.TryGetValue(k, out t) && (DateTime.UtcNow - t).TotalSeconds < 60) return;
             CzDbgSeen[k] = DateTime.UtcNow;

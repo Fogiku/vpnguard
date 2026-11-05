@@ -95,7 +95,7 @@ namespace VpnGuard
         {
             AddModule("tunnels", "Туннели", CheckMs, () => VpnWatch(), TunnelCmd,
                 "reconnect", "reconnect-meduza", "reconnect-awg", "restart-meduza", "meduza-test", "meduza-catalog", "meduza-proto-reset", "dual-switch");
-            AddModule("wg", "WG-Server", () => 15000, () => { WgWatch(); WgClientsWatch(); }, c => { if (c == "restart-wg") { SvcRestart(CfgStr("ws4w.serviceName", "WireGuardTunnel$wg_server")); Emit("wg.restarted"); } }, "restart-wg");
+            AddModule("wg", "WG-Server", () => 15000, () => { WgWatch(); WgClientsWatch(); }, c => { if (c == "restart-wg") { SvcRestart(CfgStr("wg.serviceName", "WireGuardTunnel$wg_server")); Emit("wg.restarted"); } }, "restart-wg");
             AddModule("ics", "Раздача", () => 10000, SharingWatch, c => { if (c == "reapply-ics") ForceIcs = true; }, "reapply-ics");
             AddModule("zapret", "zapret", CheckMs, () => { ZapretWatch(); ClientZapretWatch(); LanWatch(); }, c => ZCommand(c),
                 "zapret-on", "zapret-off", "zapret-check", "zapret-releases", "zapret-update", "zapret-reload", "zapret-test")
@@ -106,7 +106,7 @@ namespace VpnGuard
             var upd = AddModule("update", "Обновление VpnGuard", () => 60000, AppUpdateTick, AppUpdateCmd, "app-check", "app-update");
             upd.WarnAfterSec = 900; upd.State = () => new Dictionary<string, object> { { "app", AppSnapshot() } };
             AddModule("status", "Сводка", () => 10000, Snapshot);
-            var comp = AddModule("components", "Компоненты", () => 60000, ComponentsTick, ComponentsCmd, "software-check", "install-missing", "check-update", "ws4w-scan", "ws4w-remove");
+            var comp = AddModule("components", "Компоненты", () => 60000, ComponentsTick, ComponentsCmd, "software-check", "install-missing", "check-update");
             comp.Prefixes = new[] { "install " }; comp.WarnAfterSec = 1200;                 // установка может идти минутами
             comp.State = () => new Dictionary<string, object> { { "software", SoftwareSnapshot() }, { "meduzaRemoteVersion", SwS("meduzaRemote") }, { "meduzaLastCheck", When(SwD("meduzaChecked")) } };
             AddModule("failover", "Быстрое переключение", () => Math.Max(2, CfgInt("vpn.fastCheckSec", 5)) * 1000, FailoverTick);

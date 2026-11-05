@@ -47,12 +47,12 @@ namespace VpnGuard
         // заглушка провайдера вместо сайта Google: Google с современными браузерами всегда отвечает по TLS 1.3 (сертификат зашифрован);
         // открытый сертификат (сообщение Certificate в первом ответе) — значит, отвечает не Google
         static long CzStubs;
-        // видео Google через VPN (ws4w.clientVideoVpn): кэш провайдера (адреса не Google) остаётся через zapret
+        // видео Google через VPN (wg.clientVideoVpn): кэш провайдера (адреса не Google) остаётся через zapret
         static bool CzQuicReject = true;
         static bool CzVideoVpn = true; static int CzVideoVpnMin = 360; static long CzVideoToVpn;
         static readonly ConcurrentDictionary<uint, byte> CzVideoLogged = new ConcurrentDictionary<uint, byte>();
         static CzRanges CzGoogle = new CzRanges { Lo = new uint[0], Hi = new uint[0] }; static DateTime CzGoogleAt = DateTime.MinValue;
-        // имена, которым через VPN лучше всегда (ws4w.clientVpnHosts), и имена, недавно не ответившие через zapret
+        // имена, которым через VPN лучше всегда (wg.clientVpnHosts), и имена, недавно не ответившие через zapret
         static readonly ConcurrentDictionary<string, DateTime> CzBadHost = new ConcurrentDictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
         static string[] CzVpnHosts = new string[0]; static long CzHostToVpn;
         static bool CzVpnHost(string h)

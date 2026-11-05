@@ -214,23 +214,23 @@
    "desc": "защита от бесконечных перезапусков"
   },
   {
-   "key": "ws4w.endpoint",
+   "key": "wg.endpoint",
    "default": "",
    "type": "text:^[\\\\w\\\\.\\\\-:\\\\[\\\\]]{0,100}$",
    "group": "WG-Server",
    "title": "Адрес для клиентов (IP или имя[:порт])",
-   "desc": "пусто — как у клиентов WS4W или внешний IP"
+   "desc": "пусто — как в конфигах клиентов или внешний IP"
   },
   {
-   "key": "ws4w.clientDns",
+   "key": "wg.clientDns",
    "default": "",
    "type": "text:^[\\\\d\\\\., a-fA-F:]{0,100}$",
    "group": "WG-Server",
    "title": "DNS для новых клиентов",
-   "desc": "пусто — как у клиентов WS4W или адрес сервера"
+   "desc": "пусто — как в конфигах клиентов или адрес сервера"
   },
   {
-   "key": "ws4w.clientZapret",
+   "key": "wg.clientZapret",
    "default": false,
    "type": "bool",
    "group": "WG-Server",
@@ -238,7 +238,7 @@
    "desc": "трафик клиентов к адресам zapret (YouTube, Discord …) — через zapret этого ПК, остальное — через VPN; на устройствах ничего менять не нужно (только агент на C#)"
   },
   {
-   "key": "ws4w.autoCreateServer",
+   "key": "wg.autoCreateServer",
    "default": true,
    "type": "bool",
    "group": "WG-Server",
@@ -456,47 +456,47 @@
    "default": ""
   },
   {
-   "key": "ws4w.clientBypassMin",
+   "key": "wg.clientBypassMin",
    "default": 5
   },
   {
-   "key": "ws4w.clientDebug",
+   "key": "wg.clientDebug",
    "default": true
   },
   {
-   "key": "ws4w.clientFallbackMs",
+   "key": "wg.clientFallbackMs",
    "default": 3000
   },
   {
-   "key": "ws4w.clientMss",
+   "key": "wg.clientMss",
    "default": 1200
   },
   {
-   "key": "ws4w.clientNoZapret",
+   "key": "wg.clientNoZapret",
    "default": []
   },
   {
-   "key": "ws4w.clientOff",
+   "key": "wg.clientOff",
    "default": []
   },
   {
-   "key": "ws4w.clientQuic",
+   "key": "wg.clientQuic",
    "default": "drop"
   },
   {
-   "key": "ws4w.clientQuicReject",
+   "key": "wg.clientQuicReject",
    "default": true
   },
   {
-   "key": "ws4w.clientVideoVpn",
+   "key": "wg.clientVideoVpn",
    "default": true
   },
   {
-   "key": "ws4w.clientVideoVpnMin",
+   "key": "wg.clientVideoVpnMin",
    "default": 360
   },
   {
-   "key": "ws4w.clientVpnHosts",
+   "key": "wg.clientVpnHosts",
    "default": [
     "doubleclick.net",
     "googlesyndication.com",
@@ -505,39 +505,39 @@
    ]
   },
   {
-   "key": "ws4w.clientAllowedIPs",
+   "key": "wg.clientAllowedIPs",
    "default": "0.0.0.0/0"
   },
   {
-   "key": "ws4w.clientKeepalive",
+   "key": "wg.clientKeepalive",
    "default": 25
   },
   {
-   "key": "ws4w.configPath",
+   "key": "wg.configPath",
    "default": ""
   },
   {
-   "key": "ws4w.interfaceName",
+   "key": "wg.interfaceName",
    "default": "wg_server"
   },
   {
-   "key": "ws4w.newServerAddress",
+   "key": "wg.newServerAddress",
    "default": "10.253.0.1/24"
   },
   {
-   "key": "ws4w.newServerPort",
+   "key": "wg.newServerPort",
    "default": 51820
   },
   {
-   "key": "ws4w.serverAddress",
+   "key": "wg.serverAddress",
    "default": ""
   },
   {
-   "key": "ws4w.serviceName",
+   "key": "wg.serviceName",
    "default": "WireGuardTunnel$wg_server"
   },
   {
-   "key": "ws4w.wireguardExe",
+   "key": "wg.wireguardExe",
    "default": "C:\\Program Files\\WireGuard\\wireguard.exe"
   },
   {

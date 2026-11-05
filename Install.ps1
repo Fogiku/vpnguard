@@ -25,7 +25,7 @@ Set-ItemProperty $k -Name EnableRebootPersistConnection -Value 1 -Type DWord
 
 $wg = Get-Service -Name 'WireGuardTunnel$wg_server' -ErrorAction SilentlyContinue
 if ($wg) { Set-Service -Name 'WireGuardTunnel$wg_server' -StartupType Automatic; Write-Host '-- Служба WireGuardTunnel$wg_server -> Автоматически' }
-else     { Write-Warning 'Служба WireGuardTunnel$wg_server не найдена. Настройте сервер в WS4W (шаг Tunnel Service), VpnGuard подхватит его сам.' }
+else     { Write-Warning 'Служба WireGuardTunnel$wg_server не найдена. VpnGuard создаст сервер сам (или на вкладке WG-Server веб-интерфейса).' }
 
 Write-Host '-- Задача агента (при входе + каждые 5 мин, наивысшие права)'
 Invoke-Agent '-SetupTask agent'

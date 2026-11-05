@@ -120,7 +120,7 @@ function Invoke-Diag([switch]$TryFix) {
         }
     }
 
-    Section 'WS4W / wg_server'
+    Section 'WG-Server (wg_server)'
     Try-Run {
         $svc = Get-Service -Name $W.serviceName -ErrorAction SilentlyContinue
         if ($svc) { Write-Host "Служба $($W.serviceName): $($svc.Status) / $($svc.StartType)" } else { Write-Host "!! служба $($W.serviceName) не найдена" }
@@ -132,11 +132,11 @@ function Invoke-Diag([switch]$TryFix) {
         $peers = Get-WgPeers
         if ($peers) { Write-Host "Клиенты: $($peers.Active) активных из $($peers.Total)" } else { Write-Host 'Клиенты: нет данных (wg.exe)' }
         Write-Host "wireguard.exe: $($W.wireguardExe) (есть: $(Test-Path $W.wireguardExe))"
-        # устройство папки WS4W (без ключей) — для управления клиентами
+        # папка конфига сервера (без ключей)
         $conf = Find-WgConf
         if ($conf -and (Test-Path $conf) -and $conf -like '*.conf') {
             $base = Split-Path (Split-Path $conf)
-            Write-Host "Папка WS4W: $base"
+            Write-Host "Папка: $base"
             Get-ChildItem $base -Recurse -Depth 2 -File -ErrorAction SilentlyContinue | Select-Object -First 40 |
                 ForEach-Object { Write-Host ("  {0} ({1} Б)" -f $_.FullName.Substring($base.Length), $_.Length) }
             Write-Host 'Конфиг сервера (ключи скрыты):'

@@ -26,35 +26,33 @@ namespace VpnGuard
         // ---------------------------------------------------------------- wg_server
         static string WgConf()
         {
-            var p = CfgStr("ws4w.configPath", ""); if (p.Length > 0 && File.Exists(p)) return p;
+            var p = CfgStr("wg.configPath", ""); if (p.Length > 0 && File.Exists(p)) return p;
             try {     // сервер, созданный самим VpnGuard (запомнен в state.json)
                 var st = Json.DeserializeObject(File.ReadAllText(Path.Combine(DataDir, "state.json"), Encoding.UTF8)) as Dictionary<string, object>;
                 object w; if (st != null && st.TryGetValue("wgConfPath", out w) && w != null && Convert.ToString(w).Length > 0 && File.Exists(Convert.ToString(w))) return Convert.ToString(w);
             } catch { }
             try {
-                using (var k = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\" + CfgStr("ws4w.serviceName", "WireGuardTunnel$wg_server"))) {
+                using (var k = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\" + CfgStr("wg.serviceName", "WireGuardTunnel$wg_server"))) {
                     var img = k == null ? null : Convert.ToString(k.GetValue("ImagePath"));
                     var mt = Regex.Match(img ?? "", "/tunnelservice\\s+\"?([^\"]+?\\.conf(\\.dpapi)?)\"?\\s*$");
                     if (mt.Success && File.Exists(mt.Groups[1].Value)) return mt.Groups[1].Value;
                 }
             } catch { }
             string n = WgIf(), pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
-            foreach (var c in new[] { Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WS4W", "server_wg", n + ".conf"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "WS4W", n + ".conf"), Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WS4W", n + ".conf"),
-                Path.Combine(DataDir, "wg", n + ".conf"), Path.Combine(pf, "WireGuard", "Data", "Configurations", n + ".conf.dpapi"), Path.Combine(pf, "WireGuard", "Data", "Configurations", n + ".conf") })
+            foreach (var c in new[] { Path.Combine(DataDir, "wg", n + ".conf"), Path.Combine(pf, "WireGuard", "Data", "Configurations", n + ".conf.dpapi"), Path.Combine(pf, "WireGuard", "Data", "Configurations", n + ".conf") })
                 if (File.Exists(c)) return c;
             return null;
         }
         static string WgServerAddress()
         {
-            var a = CfgStr("ws4w.serverAddress", ""); if (a.Length > 0) return a;
+            var a = CfgStr("wg.serverAddress", ""); if (a.Length > 0) return a;
             var c = WgConf();
             if (c != null && c.EndsWith(".conf")) { try { var m = Regex.Match(File.ReadAllText(c), @"(?m)^\s*Address\s*=\s*([\d\.]+)"); if (m.Success) return m.Groups[1].Value; } catch { } }
             var ip = Ipv4(WgIf()); return ip != null && !ip.StartsWith("192.168.137.") ? ip : null;
         }
         static void WgWatch()
         {
-            string sn = CfgStr("ws4w.serviceName", "WireGuardTunnel$wg_server"), wgExe = CfgStr("ws4w.wireguardExe", @"C:\Program Files\WireGuard\wireguard.exe");
+            string sn = CfgStr("wg.serviceName", "WireGuardTunnel$wg_server"), wgExe = CfgStr("wg.wireguardExe", @"C:\Program Files\WireGuard\wireguard.exe");
             var svc = Svc(sn); var conf = WgConf();
             if (svc == null) {
                 if (conf != null && File.Exists(wgExe)) {
@@ -66,10 +64,10 @@ namespace VpnGuard
                         var e = WgLib.InstallService(wgExe, sn, WgIf(), conf); Log("wg_server: установка службы — " + (e ?? "готово"), e == null ? "INFO" : "ERROR");
                     });
                     if (!done) Log("wg_server: службы нет, но сервер сейчас меняют из веб-интерфейса — проверю позже", "INFO");
-                } else if (CfgBool("ws4w.autoCreateServer", true)) {
+                } else if (CfgBool("wg.autoCreateServer", true)) {
                     if (++WgMissingTicks < 3) Log("wg_server: нет ни службы, ни конфига (" + WgMissingTicks + "/3) — если так останется, создам сервер сам", "WARN");
                     else { WgMissingTicks = 0; try { WgCreateServer(); } catch (Exception e) { Log("wg_server: не удалось создать сервер: " + e.Message, "ERROR"); } }
-                } else Log("wg_server: служба '" + sn + "' не найдена и конфиг не найден — настройте туннель в WS4W", "ERROR");
+                } else Log("wg_server: служба '" + sn + "' не найдена и конфиг не найден — создайте сервер на вкладке WG-Server", "ERROR");
                 return;
             }
             if (StartMode(sn) != "Auto") { SetAutoStart(sn); Log("wg_server: тип запуска службы -> Автоматически", "INFO"); }
@@ -82,7 +80,7 @@ namespace VpnGuard
             if (!Up(WgIf())) { Log("wg_server: служба работает, но адаптер не поднят — перезапуск службы", "WARN"); SvcRestart(sn); return; }
             WgServiceHeal(sn, wgExe, conf);
         }
-        // служба туннеля установлена с другим файлом, чем конфиг VpnGuard (например, после переноса из WS4W её успели поставить из старого) —
+        // служба туннеля установлена с другим файлом, чем конфиг VpnGuard (например, её успели поставить из прежнего конфига) —
         // правки сервера не применялись бы. Переустановить на свой конфиг (не чаще раза в 10 минут)
         static DateTime WgHealAt = DateTime.MinValue;
         static void WgServiceHeal(string sn, string wgExe, string conf)
@@ -108,7 +106,7 @@ namespace VpnGuard
             var stamp = string.Join("|", new[] { conf }.Concat(files).Select(f => File.GetLastWriteTimeUtc(f).Ticks));
             if (stamp == PeerStamp) return;
             var byKey = new Dictionary<string, string>(); var byIp = new Dictionary<string, string>();
-            // имя клиента: «# Name = …» внутри блока [Peer] (так пишет VpnGuard) → комментарий над [Peer] (так пишет WS4W: «# 1», «[Peer]»)
+            // имя клиента: «# Name = …» внутри блока [Peer] (так пишет VpnGuard) → комментарий над [Peer] (старый формат: «# 1», «[Peer]»)
             // → первый свой комментарий в блоке (не «VpnGuard: …») → имя файла клиента с тем же адресом (byIp).
             // Комментарии после последнего ключа блока относятся к следующему блоку.
             bool inPeer = false; string key = null, nmName = null, nmFirst = null, above = null; var pending = new List<string>();
@@ -157,7 +155,7 @@ namespace VpnGuard
         // для окна и веба (сводка): часть «WG-Server»
         static Dictionary<string, object> WgComp(object clientZapret)
         {
-            var wa = Nic(WgIf()); var wgSvc = Svc(CfgStr("ws4w.serviceName", "WireGuardTunnel$wg_server"));
+            var wa = Nic(WgIf()); var wgSvc = Svc(CfgStr("wg.serviceName", "WireGuardTunnel$wg_server"));
             bool wUp = wgSvc != null && wgSvc.Status == ServiceControllerStatus.Running && wa != null && wa.OperationalStatus == OperationalStatus.Up;
             if (wUp) { if (WgUpSince == DateTime.MinValue) WgUpSince = DateTime.Now; } else WgUpSince = DateTime.MinValue;
             string wIp = wa != null ? Ipv4(WgIf()) : null;
@@ -181,7 +179,7 @@ namespace VpnGuard
         static string[] WgDump()
         {
             return Cached("wgdump", 2, () => {
-                var wg = Path.Combine(Path.GetDirectoryName(CfgStr("ws4w.wireguardExe", @"C:\Program Files\WireGuard\wireguard.exe")), "wg.exe");
+                var wg = Path.Combine(Path.GetDirectoryName(CfgStr("wg.wireguardExe", @"C:\Program Files\WireGuard\wireguard.exe")), "wg.exe");
                 if (!File.Exists(wg)) return null;
                 var r = Exe(wg, "show " + WgIf() + " dump", 5);
                 return r.Code == 0 ? r.Out.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries) : null;
@@ -192,19 +190,19 @@ namespace VpnGuard
         // новый сервер: ключи, data\wg\wg_server.conf (доступ — только администраторам и SYSTEM), служба туннеля, правило брандмауэра
         static void WgCreateServer()
         {
-            string gui = CfgStr("ws4w.wireguardExe", @"C:\Program Files\WireGuard\wireguard.exe"), cli = Path.Combine(Path.GetDirectoryName(gui), "wg.exe");
+            string gui = CfgStr("wg.wireguardExe", @"C:\Program Files\WireGuard\wireguard.exe"), cli = Path.Combine(Path.GetDirectoryName(gui), "wg.exe");
             if (!File.Exists(gui)) throw new Exception("WireGuard не установлен (" + gui + ") — установите его на вкладке «Компоненты»");
             var dir = Path.Combine(DataDir, "wg"); Directory.CreateDirectory(dir); var conf = Path.Combine(dir, WgIf() + ".conf");
             if (!File.Exists(conf)) {
-                int port = CfgInt("ws4w.newServerPort", 51820);
-                WgLib.WriteLines(conf, WgLib.NewServerConf(cli, CfgStr("ws4w.newServerAddress", "10.253.0.1/24"), port, 0));
+                int port = CfgInt("wg.newServerPort", 51820);
+                WgLib.WriteLines(conf, WgLib.NewServerConf(cli, CfgStr("wg.newServerAddress", "10.253.0.1/24"), port, 0));
                 Exe("icacls.exe", "\"" + conf + "\" /inheritance:r /grant:r *S-1-5-32-544:F *S-1-5-18:F", 15);
                 Exe("netsh.exe", "advfirewall firewall add rule name=\"VpnGuard wg_server\" dir=in action=allow protocol=UDP localport=" + port + " profile=any", 15);
             }
-            CfgSet("ws4w.configPath", conf);
-            string err = null; WgLib.TryLocked(60000, () => err = WgLib.InstallService(gui, CfgStr("ws4w.serviceName", "WireGuardTunnel$wg_server"), WgIf(), conf));
+            CfgSet("wg.configPath", conf);
+            string err = null; WgLib.TryLocked(60000, () => err = WgLib.InstallService(gui, CfgStr("wg.serviceName", "WireGuardTunnel$wg_server"), WgIf(), conf));
             if (err != null) throw new Exception(err);
-            Log("wg_server: создан новый сервер (" + conf + ", адрес " + CfgStr("ws4w.newServerAddress", "10.253.0.1/24") + ", порт " + CfgInt("ws4w.newServerPort", 51820) + ")", "WARN");
+            Log("wg_server: создан новый сервер (" + conf + ", адрес " + CfgStr("wg.newServerAddress", "10.253.0.1/24") + ", порт " + CfgInt("wg.newServerPort", 51820) + ")", "WARN");
         }
     }
 }

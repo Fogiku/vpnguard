@@ -1,5 +1,5 @@
 ﻿#Requires -Version 5.1
-# Удаление VpnGuard (MeduzaVPN, WS4W и общий доступ не трогаются).
+# Удаление VpnGuard (MeduzaVPN, AmneziaVPN, WireGuard и общий доступ не трогаются).
 $id = [Security.Principal.WindowsIdentity]::GetCurrent()
 if (-not (New-Object Security.Principal.WindowsPrincipal $id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Start-Process powershell.exe -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""

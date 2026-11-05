@@ -28,7 +28,7 @@ param(
     [string]$ConfigPath = ''
 )
 
-$AgentVersion = '3.45.2'
+$AgentVersion = '3.46.0'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -61,6 +61,13 @@ function Get-DefaultConfig {
     return $c
 }
 
+# прежнее имя раздела настроек WG-Server — «ws4w»: перенести в «wg» (значения «wg» главнее)
+function Rename-OldConfigSection($o) {
+    if ($null -eq $o -or -not $o.PSObject.Properties['ws4w']) { return $o }
+    if (-not $o.PSObject.Properties['wg']) { $o | Add-Member -NotePropertyName wg -NotePropertyValue ([pscustomobject]@{}) }
+    foreach ($p in $o.ws4w.PSObject.Properties) { if (-not $o.wg.PSObject.Properties[$p.Name]) { $o.wg | Add-Member -NotePropertyName $p.Name -NotePropertyValue $p.Value } }
+    $o.PSObject.Properties.Remove('ws4w'); return $o
+}
 function Merge-Config($base, $over) {
     if ($null -eq $over) { return $base }
     foreach ($p in $over.PSObject.Properties) {
@@ -79,11 +86,11 @@ function Import-Config {
     $stamp = $null
     if (Test-Path $ConfigPath) {
         $stamp = (Get-Item $ConfigPath).LastWriteTimeUtc
-        $c = Merge-Config $c (Get-Content $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json)
+        $c = Merge-Config $c (Rename-OldConfigSection (Get-Content $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json))
     }
     $script:Cfg = $c
     $script:M   = $c.meduza
-    $script:W   = $c.ws4w
+    $script:W   = $c.wg
     $script:CfgStamp = $stamp
     $script:MzAdapterCfg = $c.meduza.adapterName
 }
@@ -99,7 +106,7 @@ function Set-ConfigValue([string]$Path, $Value) {
 }
 function Set-ConfigValueCore([string]$Path, $Value) {
     $o = [pscustomobject]@{}
-    if (Test-Path $ConfigPath) { $o = Get-Content $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json }
+    if (Test-Path $ConfigPath) { $o = Rename-OldConfigSection (Get-Content $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json) }
     $parts = $Path.Split('.')
     $cur = $o
     for ($i = 0; $i -lt $parts.Count - 1; $i++) {
@@ -250,7 +257,7 @@ function Test-Signature([string]$Path) {
     return ($sig.Status -eq 'Valid' -and $sig.SignerCertificate.Subject -match [regex]::Escape($M.signer))
 }
 
-# ---------------------------------------------------------------- WS4W / wg_server
+# ---------------------------------------------------------------- WG-Server (wg_server)
 
 # конфиг сервера (для диагностики и -Status): из настроек → из службы туннеля → прежнее место. Клиентами и сервером управляют веб-сервер (WebWg.cs) и агент (WgLib.cs)
 function Find-WgConf {
@@ -286,7 +293,7 @@ function Format-When([datetime]$d) {
 }
 
 # имена клиентов: комментарий в блоке [Peer] конфига сервера или имя файла клиентского
-# конфига WS4W (по его адресу), иначе — разрешённый IP
+# конфига (по его адресу), иначе — разрешённый IP
 $script:PeerNames = @{ Stamp = ''; ByKey = @{}; ByIp = @{} }
 function Get-WgPeerNames {
     $conf = Find-WgConf
@@ -296,7 +303,7 @@ function Get-WgPeerNames {
     $stamp = ((@(Get-Item $conf) + $files) | ForEach-Object { $_.LastWriteTimeUtc.Ticks }) -join '|'
     if ($stamp -eq $script:PeerNames.Stamp) { return $script:PeerNames }
     $byKey = @{}; $byIp = @{}
-    # имя клиента: «# Name = …» внутри блока [Peer] (так пишет VpnGuard) → комментарий над [Peer] (так пишет WS4W: «# 1», «[Peer]»)
+    # имя клиента: «# Name = …» внутри блока [Peer] (так пишет VpnGuard) → комментарий над [Peer] (старый формат: «# 1», «[Peer]»)
     # → первый свой комментарий в блоке (не «VpnGuard: …») → имя файла клиента с тем же адресом (ByIp).
     # Комментарии после последнего ключа блока относятся к следующему блоку.
     $inPeer = $false; $key = $null; $nmName = $null; $nmFirst = $null; $above = $null; $pending = New-Object Collections.ArrayList
@@ -526,7 +533,7 @@ function Write-PsStatus {
 }
 
 function Remove-ObsoleteFiles {
-    foreach ($n in 'Agent.cs', 'Zapret.cs', 'ClientZapret.cs', 'VpnGuardMonitor.ps1', 'VpnGuardMonitor.cmd', 'Software.ps1', 'Zapret.ps1', 'Wg.ps1') {
+    foreach ($n in 'Agent.cs', 'Zapret.cs', 'ClientZapret.cs', 'VpnGuardMonitor.ps1', 'VpnGuardMonitor.cmd', 'Software.ps1', 'Zapret.ps1', 'Wg.ps1', 'agent\Ws4w.cs') {
         $f = Join-Path $Root $n
         if (-not (Test-Path $f)) { continue }
         if ($n -like '*.cs' -and -not ("$(Get-Content $f -TotalCount 1 -ErrorAction SilentlyContinue)" -match 'Перенесено в agent')) { continue }   # только заглушки

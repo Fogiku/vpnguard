@@ -140,12 +140,12 @@ namespace VpnGuard
             if (st.Ok && ipOk && !ForceIcs) return;
             if (!ForceIcs && (DateTime.Now - LastIcsApply).TotalSeconds < 20) return;
             ForceIcs = false; LastIcsApply = DateTime.Now;
-            Log("ICS: настраиваю общий доступ '" + up + "' -> '" + wg + "'", "INFO"); SetActivity("настраиваю раздачу");
+            Log("ICS: настраиваю общий доступ '" + up + "' -> '" + wg + "'", "INFO"); SetActivity("настраиваю раздачу"); NetChanged();
             try {
                 if (StartMode("SharedAccess") != "Auto") SetAutoStart("SharedAccess");
                 bool scope = IcsScope(addr);
                 if (!WaitIcs(30)) throw new Exception("служба SharedAccess не запускается");
-                if (scope) { Log("ICS: перезапуск службы SharedAccess для нового адреса", "INFO"); IcsRestartService(); }
+                if (scope) { Log("ICS: перезапуск службы SharedAccess для нового адреса", "INFO"); IcsRestartService(); NetChanged(); }
                 if (ClearStaleIcs() > 0) { Log("ICS: перезапуск службы SharedAccess после очистки старых записей", "INFO"); IcsRestartService(); }
                 foreach (var c in IcsConnections()) {
                     if (!c.Enabled) continue;
@@ -156,9 +156,9 @@ namespace VpnGuard
                 wgIp = Ipv4(wg);
                 if (addr != null && wgIp != addr && (DateTime.Now - LastIpFix).TotalMinutes >= 10) {
                     LastIpFix = DateTime.Now; Log("ICS: адрес wg_server стал " + wgIp + ", ожидается " + addr + " — перезапуск туннеля", "WARN");
-                    SvcRestart(CfgStr("ws4w.serviceName", "WireGuardTunnel$wg_server"));
+                    SvcRestart(CfgStr("wg.serviceName", "WireGuardTunnel$wg_server"));
                 }
-                if (IcsStatus().Ok) { Log("ICS: общий доступ включён", "INFO"); LastIcsFix = DateTime.Now; IcsFixCount++; }
+                if (IcsStatus().Ok) { NetChanged(); Log("ICS: общий доступ включён", "INFO"); LastIcsFix = DateTime.Now; IcsFixCount++; }
                 else Log("ICS: после настройки состояние не подтвердилось, повторю", "WARN");
             } catch (Exception e) { Log("ICS: ошибка: " + (e.InnerException ?? e).Message, "ERROR"); }
         }

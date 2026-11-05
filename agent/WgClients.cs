@@ -1,4 +1,4 @@
-﻿// Клиенты WG-Server: отключение и включение (ws4w.clientOff), клиенты, которых туннель не принимает.
+﻿// Клиенты WG-Server: отключение и включение (wg.clientOff), клиенты, которых туннель не принимает.
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -17,13 +17,13 @@ namespace VpnGuard
 {
     public static partial class Agent
     {
-        // ---------------------------------------------------------------- отключение клиентов WG-Server (ws4w.clientOff — список IP)
-        // Конфиг сервера не меняется (его ведёт и WS4W): отключённый клиент просто убирается из работающего туннеля
+        // ---------------------------------------------------------------- отключение клиентов WG-Server (wg.clientOff — список IP)
+        // Конфиг сервера не меняется: отключённый клиент просто убирается из работающего туннеля
         // («wg set … peer … remove») и возвращается из конфига, когда его включат. После перезапуска туннеля агент снова уберёт его.
         class WcPeer { public string Key, Ip, Psk, Allowed; public int Keepalive; }
         static DateTime WcAt = DateTime.MinValue; static string WcErr = "", WcSig = ""; static readonly Dictionary<string, int> WcTries = new Dictionary<string, int>();
-        static string WgExe() { return Path.Combine(Path.GetDirectoryName(CfgStr("ws4w.wireguardExe", @"C:\Program Files\WireGuard\wireguard.exe")), "wg.exe"); }
-        static HashSet<string> WcOff() { return new HashSet<string>(CfgList("ws4w.clientOff", new string[0]).Select(x => x.Trim())); }
+        static string WgExe() { return Path.Combine(Path.GetDirectoryName(CfgStr("wg.wireguardExe", @"C:\Program Files\WireGuard\wireguard.exe")), "wg.exe"); }
+        static HashSet<string> WcOff() { return new HashSet<string>(CfgList("wg.clientOff", new string[0]).Select(x => x.Trim())); }
         static List<WcPeer> WgConfPeers()
         {
             var conf = WgConf(); if (conf == null || !conf.EndsWith(".conf")) return null;
@@ -59,7 +59,7 @@ namespace VpnGuard
         {
             // wg.exe — раз в минуту или сразу, когда список отключённых изменился
             var offSig = string.Join(",", WcOff().OrderBy(x => x)); if (offSig == WcSig && (DateTime.UtcNow - WcAt).TotalSeconds < 60) return; WcAt = DateTime.UtcNow; WcSig = offSig;
-            var svc = Svc(CfgStr("ws4w.serviceName", "WireGuardTunnel$wg_server")); if (svc == null || svc.Status != System.ServiceProcess.ServiceControllerStatus.Running) return;
+            var svc = Svc(CfgStr("wg.serviceName", "WireGuardTunnel$wg_server")); if (svc == null || svc.Status != System.ServiceProcess.ServiceControllerStatus.Running) return;
             string wg = WgExe(); if (!File.Exists(wg)) return;
             List<WcPeer> conf; try { conf = WgConfPeers(); } catch { return; } if (conf == null) return;
             var off = WcOff();

@@ -66,7 +66,7 @@ namespace VpnGuard
         static readonly Dictionary<string, string> WebCfgKeys = new Dictionary<string, string> {
             {"vpn.mode", @"^(meduza|amnezia|dual|zapret)$"}, {"vpn.primary", @"^(meduza|amnezia)$"}, {"zapret.strategy", @"^[\w \(\)\-\.]{0,60}$"},
             {"meduza.serviceId", @"^[\w \-\.\(\)]{0,100}$"}, {"meduza.protocol", @"^[a-z0-9\-]{1,40}$"}, {"amnezia.active", @"^[a-z0-9_=+.\-]{1,32}$"},
-            {"update.auto", "bool"}, {"ws4w.clientZapret", "bool"}, {"zapret.videoCheck", "bool"}, {"zapret.version", @"^[\w\.\-]{0,30}$"} };
+            {"update.auto", "bool"}, {"wg.clientZapret", "bool"}, {"zapret.videoCheck", "bool"}, {"zapret.version", @"^[\w\.\-]{0,30}$"} };
 
         // все настройки для вкладки «Настройки» веб-интерфейса: ключ, раздел, название, тип, подсказка, значение по умолчанию.
         // тип: int:мин:макс | bool | enum:a|b|c | text:регулярка | hosts (хост:порт через запятую)
@@ -171,7 +171,7 @@ namespace VpnGuard
                 DateTime st = File.Exists(ConfigPath) ? File.GetLastWriteTimeUtc(ConfigPath) : DateTime.MinValue;
                 if (!force && st == CfgStamp) return;
                 CfgStamp = st;
-                try { Cfg = st == DateTime.MinValue ? new Dictionary<string, object>() : (Json.DeserializeObject(File.ReadAllText(ConfigPath, Encoding.UTF8)) as Dictionary<string, object>) ?? new Dictionary<string, object>(); }
+                try { Cfg = st == DateTime.MinValue ? new Dictionary<string, object>() : (Json.DeserializeObject(File.ReadAllText(ConfigPath, Encoding.UTF8)) as Dictionary<string, object>) ?? new Dictionary<string, object>(); CfgRenameOld(Cfg); }
                 catch { }
             }
         }
@@ -199,18 +199,30 @@ namespace VpnGuard
             }
             LoadCfg(true);
         }
+        // прежнее имя раздела настроек WG-Server — «ws4w»: перенести в «wg» (значения «wg» главнее). true — что-то перенесли
+        static bool CfgRenameOld(Dictionary<string, object> o)
+        {
+            object old; if (o == null || !o.TryGetValue("ws4w", out old)) return false;
+            var od = old as Dictionary<string, object>; object nw; var nd = o.TryGetValue("wg", out nw) ? nw as Dictionary<string, object> : null;
+            if (nd == null) { nd = new Dictionary<string, object>(); o["wg"] = nd; }
+            if (od != null) foreach (var kv in od) if (!nd.ContainsKey(kv.Key)) nd[kv.Key] = kv.Value;
+            o.Remove("ws4w"); return true;
+        }
         static void CfgWrite(string path, object value)
         {
             {
                 Dictionary<string, object> o = null;
                 try { if (File.Exists(ConfigPath)) o = Json.DeserializeObject(File.ReadAllText(ConfigPath, Encoding.UTF8)) as Dictionary<string, object>; } catch { }
                 if (o == null) o = new Dictionary<string, object>();
+                CfgRenameOld(o);
+                if (path == null) goto write;                         // только перенос прежнего раздела
                 var parts = path.Split('.'); var cur = o;
                 for (int i = 0; i < parts.Length - 1; i++) {
                     object nx; if (!cur.TryGetValue(parts[i], out nx) || !(nx is Dictionary<string, object>)) { nx = new Dictionary<string, object>(); cur[parts[i]] = nx; }
                     cur = (Dictionary<string, object>)nx;
                 }
                 cur[parts[parts.Length - 1]] = value;
+                write:
                 string tmp = ConfigPath + "." + Process.GetCurrentProcess().Id + ".tmp";
                 File.WriteAllText(tmp, Pretty(Json.Serialize(o)), new UTF8Encoding(true));
                 try { if (File.Exists(ConfigPath)) File.Replace(tmp, ConfigPath, null); else File.Move(tmp, ConfigPath); } catch { File.Copy(tmp, ConfigPath, true); File.Delete(tmp); }
@@ -640,12 +652,12 @@ namespace VpnGuard
                     JsonOut(ctx, r, (bool)r["ok"] ? 200 : 400); return;
                 }
                 case "/api/wg/client-set": {
-                    // настройки клиента: zapret вкл/выкл, клиент вкл/выкл — списки IP в ws4w.clientNoZapret / ws4w.clientOff (применяет агент)
+                    // настройки клиента: zapret вкл/выкл, клиент вкл/выкл — списки IP в wg.clientNoZapret / wg.clientOff (применяет агент)
                     if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; }
                     var b = Body(req); string cip = BStr(b, "ip").Trim();
                     if (!Regex.IsMatch(cip, @"^\d{1,3}(\.\d{1,3}){3}$")) { JsonOut(ctx, Err("неверный IP клиента"), 400); return; }
                     var done = new List<string>();
-                    foreach (var kv in new[] { new[] { "zapret", "ws4w.clientNoZapret" }, new[] { "off", "ws4w.clientOff" } }) {
+                    foreach (var kv in new[] { new[] { "zapret", "wg.clientNoZapret" }, new[] { "off", "wg.clientOff" } }) {
                         if (!b.ContainsKey(kv[0])) continue;
                         bool val = BBool(b, kv[0]), inList = kv[0] == "off" ? val : !val;
                         var cur = (CfgGet(kv[1], null) as System.Collections.IEnumerable ?? new object[0]).Cast<object>().Select(x => Convert.ToString(x).Trim()).Where(x => x.Length > 0 && x != cip).ToList();

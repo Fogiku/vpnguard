@@ -1,4 +1,4 @@
-// Общая библиотека WireGuard (агент и веб-сервер — один код): разбор конфига сервера wg_server в форматах WS4W («# 1» строкой над [Peer])
+// Общая библиотека WireGuard (агент и веб-сервер — один код): разбор конфига сервера wg_server в старом формате («# 1» строкой над [Peer])
 // и VpnGuard («# Name = …» внутри [Peer]), имена клиентов, ключи (wg.exe), добавление / удаление / переименование клиентов.
 // Меняются только блоки [Peer] (и ListenPort при смене порта), остальное в конфиге не трогается. Перед каждым изменением — копия в data\backup.
 // Конфиг правят два процесса (агент, веб-сервер) — под общей блокировкой Global\VpnGuardWgConf.
@@ -45,7 +45,7 @@ namespace VpnGuard
         }
 
         // ---------------------------------------------------------------- разбор: секции с номерами строк. Комментарии после последнего ключа секции
-        // относятся к следующей (Above): WS4W пишет имя строкой над [Peer] («# 1»); VpnGuard — внутри («# Name = …»). End — последний ключ или комментарий внутри
+        // относятся к следующей (Above): старый формат — имя строкой над [Peer] («# 1»); VpnGuard — внутри («# Name = …»). End — последний ключ или комментарий внутри
         public static Conf Read(string path)
         {
             var lines = ReadLines(path); var secs = new List<Sec>(); Sec cur = null; var pending = new List<KeyValuePair<int, string>>();
@@ -64,7 +64,7 @@ namespace VpnGuard
             return new Conf { Lines = lines, Sections = secs };
         }
         static readonly Regex NameRx = new Regex(@"^(?:Name|Client|Имя)\s*[=:]\s*(.+)$", RegexOptions.IgnoreCase);
-        // имя клиента: «# Name = …» внутри блока → комментарий над [Peer] (WS4W) → первый свой комментарий в блоке
+        // имя клиента: «# Name = …» внутри блока → комментарий над [Peer] (старый формат) → первый свой комментарий в блоке
         public static string PeerName(Sec s)
         {
             foreach (var c in s.Comments) { var m = NameRx.Match(c); if (m.Success) return m.Groups[1].Value.Trim(); }
@@ -110,7 +110,7 @@ namespace VpnGuard
             }).ToList();
             return new Server { Conf = conf, Ip = m.Groups[1].Value, Prefix = int.Parse(m.Groups[2].Value), Port = port, PublicKey = Wg(wgExe, "pubkey", pk + "\n"), Peers = peers };
         }
-        // конфиги клиентов: наши (data\clients и копия в ProgramData) и WS4W (папки рядом с конфигом сервера)
+        // конфиги клиентов: наши (data\clients и копия в ProgramData) и внешние (папки рядом с конфигом сервера)
         public static List<ClientFile> ClientFiles(string serverConf, string clientsDir, string mirrorDir, string backupDir)
         {
             var dirs = new List<string> { clientsDir, mirrorDir };
@@ -143,7 +143,7 @@ namespace VpnGuard
             for (uint v = net + 2; v < bc; v++) { var s = S(v); if (!u.Contains(s)) return s; }
             throw new Exception("В подсети сервера не осталось свободных адресов");
         }
-        // блок клиента: вместе с комментариями вплотную над [Peer] (WS4W: «# 1») и пустой строкой перед ними
+        // блок клиента: вместе с комментариями вплотную над [Peer] (старый формат: «# 1») и пустой строкой перед ними
         static int[] PeerRange(Conf c, Sec s)
         {
             int start = s.Start;
@@ -165,7 +165,7 @@ namespace VpnGuard
             var r = PeerRange(c, s); Backup(conf, backupDir);
             WriteLines(conf, c.Lines.Where((l, i) => i < r[0] || i > r[1]));
         }
-        // переименовать: имя — «# Name = …» сразу после [Peer]; прежние имена (внутри и строкой WS4W над [Peer]) убираются
+        // переименовать: имя — «# Name = …» сразу после [Peer]; прежние имена (внутри и строкой над [Peer]) убираются
         public static void RenamePeer(string conf, string backupDir, string key, string name)
         {
             var c = Read(conf); var s = FindPeer(c, key); if (s == null) throw new Exception("Клиент не найден в конфиге сервера");
@@ -173,7 +173,7 @@ namespace VpnGuard
             var block = new List<string>();
             for (int i = r[0]; i <= r[1]; i++) {
                 var l = c.Lines[i]; var cm = Regex.Match(l, @"^\s*[#;]\s*(.*?)\s*$");
-                if (i < s.Start && cm.Success) {                                   // над [Peer]: имя WS4W — убрать, прочие комментарии оставить
+                if (i < s.Start && cm.Success) {                                   // над [Peer]: имя в старом формате — убрать, прочие комментарии оставить
                     var t = cm.Groups[1].Value; if (NameRx.IsMatch(t) || (t.Length > 0 && t.Length <= 60 && !t.StartsWith("VpnGuard", StringComparison.OrdinalIgnoreCase))) continue;
                 }
                 if (i > s.Start && cm.Success && NameRx.IsMatch(cm.Groups[1].Value)) continue;

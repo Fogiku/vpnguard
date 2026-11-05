@@ -95,7 +95,7 @@ namespace VpnGuard
                 St(History.Count == 1, "история: восстановлена, точки старше 2 ч отброшены");
                 St(LiveT.Count == 1 && LiveH.ContainsKey("r:p") && LiveH["r:p"][0][1] == 20, "история: живые скорости восстановлены");
 
-                // ---- WireGuard: имена клиентов в форматах WS4W («# 1» над [Peer]) и VpnGuard («# Name =» внутри) — общая библиотека и агент одинаково;
+                // ---- WireGuard: имена клиентов в старом формате («# 1» над [Peer]) и VpnGuard («# Name =» внутри) — общая библиотека и агент одинаково;
                 // переименование и удаление клиента
                 var wsrv = Path.Combine(Root, "srv", "server_wg"); Directory.CreateDirectory(wsrv); Directory.CreateDirectory(Path.Combine(Root, "srv", "clients_wg", "c1"));
                 var wconf = Path.Combine(wsrv, "wg_server.conf");
@@ -104,12 +104,16 @@ namespace VpnGuard
                     "[Peer]", "PublicKey = KEY6", "AllowedIPs = 192.168.15.12/32" }), new UTF8Encoding(false));
                 File.WriteAllText(Path.Combine(Root, "srv", "clients_wg", "c1", "планшет.conf"), "[Interface]\r\nPrivateKey = X\r\nAddress = 192.168.15.12/32\r\n[Peer]\r\nPublicKey = Y", Encoding.UTF8);
                 Func<string> libNames = () => string.Join(";", WgLib.Read(wconf).Sections.Where(x => x.Type == "Peer").Select(x => x.Keys["PublicKey"] + "=" + WgLib.PeerName(x)));
-                St(libNames() == "KEY1=1;KEY2=2;KEY4=телефон;KEY6=", "WireGuard: имена из WS4W и VpnGuard читаются (библиотека)");
-                StCfg("{\"ws4w\":{\"configPath\":\"" + wconf.Replace("\\", "\\\\") + "\"}}"); PeerStamp = ""; LoadPeerNames();
+                St(libNames() == "KEY1=1;KEY2=2;KEY4=телефон;KEY6=", "WireGuard: имена в старом формате и формате VpnGuard читаются (библиотека)");
+                // прежнее имя раздела настроек «ws4w» — переносится в «wg» (в памяти и в config.json)
+                StCfg("{\"ws4w\":{\"configPath\":\"" + wconf.Replace("\\", "\\\\") + "\",\"clientOff\":[\"1.2.3.4\"]},\"wg\":{\"clientDns\":\"9.9.9.9\"}}"); PeerStamp = ""; LoadPeerNames();
+                var cfgText = File.ReadAllText(ConfigPath);
+                St(CfgStr("wg.configPath", "") == wconf && CfgList("wg.clientOff", new string[0]).Contains("1.2.3.4") && CfgStr("wg.clientDns", "") == "9.9.9.9" && !cfgText.Contains("ws4w") && cfgText.Contains("\"wg\""),
+                    "настройки: прежний раздел «ws4w» перенесён в «wg» (и в config.json)");
                 string an; PeerNamesByKey.TryGetValue("KEY1", out an); string an4; PeerNamesByKey.TryGetValue("KEY4", out an4); string anIp; PeerNamesByIp.TryGetValue("192.168.15.12", out anIp);
                 St(an == "1" && an4 == "телефон" && anIp == "планшет", "WireGuard: агент видит те же имена (и имя по файлу клиента)");
                 WgLib.RenamePeer(wconf, Path.Combine(Root, "bk"), "KEY1", "Мама телефон"); WgLib.RenamePeer(wconf, Path.Combine(Root, "bk"), "KEY4", "ноутбук");
-                St(libNames() == "KEY1=Мама телефон;KEY2=2;KEY4=ноутбук;KEY6=", "WireGuard: переименование (и из формата WS4W)");
+                St(libNames() == "KEY1=Мама телефон;KEY2=2;KEY4=ноутбук;KEY6=", "WireGuard: переименование (и из старого формата)");
                 WgLib.RemovePeer(wconf, Path.Combine(Root, "bk"), "KEY2");
                 var wl = File.ReadAllText(wconf);
                 St(libNames() == "KEY1=Мама телефон;KEY4=ноутбук;KEY6=" && wl.Contains("PrivateKey=AAAA") && !wl.Contains("KEY2") && !wl.Contains("# 2"), "WireGuard: удаление клиента не задевает сервер и соседей");

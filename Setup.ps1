@@ -24,7 +24,7 @@ function Set-MonitorShortcuts([bool]$Create) {
         $lnk.Arguments = "/run /tn `"$MonitorTask`""
         $lnk.WindowStyle = 7
         $lnk.IconLocation = "$env:windir\System32\shell32.dll,18"
-        $lnk.Description = 'VpnGuard — мониторинг и управление MeduzaVPN и WS4W'
+        $lnk.Description = 'VpnGuard — мониторинг и управление VPN и WG-Server'
         $lnk.Save()
     }
 }
