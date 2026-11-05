@@ -154,7 +154,9 @@ namespace VpnGuard
         }
         static string SourceSig()
         {
-            try { return string.Join("|", Directory.GetFiles(Path.Combine(Root, "agent"), "*.cs").OrderBy(f => f, StringComparer.OrdinalIgnoreCase).Select(f => Path.GetFileName(f) + ":" + File.GetLastWriteTimeUtc(f).Ticks)); } catch { return ""; }
+            // исходники агента + номер версии из VpnGuard.ps1 (выпуск, где изменился только он, тоже перезапускает агент — с новым номером)
+            string ver = ""; try { ver = Regex.Match(File.ReadAllText(Path.Combine(Root, "VpnGuard.ps1")), @"\$AgentVersion\s*=\s*'([^']+)'").Groups[1].Value; } catch { }
+            try { return "v:" + ver + "|" + string.Join("|", Directory.GetFiles(Path.Combine(Root, "agent"), "*.cs").OrderBy(f => f, StringComparer.OrdinalIgnoreCase).Select(f => Path.GetFileName(f) + ":" + File.GetLastWriteTimeUtc(f).Ticks)); } catch { return ""; }
         }
 
         // ---------------------------------------------------------------- настройки (умолчания — как у агента PowerShell)
