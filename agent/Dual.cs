@@ -54,7 +54,7 @@ namespace VpnGuard
             DualActive = k; DualSwitchAt = DateTime.Now; DualSwitches++; DualReason = reason; DualFails = 0; DualOkSince = DateTime.MinValue;
             Log("Два туннеля: трафик переключён " + ModeNames[from] + " → " + ModeNames[k] + " — " + reason, "WARN");
             try { DualSyncRoutes(); } catch (Exception e) { Log("Два туннеля: маршруты: " + e.Message, "ERROR"); }
-            RequestIcs(); ProbeFailures = 0;
+            Emit("tunnel.switched", ModeNames[from] + " → " + ModeNames[k]); ProbeFailures = 0;
         }
 
         // маршруты и метрики (root\StandardCimv2 — то же, что Get-NetRoute / Get-NetIPInterface)

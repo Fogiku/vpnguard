@@ -46,7 +46,7 @@ namespace VpnGuard
         // перезапуск службы, которая не принимает «стоп» (AmneziaVPN-service): штатно не вышло — завершить её процесс
         // перенастроить раздачу, только если этот туннель сейчас несёт трафик (резерв перезапустился — раздачу не трогать, клиенты не рвутся;
         // если у раздаваемого адаптера сменилось имя, SharingWatch и так это увидит)
-        static void IcsIfUplink(string kind) { if (TunnelKind() == kind) RequestIcs(); }
+        static void IcsIfUplink(string kind) { Emit("tunnel.reconnected", kind); }
         static void SvcHardRestart(string name)
         {
             var s = Svc(name); if (s == null) return;

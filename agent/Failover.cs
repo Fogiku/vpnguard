@@ -23,7 +23,7 @@ namespace VpnGuard
             if (FoFails < need) return;
             if (KindOk(oth)) {
                 DualSwitch(oth, ModeNames[act] + " не пропускает трафик (" + FoFails + " быстрые проверки подряд) — восстанавливаю его, трафик пока через " + ModeNames[oth]);
-                FoFails = 0; Wake("tunnels");
+                FoFails = 0;
             } else if (FoFails == need) Log("Быстрое переключение: " + ModeNames[act] + " не пропускает трафик, но и резерв " + ModeNames[oth] + " не готов — переключать некуда", "WARN");
         }
     }

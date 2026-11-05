@@ -79,9 +79,7 @@ namespace VpnGuard
                 if (InetState != 0) {
                     if (InetState == 1) {
                         InetLastLen = DateTime.Now - InetSince; Log("Интернет: снова есть (не было " + Dur(InetLastLen) + ")", "WARN");
-                        // адреса, «замолчавшие» из-за обрыва, — снова через zapret (иначе ещё 5–10 мин шли бы через VPN)
-                        int nb = CzBypass.Count + CzRemap.Count; CzBypass.Clear(); CzRemap.Clear(); CzGoodIp.Clear(); CzBadHost.Clear();
-                        if (nb > 0) Log("zapret для клиентов: после обрыва связи сброшено " + nb + " временных обходов — снова через zapret", "INFO");
+                        Emit("inet.restored", Dur(InetLastLen));
                     }
                     InetState = 0; InetSince = DateTime.Now;
                 }
@@ -90,6 +88,7 @@ namespace VpnGuard
                 if (++InetFails >= 2 && InetState != 1) {
                     InetState = 1; InetSince = DateTime.Now; InetLastDown = DateTime.Now; InetDowns++;
                     Log("Интернет: пропал — " + why + ". VPN не переподключаю, жду возвращения связи", "WARN");
+                    Emit("inet.lost", why);
                 }
             }
         }

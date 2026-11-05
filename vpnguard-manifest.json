@@ -1,8 +1,8 @@
 {
-    "version":  "3.26.1",
-    "build":  "20261105-1435",
+    "version":  "3.27.0",
+    "build":  "20261105-1439",
     "notes":  "",
-    "date":  "2026-11-05T14:35:04.6652433+03:00",
+    "date":  "2026-11-05T14:39:59.6515370+03:00",
     "files":  [
                   {
                       "path":  "Agent.cs",
@@ -26,23 +26,23 @@
                   },
                   {
                       "path":  "agent/Commands.cs",
-                      "sha256":  "fe87e0f81eab180ed0197f554de0c7aa1122a80fed950529a011d150323f5cc0",
-                      "size":  4824
+                      "sha256":  "95a43ee4db75137f26b734d9a71bbb96e1d504c002e22307d9807a311ad10cad",
+                      "size":  4818
                   },
                   {
                       "path":  "agent/Core.cs",
-                      "sha256":  "0ce86ffdb4efacc41ad36facef25a69710d3c9b37e9ae91454c2dc28ba986737",
-                      "size":  21344
+                      "sha256":  "d700384386d7ac5a64d49c69c9a4b8d5b627ec14a9abed4619d2dd8b4730bcbc",
+                      "size":  21400
                   },
                   {
                       "path":  "agent/Dual.cs",
-                      "sha256":  "7e731fcc2e57d01b607c5ff2e2af8d6b8c859db6ced60ff088630f3dac3319b2",
-                      "size":  17554
+                      "sha256":  "f1eaaca7ca80bb2b6514f4760e43d048c98da4afe7f97e3115a31609b95f2070",
+                      "size":  17607
                   },
                   {
                       "path":  "agent/Failover.cs",
-                      "sha256":  "4d69cc6fd48f0c45f0552ba46fe5fb1560ae862879e0cb612a48aa60afb708e0",
-                      "size":  2302
+                      "sha256":  "f8658bee2307c5f1b00994b5750ed0c330f6f78683e98c5e147547f9987f055f",
+                      "size":  2285
                   },
                   {
                       "path":  "agent/Ics.cs",
@@ -51,8 +51,8 @@
                   },
                   {
                       "path":  "agent/Inet.cs",
-                      "sha256":  "194237ae5e902f9befc82f12ad7175e331559cabe63c8fbd78ba404b77def4a5",
-                      "size":  6236
+                      "sha256":  "e4534c5a7360c8ac197681a3bb961d2b8677d5d5b9ce5a63f407f35b29d121c8",
+                      "size":  5807
                   },
                   {
                       "path":  "agent/Lan.cs",
@@ -66,13 +66,13 @@
                   },
                   {
                       "path":  "agent/Mode.cs",
-                      "sha256":  "d1400776c44937c7183772e6d823fb12a01e355766c824f5dd77044dfbf6970d",
-                      "size":  3726
+                      "sha256":  "2761db166db73946d1d6a8363c8a9aef64246752a766d8addbb5898029661d35",
+                      "size":  3783
                   },
                   {
                       "path":  "agent/Modules.cs",
-                      "sha256":  "3688d2ced255c137e5d0768d9f06a5e048dd5646cc95dff64e6374fea1550403",
-                      "size":  8614
+                      "sha256":  "495484c1b40486ca74baacc33c98901f3642300648f877b7ac81e3962db8194b",
+                      "size":  13272
                   },
                   {
                       "path":  "agent/PsPart.cs",
@@ -81,8 +81,8 @@
                   },
                   {
                       "path":  "agent/Snapshot.cs",
-                      "sha256":  "ac4af74942658db75c81cf1312c32204ff04555d9942aaeccf5b467f6dbaba8f",
-                      "size":  26738
+                      "sha256":  "60644a1b7a3f0b60f70733958f5f4f136591f34bc9bc62cdbb1a5e6e342af856",
+                      "size":  26766
                   },
                   {
                       "path":  "agent/Traffic.cs",
@@ -186,7 +186,7 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "a3ca9b0321feb810bd705f449d820b47e56eb91aa51f99d285346b36f5cebb13",
+                      "sha256":  "ac0b2301457552bee1fc41d49c698067b9ad298867bc7ac7b3a7d5e360174ff8",
                       "size":  82234
                   },
                   {
@@ -206,8 +206,8 @@
                   },
                   {
                       "path":  "web/index.html",
-                      "sha256":  "8ca80d8e18f9dc486ac4c6b88d600548321954efa1bb09ad520ec4ae6d217de7",
-                      "size":  92673
+                      "sha256":  "899e88579158f56c7909755df738e79c9d5d41a9c9f99901c571d3b30aab6250",
+                      "size":  97111
                   },
                   {
                       "path":  "Wg.ps1",

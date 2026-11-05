@@ -239,6 +239,7 @@ async function setCfg(key, value, label) {
 async function load() {
   try { S = await api('/api/status'); } catch (e) { $('#agent').textContent = 'нет связи с агентом: ' + e.message; return; }
   head(); render();
+  if (page === 'diag' && $('#mods')) { $('#mods').innerHTML = modsHtml(); $('#evts').innerHTML = evtsHtml(); }   // остальное на вкладке не перерисовывается
 }
 
 // ---------------------------------------------------------------- вход
@@ -765,7 +766,40 @@ P.system = () => {
     <div class="sec">Удалённая диагностика</div><div class="card"><p class="muted">${rm.enabled ? 'Включена до ' + new Date(rm.until).toLocaleString() + ` · запросов: ${rm.requests}` : 'Выключена. Включается в окне VpnGuard на этом ПК (вкладка «Диагностика»).'}</p></div>`;
 };
 let diagText = '';
-P.diag = () => `<div class="sec">Вход в веб-интерфейс</div><div class="card" id="webset"><p class="muted">загрузка…</p></div>
+// модули агента: состояние, нагрузка (по разнице двух снимков), ошибки; события между модулями
+let PERF0 = null;
+const MODEV = { 'tunnel.switched': 'туннель переключён', 'tunnel.reconnected': 'туннель переподключён', 'mode.changed': 'режим сменился', 'wg.restarted': 'WG-Server перезапущен',
+  'ics.reapply': 'перенастроить раздачу', 'inet.lost': 'интернет пропал', 'inet.restored': 'интернет вернулся' };
+function cpuNow() {
+  const p = S && S.perf; if (!p) return {};
+  const prev = PERF0 && PERF0.uptime < p.uptime ? PERF0 : null, out = {};
+  for (const k in p.threads) out[k] = prev && prev.threads[k] !== undefined ? 100 * (p.threads[k] - prev.threads[k]) / (p.uptime - prev.uptime) : 100 * p.threads[k] / Math.max(1, p.uptime);
+  out._total = prev ? 100 * (p.total - prev.total) / (p.uptime - prev.uptime) : 100 * p.total / Math.max(1, p.uptime);
+  if (!PERF0 || p.uptime - PERF0.uptime >= 30 || p.uptime < PERF0.uptime) PERF0 = JSON.parse(JSON.stringify(p));   // окно ~30 с
+  return out;
+}
+const pct = v => v === undefined || isNaN(v) ? '—' : (v < 0.05 ? '0' : v.toFixed(v < 10 ? 1 : 0)) + ' %';
+const agoS = s => s < 0 ? 'ещё не было' : s < 60 ? s + ' с назад' : Math.round(s / 60) + ' мин назад';
+function modsHtml() {
+  const ms = (S && S.modules) || []; if (!ms.length) return '<p class="muted">Агент этой версии не сообщает о модулях.</p>';
+  const cpu = cpuNow(), mod = new Set(ms.map(m => 'модуль: ' + m.title));
+  const rows = ms.map(m => {
+    const st = m.lastError ? `<span class="c2">ошибка</span>` : m.busy && m.busySec >= 10 ? `<span class="c1">занят ${m.busySec} с${m.doing ? ': ' + esc(m.doing) : ''}</span>` : m.busy ? `<span class="c0">проверяет</span>` : `<span class="c0">ждёт</span>`;
+    return `<tr><td><b>${esc(m.title)}</b><div class="sub">${esc(m.name)}</div></td><td>${st}</td><td>${agoS(m.lastAgo)}</td><td>${m.runs}</td><td class="${m.errors ? 'c2' : ''}">${m.errors}</td><td>${pct(cpu['модуль: ' + m.title])}</td><td class="sub">${esc(m.lastError || '')}</td></tr>`;
+  }).join('');
+  const other = Object.keys(cpu).filter(k => k !== '_total' && !mod.has(k)).sort((a, b) => cpu[b] - cpu[a])
+    .map(k => `<tr><td>${esc(k)}</td><td colspan="4" class="sub">отдельный поток</td><td>${pct(cpu[k])}</td><td></td></tr>`).join('');
+  return `<table><tr><th>Модуль</th><th>Состояние</th><th>Последняя проверка</th><th>Проверок</th><th>Ошибок</th><th>Процессор</th><th class="hide-m">Последняя ошибка</th></tr>${rows}${other}
+    <tr><td><b>Агент всего</b></td><td colspan="4" class="sub">работает ${Math.round(((S.perf && S.perf.uptime) || 0) / 60)} мин</td><td><b>${pct(cpu._total)}</b></td><td></td></tr></table>
+    <p class="sub" style="margin-top:8px">Процессор — доля одного ядра за последние ~30 с. Каждый модуль работает в своём потоке: занятый модуль не задерживает остальные.</p>`;
+}
+function evtsHtml() {
+  const ev = (S && S.events) || []; if (!ev.length) return '<p class="muted">Событий пока не было — модули сообщают друг другу о переключении туннеля, смене режима, пропаже и возвращении интернета.</p>';
+  return `<table><tr><th>Время</th><th>Событие</th><th>Подробности</th><th>От кого</th><th>Кому</th></tr>${ev.map(e => `<tr><td>${esc(e.at)}</td><td>${esc(MODEV[e.name] || e.name)}<div class="sub">${esc(e.name)}</div></td><td>${esc(e.info)}</td><td class="sub">${esc(e.from)}</td><td class="sub">${esc(e.to || '—')}</td></tr>`).join('')}</table>`;
+}
+P.diag = () => `<div class="sec">Модули агента</div><div class="card" id="mods">${modsHtml()}</div>
+  <div class="sec">События между модулями</div><div class="card" id="evts">${evtsHtml()}</div>
+  <div class="sec">Вход в веб-интерфейс</div><div class="card" id="webset"><p class="muted">загрузка…</p></div>
   <div class="sec">Удалённая диагностика</div><div class="card" id="remote"><p class="muted">загрузка…</p></div>
   <div class="sec">Отчёт «Диагностика»</div><div class="card"><div class="row">${btn('Собрать отчёт', 'runDiag()', true)}${btn('Скопировать', "navigator.clipboard.writeText(diagText).then(()=>toast('Скопировано'))")}${btn('Скачать', "dlText('vpnguard-diag.txt', diagText)")}<span class="sub" id="dstate"></span></div><pre id="dtext" style="max-height:60vh;overflow:auto;margin-top:10px">${esc(diagText || 'Нажмите «Собрать отчёт» (до минуты). Ключей и паролей в отчёте нет.')}</pre></div>`;
 P.diag.after = async () => { await loadWebSet(); await loadRemote(); };

@@ -38,7 +38,7 @@ namespace VpnGuard
                 if (mode == "meduza" || mode == "dual") MeduzaStartedAt = DateTime.Now;
                 if (mode == "amnezia" || mode == "dual") { AvpnStartedAt = DateTime.Now; if (AvpnBlocked()) Log("Защита AmneziaVPN: режим выбран заново — снова пробую AmneziaVPN", "INFO"); AgBlockedUntil = DateTime.MinValue; AgFails = 0; }
                 if (mode == "dual") { DualActive = DualPrimary(); DualFails = 0; DualOkSince = DateTime.MinValue; }
-                ProbeFailures = 0; DownTicks = 0; LastTraffic = null; AwgProbeFailures = 0; AwgDownTicks = 0; AwgTraffic = null; if (LastMode != null) RequestIcs();
+                ProbeFailures = 0; DownTicks = 0; LastTraffic = null; AwgProbeFailures = 0; AwgDownTicks = 0; AwgTraffic = null; if (LastMode != null) Emit("mode.changed", ModeNames[LastMode] + " → " + ModeNames[mode]);
                 LastMode = mode;
             }
             if (mode == "amnezia" || mode == "dual") { try { PerfRun("VpnWatch/защита Amnezia", AvpnGuard); } catch (Exception e) { Log("Защита AmneziaVPN: " + e.Message, "WARN"); } }

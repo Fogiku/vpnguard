@@ -47,7 +47,7 @@ namespace VpnGuard
         static DateTime CatalogAt = DateTime.MinValue, MzFallbackAt = DateTime.MinValue, MzReturnAt = DateTime.MinValue, MzProtoSince = DateTime.MinValue, LastSnapshot = DateTime.MinValue;
         static string LastRestartReason = "", AwgLastReason = "", MzOverride = "", MzAdapter = "", Activity = "", LastMode = null;
         static DateTime ActivitySince = DateTime.MinValue;
-        static volatile bool ForceIcs;          // раздаче — перенастроиться (ставить через RequestIcs)
+        static volatile bool ForceIcs;          // только модуль «Раздача»: перенастроиться (другие модули — событиями, см. Subscribe)
         static Dictionary<string, object> Catalog, ProtoTest;
         static readonly List<Dictionary<string, object>> History = new List<Dictionary<string, object>>();
         static Process PsPart; static DateTime PsPartAt = DateTime.MinValue;

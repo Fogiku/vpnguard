@@ -23,6 +23,7 @@ namespace VpnGuard
             public int WarnAfterSec = 180;               // одно действие дольше — предупреждение в журнале
             public readonly AutoResetEvent Wake = new AutoResetEvent(false);
             public readonly ConcurrentQueue<string> Cmds = new ConcurrentQueue<string>();
+            public readonly ConcurrentQueue<KeyValuePair<string, Action>> Jobs = new ConcurrentQueue<KeyValuePair<string, Action>>();   // реакции на события
             public volatile bool Busy; public DateTime BusySince = DateTime.MinValue, LastEnd = DateTime.MinValue;
             public long Runs, Errors; public string LastError = "", Doing = ""; public bool Warned;
         }
@@ -37,17 +38,66 @@ namespace VpnGuard
         static Module FindModule(string name) { lock (Mods) return Mods.FirstOrDefault(m => m.Name == name); }
         static int CheckMs() { return Math.Max(10, CfgInt("checkIntervalSec", 30)) * 1000; }
 
+        // ---------------------------------------------------------------- события: модуль сообщает, что произошло, — подписчики реагируют в своём потоке
+        // tunnel.switched (откуда→куда), tunnel.reconnected (meduza|amnezia — адаптер мог смениться), mode.changed (режим),
+        // wg.restarted, ics.reapply, inet.lost (причина), inet.restored (сколько не было)
+        class AgentEvent { public DateTime At; public string Name, Info, From; public string[] To; }
+        static readonly List<AgentEvent> EventLog = new List<AgentEvent>();
+        static readonly Dictionary<string, List<KeyValuePair<Module, Action<string>>>> Subs = new Dictionary<string, List<KeyValuePair<Module, Action<string>>>>();
+        static void On(string module, string evt, Action<string> handler)
+        {
+            var m = FindModule(module); if (m == null) return;
+            lock (Subs) { List<KeyValuePair<Module, Action<string>>> l; if (!Subs.TryGetValue(evt, out l)) Subs[evt] = l = new List<KeyValuePair<Module, Action<string>>>(); l.Add(new KeyValuePair<Module, Action<string>>(m, handler)); }
+        }
+        static void Emit(string evt, string info = "")
+        {
+            List<KeyValuePair<Module, Action<string>>> l; lock (Subs) l = Subs.ContainsKey(evt) ? Subs[evt].ToList() : new List<KeyValuePair<Module, Action<string>>>();
+            var e = new AgentEvent { At = DateTime.Now, Name = evt, Info = info ?? "", From = EventFrom(), To = l.Select(x => x.Key.Title).Distinct().ToArray() };
+            lock (EventLog) { EventLog.Add(e); if (EventLog.Count > 100) EventLog.RemoveAt(0); }
+            foreach (var s in l) { var h = s.Value; var inf = e.Info; s.Key.Jobs.Enqueue(new KeyValuePair<string, Action>(evt, () => h(inf))); s.Key.Wake.Set(); }
+            Wake("status");
+        }
+        static string EventFrom()
+        {
+            var fm = CurModule != null ? FindModule(CurModule) : null; if (fm != null) return fm.Title;
+            var tn = Thread.CurrentThread.Name ?? ""; return tn == "inet" ? "Проверка интернета" : tn == "" ? "главный поток" : tn;
+        }
+        static object[] EventsInfo()
+        {
+            lock (EventLog) return EventLog.AsEnumerable().Reverse().Take(30).Select(e => (object)new Dictionary<string, object> {
+                { "at", e.At.ToString("HH:mm:ss") }, { "name", e.Name }, { "info", e.Info }, { "from", e.From }, { "to", string.Join(", ", e.To) } }).ToArray();
+        }
+        // кто на что реагирует
+        static void Subscribe()
+        {
+            On("ics", "tunnel.switched", _ => ForceIcs = true);
+            On("ics", "tunnel.reconnected", kind => { if (TunnelKind() == kind) ForceIcs = true; });   // переподключился тот, что несёт трафик
+            On("ics", "mode.changed", _ => ForceIcs = true);
+            On("ics", "wg.restarted", _ => ForceIcs = true);
+            On("ics", "ics.reapply", _ => ForceIcs = true);
+            On("failover", "tunnel.switched", _ => FoFails = 0);
+            On("failover", "mode.changed", _ => FoFails = 0);
+            On("tunnels", "tunnel.switched", _ => { });                                          // разбудить: сверить маршруты, восстановить упавший
+            On("tunnels", "inet.restored", _ => { ProbeFailures = 0; AwgProbeFailures = 0; DualFails = 0; });
+            On("zapret", "inet.restored", _ => {
+                // адреса, «замолчавшие» из-за обрыва, — снова через zapret (иначе ещё 5–10 мин шли бы через VPN)
+                int nb = CzBypass.Count + CzRemap.Count; CzBypass.Clear(); CzRemap.Clear(); CzGoodIp.Clear(); CzBadHost.Clear();
+                if (nb > 0) Log("zapret для клиентов: после обрыва связи сброшено " + nb + " временных обходов — снова через zapret", "INFO");
+            });
+        }
+
         static void StartModules()
         {
             AddModule("tunnels", "Туннели", CheckMs, () => VpnWatch(), TunnelCmd,
                 "reconnect", "reconnect-meduza", "reconnect-awg", "restart-meduza", "meduza-test", "meduza-catalog", "meduza-proto-reset", "dual-switch");
-            AddModule("wg", "WG-Server", () => 15000, () => { WgWatch(); WgClientsWatch(); }, c => { if (c == "restart-wg") { SvcRestart(CfgStr("ws4w.serviceName", "")); RequestIcs(); } }, "restart-wg");
+            AddModule("wg", "WG-Server", () => 15000, () => { WgWatch(); WgClientsWatch(); }, c => { if (c == "restart-wg") { SvcRestart(CfgStr("ws4w.serviceName", "")); Emit("wg.restarted"); } }, "restart-wg");
             AddModule("ics", "Раздача", () => 10000, SharingWatch, c => { if (c == "reapply-ics") ForceIcs = true; }, "reapply-ics");
             AddModule("zapret", "zapret", CheckMs, () => { ZapretWatch(); ClientZapretWatch(); LanWatch(); }, c => ZCommand(c),
                 "zapret-on", "zapret-off", "zapret-check", "zapret-releases", "zapret-update", "zapret-reload", "zapret-test");
             AddModule("ps", "Часть PowerShell", () => 10000, PsPartWatch);
             AddModule("status", "Сводка", () => 10000, Snapshot);
             AddModule("failover", "Быстрое переключение", () => Math.Max(2, CfgInt("vpn.fastCheckSec", 5)) * 1000, FailoverTick);
+            Subscribe();
             foreach (var m in Mods.ToList()) { var mm = m; new Thread(() => ModuleLoop(mm)) { IsBackground = true, Name = "mod-" + m.Name }.Start(); }
         }
         static void ModuleLoop(Module m)
@@ -55,6 +105,10 @@ namespace VpnGuard
             PerfThread("модуль: " + m.Title); CurModule = m.Name;
             Thread.Sleep(200);
             while (!Stopping) {
+                KeyValuePair<string, Action> job;
+                while (m.Jobs.TryDequeue(out job)) {
+                    try { job.Value(); } catch (Exception e) { Log("Модуль «" + m.Title + "»: событие " + job.Key + ": " + e.Message, "ERROR"); }
+                }
                 string c;
                 while (m.Cmds.TryDequeue(out c)) {
                     m.Busy = true; m.BusySince = DateTime.Now; m.Doing = "команда " + c; m.Warned = false;
@@ -74,7 +128,7 @@ namespace VpnGuard
         // разбудить модуль (проверить сейчас, не дожидаясь своего ритма)
         static void Wake(string name) { var m = FindModule(name); if (m != null) m.Wake.Set(); }
         // раздаче — перенастроиться сейчас
-        static void RequestIcs() { ForceIcs = true; Wake("ics"); }
+        static void RequestIcs() { Emit("ics.reapply"); }
 
         // команды из окна / веба / удалённой диагностики: каждая — своему модулю; не наши — части PowerShell
         static void DispatchCommands()
