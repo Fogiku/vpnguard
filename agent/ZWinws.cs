@@ -42,7 +42,8 @@ namespace VpnGuard
             return a;
         }
         // метки времени TCP (RFC 1323): без них стратегии с fooling=ts не работают (service.bat тоже их включает)
-        static string ZTcpTimestamps()
+        static string ZTcpTimestamps() { return Cached("tcpts", 300, ZTcpTimestampsNow); }
+        static string ZTcpTimestampsNow()
         {
             var o = Exe("netsh.exe", "interface tcp show global", 15).Out;
             if (Regex.IsMatch(o, @"(?im)(Timestamps|1323)[^\n]*:\s*(enabled|включ)")) return "Enabled";
@@ -51,9 +52,9 @@ namespace VpnGuard
         }
         static void ZEnableTimestamps()
         {
-            if (ZTcpTimestamps() == "Enabled") return;
+            if (ZTcpTimestampsNow() == "Enabled") return;
             Exe("netsh.exe", "interface tcp set global timestamps=enabled", 15);
-            var now = ZTcpTimestamps();
+            Uncache("tcpts"); var now = ZTcpTimestamps();
             if (now == "Enabled") Log("zapret: включены метки времени TCP (RFC 1323) — без них стратегии с fooling=ts не работают (так же делает service.bat)", "WARN");
             else Log("zapret: не удалось включить метки времени TCP (сейчас: '" + now + "') — стратегии с fooling=ts могут не работать", "ERROR");
         }

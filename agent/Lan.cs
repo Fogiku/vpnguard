@@ -61,9 +61,8 @@ namespace VpnGuard
             if (LanWgPort >= 0 && (DateTime.UtcNow - LanWgPortAt).TotalMinutes < 10) return LanWgPort;
             LanWgPortAt = DateTime.UtcNow; int p = 0;
             try {
-                var wg = Path.Combine(Path.GetDirectoryName(CfgStr("ws4w.wireguardExe", @"C:\Program Files\WireGuard\wireguard.exe")), "wg.exe");
-                var r = File.Exists(wg) ? Exe(wg, "show " + WgIf() + " listen-port", 5) : null;
-                if (r != null && r.Code == 0) int.TryParse(r.Out.Trim(), out p);
+                var dump = WgDump(); var h = dump != null && dump.Length > 0 ? dump[0].Split('\t') : new string[0];
+                if (h.Length > 2) int.TryParse(h[2], out p);
             } catch { }
             if (p > 0 || LanWgPort < 0) LanWgPort = p;
             return LanWgPort;

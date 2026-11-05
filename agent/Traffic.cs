@@ -110,10 +110,9 @@ namespace VpnGuard
                     ad["l"] = LanRate("live:l");
                     if (peers == null || (DateTime.UtcNow - peersAt).TotalSeconds >= (watched ? 2 : 10)) {
                         peersAt = DateTime.UtcNow;
-                        var wg = Path.Combine(Path.GetDirectoryName(CfgStr("ws4w.wireguardExe", @"C:\Program Files\WireGuard\wireguard.exe")), "wg.exe");
                         var pr = new Dictionary<string, object>();
-                        var r = File.Exists(wg) ? Exe(wg, "show " + WgIf() + " dump", 5) : null;
-                        if (r != null && r.Code == 0) foreach (var l in r.Out.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Skip(1)) {
+                        var dump = WgDump();
+                        if (dump != null) foreach (var l in dump.Skip(1)) {
                             var p = l.Split('\t'); if (p.Length < 7) continue;
                             string ip = Regex.Replace(p[3].Split(',')[0], @"/\d+$", ""); long rx, tx; long.TryParse(p[5], out rx); long.TryParse(p[6], out tx);
                             var rr = RateOf("live:wg:" + p[0], rx, tx);

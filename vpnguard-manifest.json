@@ -1,8 +1,8 @@
 {
-    "version":  "3.37.0",
-    "build":  "20261105-1556",
+    "version":  "3.38.0",
+    "build":  "20261105-1605",
     "notes":  "",
-    "date":  "2026-11-05T15:56:28.0123008+03:00",
+    "date":  "2026-11-05T16:05:35.1516875+03:00",
     "files":  [
                   {
                       "path":  "agent/Amnezia.cs",
@@ -11,8 +11,8 @@
                   },
                   {
                       "path":  "agent/AmneziaGuard.cs",
-                      "sha256":  "e4102a7321191556eac0a70cc99cc143c847ee0ddce297f47a682e7cc00fcf4e",
-                      "size":  7948
+                      "sha256":  "37b5127ad760cb71b50c5aadaf01d81873aa180f7f8a919a3936a673d15261cb",
+                      "size":  7669
                   },
                   {
                       "path":  "agent/ClientZapret.cs",
@@ -76,8 +76,8 @@
                   },
                   {
                       "path":  "agent/Lan.cs",
-                      "sha256":  "16db019ed38f442a1bff563e0de381fa2a6ef5bd85ceb9be3b590b7dba58f8d3",
-                      "size":  6627
+                      "sha256":  "bf9636f43b3152159a84777fd933982239bd585e432196a3a00efdf98c6525e4",
+                      "size":  6480
                   },
                   {
                       "path":  "agent/Meduza.cs",
@@ -116,8 +116,8 @@
                   },
                   {
                       "path":  "agent/Traffic.cs",
-                      "sha256":  "ccd75253be48fe4e3573f1ba5b664b9ab289cff3809cecc430868db133d3b9eb",
-                      "size":  12923
+                      "sha256":  "cfbd91db14e3fbad09099212a8772f0a0da079c611e514eeac95e271af058ff2",
+                      "size":  12636
                   },
                   {
                       "path":  "agent/TunnelDiag.cs",
@@ -126,13 +126,13 @@
                   },
                   {
                       "path":  "agent/WgClients.cs",
-                      "sha256":  "a7a1eb97499f8aef68763e6832a8edf33d23987b3ccca43d49c4aab68e7784ea",
-                      "size":  9232
+                      "sha256":  "7d4263866b05ad05c39b56460a80b4cdd8f036de265019b580acced8515482a3",
+                      "size":  9300
                   },
                   {
                       "path":  "agent/WgServer.cs",
-                      "sha256":  "49736b78bfd5e15d12e0e0ec3eb33e403c7d89b078bcc9bde281348ee862f243",
-                      "size":  13230
+                      "sha256":  "c3d56c6223bc84fee908035e1dca5a3c1a3fef675739df32b2782aaec6756063",
+                      "size":  13961
                   },
                   {
                       "path":  "agent/Zapret.cs",
@@ -156,8 +156,8 @@
                   },
                   {
                       "path":  "agent/ZWinws.cs",
-                      "sha256":  "c55f6c42b5e1b6b0b326b37ddbc893ac52bf62d7ae901b6e78e9ab8db4f61c8f",
-                      "size":  5778
+                      "sha256":  "bc8dfead9757311fa1c4bd91858994becafee1918912f374b635e88ce01cad2d",
+                      "size":  5894
                   },
                   {
                       "path":  "Amnezia.ps1",
@@ -251,7 +251,7 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "14340833346d66651897f0c97f83524a29b02f8a5e1bc479893764da43efb9b9",
+                      "sha256":  "07760dd13524ffafdb0da0243d14cd3246b0495c166f9ee0f378525a161a6f91",
                       "size":  33074
                   },
                   {

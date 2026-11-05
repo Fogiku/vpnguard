@@ -112,10 +112,7 @@ namespace VpnGuard
         static List<object> WgPeers(out int active, out string port)
         {
             active = 0; port = ""; var list = new List<object>();
-            var wg = Path.Combine(Path.GetDirectoryName(CfgStr("ws4w.wireguardExe", @"C:\Program Files\WireGuard\wireguard.exe")), "wg.exe");
-            if (!File.Exists(wg)) return null;
-            var r = Exe(wg, "show " + WgIf() + " dump", 5); if (r.Code != 0) return null;
-            var lines = r.Out.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries); if (lines.Length == 0) return null;
+            var lines = WgDump(); if (lines == null || lines.Length == 0) return null;
             var h = lines[0].Split('\t'); if (h.Length > 2) port = h[2];
             try { LoadPeerNames(); } catch { }
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -154,5 +151,18 @@ namespace VpnGuard
             wg["clientZapret"] = clientZapret;
             return wg;
         }
+
+        // «wg show wg_server dump»: первая строка — сервер (ключи, порт), дальше — клиенты (ключ, psk, адрес, разрешённые, рукопожатие, принято, отправлено …).
+        // Один запуск wg.exe на всех потребителей (живые скорости, сводка, защита AmneziaVPN, клиенты, учёт локальной сети) — не чаще раза в 2 с
+        static string[] WgDump()
+        {
+            return Cached("wgdump", 2, () => {
+                var wg = Path.Combine(Path.GetDirectoryName(CfgStr("ws4w.wireguardExe", @"C:\Program Files\WireGuard\wireguard.exe")), "wg.exe");
+                if (!File.Exists(wg)) return null;
+                var r = Exe(wg, "show " + WgIf() + " dump", 5);
+                return r.Code == 0 ? r.Out.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries) : null;
+            });
+        }
+        static void WgDumpReset() { Uncache("wgdump"); }
     }
 }

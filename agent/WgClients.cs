@@ -63,8 +63,8 @@ namespace VpnGuard
             string wg = WgExe(); if (!File.Exists(wg)) return;
             List<WcPeer> conf; try { conf = WgConfPeers(); } catch { return; } if (conf == null) return;
             var off = WcOff();
-            var r = Exe(wg, "show " + WgIf() + " peers", 5); if (r.Code != 0) return;
-            var live = new HashSet<string>(r.Out.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()));
+            WgDumpReset(); var dump = WgDump(); if (dump == null) return;                       // свежий список (только что могли менять)
+            var live = new HashSet<string>(dump.Skip(1).Select(x => x.Split('\t')[0].Trim()));
             string err = "";
             foreach (var p in conf) {
                 string nm; if (!PeerNamesByKey.TryGetValue(p.Key, out nm)) nm = p.Ip;
@@ -97,6 +97,7 @@ namespace VpnGuard
                     } finally { if (tmp != null) try { File.Delete(tmp); } catch { } }
                 }
             }
+            WgDumpReset();
             if (err != WcErr) { if (err.Length > 0) Log("WG-Server: " + err, "ERROR"); WcErr = err; }
         }
         // отключённые клиенты (их нет в «wg show») — для списка в окне

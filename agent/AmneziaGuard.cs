@@ -46,10 +46,9 @@ namespace VpnGuard
         static int AgPeers()
         {
             try {
-                var wg = Path.Combine(Path.GetDirectoryName(CfgStr("ws4w.wireguardExe", @"C:\Program Files\WireGuard\wireguard.exe")), "wg.exe");
-                var r = File.Exists(wg) ? Exe(wg, "show " + WgIf() + " dump", 5) : null; if (r == null || r.Code != 0) return -1;
+                var dump = WgDump(); if (dump == null) return -1;
                 long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds(); int n = 0;
-                foreach (var l in r.Out.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Skip(1)) {
+                foreach (var l in dump.Skip(1)) {
                     var p = l.Split('\t'); long hs; if (p.Length > 4 && long.TryParse(p[4], out hs) && hs > 0 && now - hs < 180) n++;
                 }
                 return n;
