@@ -983,7 +983,7 @@ namespace VpnGuard
         }
         // ---------------------------------------------------------------- локальная сеть: сколько трафика ПК идёт в домашнюю сеть, а не в интернет
         // WinDivert только смотрит (SNIFF | RECV_ONLY, трафик не задерживается): пакеты физического адаптера, у которых и отправитель,
-        // и получатель — в сети адаптера (или групповые/широковещательные). UDP-порт wg_server не считается: это интернет клиентов WG
+        // и получатель — частные адреса (или групповые/широковещательные). UDP-порт wg_server не считается: это интернет клиентов WG
         // (роутер пробрасывает их с адреса 192.168.x.1). Выключается в настройках: traffic.lanMeter = false
         static IntPtr LanH = WdInvalid; static string LanSig = "", LanError = "", LanNet = ""; static long LanRx, LanTx;
         static int LanWgPort = -1; static DateTime LanWgPortAt = DateTime.MinValue;
@@ -1009,12 +1009,14 @@ namespace VpnGuard
             if (LanH != WdInvalid && sig == LanSig) return;
             LanClose();
             if (!WdLoaded) { if (LoadLibrary(dll) == IntPtr.Zero) { LanError = "не загрузился " + dll; return; } WdLoaded = true; }
-            string f = "ifIdx == " + phys.IfIndex + " and ip and ip.SrcAddr >= " + IpS(lo) + " and ip.SrcAddr <= " + IpS(hi) +
-                " and ((ip.DstAddr >= " + IpS(lo) + " and ip.DstAddr <= " + IpS(hi) + ") or ip.DstAddr >= 224.0.0.0)" +
+            // локальные — все частные адреса (в доме бывает несколько подсетей за роутером: 192.168.1.x, 192.168.100.x …)
+            Func<string, string> priv = fld => "((" + fld + " >= 10.0.0.0 and " + fld + " <= 10.255.255.255) or (" + fld + " >= 172.16.0.0 and " + fld + " <= 172.31.255.255) or (" +
+                fld + " >= 192.168.0.0 and " + fld + " <= 192.168.255.255) or (" + fld + " >= 169.254.0.0 and " + fld + " <= 169.254.255.255)";
+            string f = "ifIdx == " + phys.IfIndex + " and ip and " + priv("ip.SrcAddr") + ") and " + priv("ip.DstAddr") + " or ip.DstAddr >= 224.0.0.0)" +
                 (port > 0 ? " and (not udp or (udp.SrcPort != " + port + " and udp.DstPort != " + port + "))" : "");
             var h = WinDivertOpen(f, WdLayerNetwork, 1000, 1 | 4);
             if (h == WdInvalid || h == IntPtr.Zero) { LanError = "WinDivert: код " + Marshal.GetLastWin32Error(); return; }
-            LanH = h; LanSig = sig; LanError = ""; LanNet = IpS(lo) + "/" + bits;
+            LanH = h; LanSig = sig; LanError = ""; LanNet = IpS(lo) + "/" + bits + " и др. частные адреса";
             new Thread(() => LanLoop(h)) { IsBackground = true, Name = "lan" }.Start();
             Log("Локальная сеть: учёт трафика " + LanNet + " через " + phys.Alias + " включён (отдельно от интернета)", "INFO");
         }
