@@ -132,7 +132,7 @@ namespace VpnGuard
                 try {
                     LoadCfg(false);
                     DispatchCommands();
-                    WatchModules();
+                    if (WatchModules()) { Stopping = true; HandOver(); return; }
                     if ((DateTime.Now - sigAt).TotalSeconds >= 10) {
                         sigAt = DateTime.Now;
                         if (SourceSig() != CodeSig) { Log("Агент C#: код обновлён — перезапуск на новой версии", "INFO"); Stopping = true; HandOver(); return; }
@@ -145,7 +145,7 @@ namespace VpnGuard
         // передать работу: VpnGuard.ps1 через задачу планировщика (он решит, какой агент запускать)
         static void HandOver()
         {
-            Snapshot();
+            if (Monitor.TryEnter(SnapLock, 3000)) { try { SnapshotCore(); } catch { } finally { Monitor.Exit(SnapLock); } }
             Run("cmd.exe", "/c ping -n 4 127.0.0.1 >nul & schtasks /run /tn \"VpnGuard\"", false);
         }
         static string SourceSig()

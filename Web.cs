@@ -195,6 +195,18 @@ namespace VpnGuard
         static void CfgSet(string path, object value)
         {
             lock (CfgLock) {
+            // config.json пишут три программы (агент, веб-сервер, PowerShell): «прочитать → изменить → записать» — под общей блокировкой
+            using (var mx = new Mutex(false, "Global\\VpnGuardConfig")) {
+                bool got = false;
+                try { got = mx.WaitOne(10000); } catch (AbandonedMutexException) { got = true; }
+                try { CfgWrite(path, value); } finally { if (got) try { mx.ReleaseMutex(); } catch { } }
+            }
+            }
+            LoadCfg(true);
+        }
+        static void CfgWrite(string path, object value)
+        {
+            {
                 Dictionary<string, object> o = null;
                 try { if (File.Exists(ConfigPath)) o = Json.DeserializeObject(File.ReadAllText(ConfigPath, Encoding.UTF8)) as Dictionary<string, object>; } catch { }
                 if (o == null) o = new Dictionary<string, object>();
@@ -204,12 +216,11 @@ namespace VpnGuard
                     cur = (Dictionary<string, object>)nx;
                 }
                 cur[parts[parts.Length - 1]] = value;
-                string tmp = ConfigPath + ".tmp";
+                string tmp = ConfigPath + "." + Process.GetCurrentProcess().Id + ".tmp";
                 File.WriteAllText(tmp, Pretty(Json.Serialize(o)), new UTF8Encoding(true));
                 try { if (File.Exists(ConfigPath)) File.Replace(tmp, ConfigPath, null); else File.Move(tmp, ConfigPath); } catch { File.Copy(tmp, ConfigPath, true); File.Delete(tmp); }
                 CfgStamp = DateTime.MinValue;
             }
-            LoadCfg(true);
         }
         static bool WebOn() { return CfgBool("web.enabled", true); }
         static int WebPort() { return CfgInt("web.port", 8765); }

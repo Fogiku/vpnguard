@@ -29,7 +29,7 @@ param(
     [string]$ConfigPath = ''
 )
 
-$AgentVersion = '3.31.0'
+$AgentVersion = '3.32.0'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -187,6 +187,13 @@ Import-Config
 
 # записать одно значение в config.json (например zapret.enabled) и перечитать настройки
 function Set-ConfigValue([string]$Path, $Value) {
+    # config.json пишут три программы (агент, веб-сервер, PowerShell) — под общей блокировкой, временный файл — свой
+    $mx = New-Object System.Threading.Mutex($false, 'Global\VpnGuardConfig'); $got = $false
+    try { $got = $mx.WaitOne(10000) } catch [Threading.AbandonedMutexException] { $got = $true }
+    try { Set-ConfigValueCore $Path $Value } finally { if ($got) { try { $mx.ReleaseMutex() } catch { } }; $mx.Dispose() }
+    Import-Config
+}
+function Set-ConfigValueCore([string]$Path, $Value) {
     $o = [pscustomobject]@{}
     if (Test-Path $ConfigPath) { $o = Get-Content $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json }
     $parts = $Path.Split('.')
@@ -196,10 +203,9 @@ function Set-ConfigValue([string]$Path, $Value) {
         $cur = $cur.($parts[$i])
     }
     $cur | Add-Member -NotePropertyName $parts[-1] -NotePropertyValue $Value -Force
-    $tmp = "$ConfigPath.tmp"
+    $tmp = "$ConfigPath.$PID.tmp"
     $o | ConvertTo-Json -Depth 6 | Set-Content $tmp -Encoding UTF8
     Move-Item $tmp $ConfigPath -Force
-    Import-Config
 }
 
 
@@ -638,59 +644,6 @@ function Get-HNetIcsEntries {
                 Present = ($present -contains $g); Instance = $_
             }
         }
-}
-
-function Reset-AllIcs {
-    foreach ($c in @(Get-IcsConnections)) {
-        if ($c.Enabled) {
-            Write-Log "ICS: снимаю общий доступ с '$($c.Name)' для полной перенастройки"
-            try { $c.Config.DisableSharing() } catch { Write-Log "ICS: DisableSharing '$($c.Name)': $($_.Exception.Message)" 'WARN' }
-        }
-    }
-    [void](Clear-StaleIcs)
-    Start-Sleep -Seconds 1
-    try { Restart-Service SharedAccess -Force } catch { }
-    [void](Wait-IcsService)
-}
-
-function Wait-IcsService([int]$TimeoutSec = 30) {
-    $deadline = (Get-Date).AddSeconds($TimeoutSec)
-    while ((Get-Date) -lt $deadline) {
-        $s = Get-Service SharedAccess
-        switch ("$($s.Status)") {
-            'Running' { Start-Sleep -Milliseconds 500; return $true }
-            'Stopped' { try { Start-Service SharedAccess } catch { } }
-        }
-        Start-Sleep -Seconds 1
-    }
-    return ((Get-Service SharedAccess).Status -eq 'Running')
-}
-
-function Enable-IcsSide([string]$Name, [int]$Type) {
-    $last = $null
-    for ($try = 1; $try -le 3; $try++) {
-        [void](Wait-IcsService)
-        $c = @(Get-IcsConnections) | Where-Object { $_.Name -eq $Name } | Select-Object -First 1
-        if (-not $c) { throw "адаптер '$Name' не найден в списке подключений" }
-        if ($c.Enabled -and $c.Type -eq $Type) { return }
-        try {
-            if ($c.Enabled) { $c.Config.DisableSharing(); Start-Sleep -Seconds 1; [void](Wait-IcsService) }
-            $c.Config.EnableSharing($Type)
-            return
-        } catch {
-            $last = $_.Exception
-            Write-Log ("ICS: '{0}' попытка {1}/3: {2} (служба: {3})" -f $Name, $try, $last.Message, (Get-Service SharedAccess).Status) 'WARN'
-            if ($try -eq 1) {
-                # чаще всего мешает «застрявшая» конфигурация: сбрасываем всё и включаем заново по порядку
-                Reset-AllIcs
-            } else {
-                Write-Log 'ICS: перезапуск службы SharedAccess'
-                try { Restart-Service SharedAccess -Force } catch { }
-            }
-            Start-Sleep -Seconds 3
-        }
-    }
-    throw $last
 }
 
 function Invoke-Diag([switch]$TryFix) {

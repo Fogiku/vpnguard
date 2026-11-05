@@ -156,8 +156,6 @@ namespace VpnGuard
             } finally { ready.Close(); }
             return m.Published;
         }
-        // раздаче — перенастроиться сейчас
-        static void RequestIcs() { Emit("ics.reapply"); }
 
         // команды из окна / веба / удалённой диагностики: каждая — своему модулю; не наши — части PowerShell
         static void DispatchCommands()
@@ -181,14 +179,22 @@ namespace VpnGuard
                 to.Cmds.Enqueue(a); to.TickNow = true; to.Wake.Set();
             }
         }
-        // модуль слишком долго делает одно действие — в журнал (один раз за действие)
-        static void WatchModules()
+        // модуль слишком долго делает одно действие — в журнал (один раз за действие); важный модуль (туннели, раздача, WG-Server)
+        // занят дольше agent.stuckRestartMin (10) мин — он завис: true — перезапустить агент
+        static readonly string[] Critical = { "tunnels", "ics", "wg", "failover" };
+        static bool WatchModules()
         {
+            int stuckMin = Math.Max(3, CfgInt("agent.stuckRestartMin", 10));
             lock (Mods) foreach (var m in Mods) {
-                if (!m.Busy || m.Warned) continue;
+                if (!m.Busy) continue;
                 var sec = (DateTime.Now - m.BusySince).TotalSeconds;
-                if (sec >= m.WarnAfterSec) { m.Warned = true; Log("Модуль «" + m.Title + "» выполняет одно действие уже " + (int)sec + " с" + (m.Doing.Length > 0 ? " (" + m.Doing + ")" : "") + (Activity.Length > 0 ? " — сейчас: " + Activity : ""), "WARN"); }
+                if (!m.Warned && sec >= m.WarnAfterSec) { m.Warned = true; Log("Модуль «" + m.Title + "» выполняет одно действие уже " + (int)sec + " с" + (m.Doing.Length > 0 ? " (" + m.Doing + ")" : "") + (Activity.Length > 0 ? " — сейчас: " + Activity : ""), "WARN"); }
+                if (Critical.Contains(m.Name) && sec >= stuckMin * 60) {
+                    Log("Модуль «" + m.Title + "» завис: одно действие идёт " + (int)(sec / 60) + " мин" + (m.Doing.Length > 0 ? " (" + m.Doing + ")" : "") + " — перезапускаю агент", "ERROR");
+                    return true;
+                }
             }
+            return false;
         }
         // для окна/веба
         static object[] ModulesInfo()
