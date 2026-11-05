@@ -509,6 +509,7 @@ namespace VpnGuard
             string prev = MzOverride;
             foreach (var p in order) {
                 if (InetDown()) { MzOverride = prev; Log("MeduzaVPN: пропал интернет — перебор протоколов прерван", "WARN"); MzDisconnect(); Thread.Sleep(1000); MzConnect(0); return true; }
+                DualMidCheck();
                 SetActivity("MeduzaVPN: пробую протокол " + p);
                 MzDisconnect(); Thread.Sleep(2000);
                 MzOverride = (p == chosen || p == "meduza-" + chosen) ? "" : p;
@@ -915,6 +916,13 @@ namespace VpnGuard
                 Exe("powershell.exe", "-NoProfile -Command Set-NetIPInterface -InterfaceIndex " + idx + " -AddressFamily IPv4 -AutomaticMetric Enabled", 30);
             }
         }
+        // во время восстановления одного туннеля (перебор протоколов, перезапуск) — если он не работает, а другой работает, трафик сразу на другой
+        static void DualMidCheck()
+        {
+            if (Mode() != "dual" || !CfgBool("vpn.dualHot", true)) return;
+            string act = DualAct(), oth = OtherKind(act);
+            if (!KindOk(act) && KindOk(oth)) DualSwitch(oth, ModeNames[act] + " не работает — восстанавливаю его, трафик пока через " + ModeNames[oth]);
+        }
         static void DualWatch()
         {
             bool hot = CfgBool("vpn.dualHot", true);
@@ -938,7 +946,13 @@ namespace VpnGuard
             // 2. наблюдение и восстановление: оба (горячий резерв) или только активный
             act = DualAct();
             try { DualSyncRoutes(); } catch { }
-            if (hot) { foreach (var k in new[] { act, OtherKind(act) }) { try { KindWatch(k); } catch (Exception e) { Log(ModeNames[k] + ": " + e.Message, "ERROR"); } } }
+            if (hot) {
+                bool actBad = !KindOk(act);
+                foreach (var k in actBad ? new[] { OtherKind(act), act } : new[] { act, OtherKind(act) }) {
+                    try { KindWatch(k); } catch (Exception e) { Log(ModeNames[k] + ": " + e.Message, "ERROR"); }
+                    if (actBad && k != act) DualMidCheck();               // резерв в порядке — трафик на него до того, как чинить основной
+                }
+            }
             else { KindWatch(act); StopKind(OtherKind(act)); }
             // 3. основной снова работает N минут — вернуть трафик на него
             string prim = DualPrimary(); int fb = CfgInt("vpn.failbackMin", 5);
