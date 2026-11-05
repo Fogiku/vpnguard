@@ -83,7 +83,7 @@ canvas { width: 100%; height: 190px; display: block; }
 .fl-sp { fill: none; stroke-width: 1.2; stroke-linejoin: round; } .fl-sp.rx { stroke: var(--rx); } .fl-sp.tx { stroke: var(--tx); opacity: .8; }
 .fl-spb { stroke: var(--border); stroke-width: 1; opacity: .6; }
 .fl-btn { cursor: pointer; } .fl-btn rect { fill: var(--card, var(--row)); stroke: var(--accent); stroke-opacity: .6; }
-.fl-btn text { font-size: 10px; fill: var(--accent); } .fl-btn:hover rect { fill: var(--accent); fill-opacity: .25; stroke-opacity: 1; }
+.fl-btn text { font-size: 11px; fill: var(--accent); } .fl-btn:hover rect { fill: var(--accent); fill-opacity: .25; stroke-opacity: 1; }
 .fl-btn.bad rect { stroke: var(--bad); } .fl-btn.bad text { fill: var(--bad); }
 .flow .fl-chv { font: bold 10px Consolas, "Courier New", monospace; letter-spacing: 5.5px; dominant-baseline: central; }
 .legend b { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
@@ -325,14 +325,14 @@ function flowModel() {
     const on = !c.off && c.active, r = on ? pr(c) : [0, 0];
     const nm0 = String(c.name || c.ip).replace(/['"\\]/g, '');
     N.push({ id: 'c' + i, col: 0, href: '#wg', dot: on ? 0 : -1, dim: !on, t1: c.name || c.ip, r: on ? r : null,
-      acts: [c.off ? { t: 'включить', tip: 'Включить клиента', fn: `cliSet('${c.ip}',{off:false},'${nm0}')` } : { t: 'отключить', bad: 1, tip: 'Отключить клиента', fn: `cliSet('${c.ip}',{off:true},'${nm0}')` }],
+      acts: [c.off ? { t: '⏻', tip: 'Включить клиента', fn: `cliSet('${c.ip}',{off:false},'${nm0}')` } : { t: '⏻', bad: 1, tip: 'Отключить клиента', fn: `cliSet('${c.ip}',{off:true},'${nm0}')` }],
       t3: c.off ? 'отключён' : !c.active ? 'не на связи' : c.zapret === false ? 'zapret выкл — всё через VPN' : c.cz ? `zapret: ${c.cz.conns || 0} соед.${c.cz.vpn ? ' · не ответили ' + c.cz.vpn : ''}` : c.ip });
     E.push({ a: 'c' + i, b: 'wg', r, c: 'var(--accent)', off: !on });
   });
   if (more > 0) { N.push({ id: 'cm', col: 0, href: '#wg', dot: -1, dim: true, t1: `ещё ${more}`, r: null, t3: 'на вкладке WG-Server' }); E.push({ a: 'cm', b: 'wg', r: [0, 0], c: 'var(--accent)', off: true }); }
   N.push({ id: 'apps', col: 0, dot: -1, t1: 'Программы ПК', r: apps, t3: 'оценка' });
   N.push({ id: 'wg', col: 1, href: '#wg', dot: lvl(wgc), acts: [{ t: '⟳', tip: 'Перезапустить wg_server', fn: "cmd('restart-wg','перезапуск wg_server','Перезапустить wg_server? Клиенты переподключатся.')" }], t1: 'WG-Server', r: [w[1], w[0]], t3: `на связи ${peers.filter(x => x.active).length} из ${peers.length}` });
-  N.push({ id: 'pc', col: 2, href: '#ics', dot: lvl(comp('ics')), acts: [{ t: 'восстановить', tip: 'Восстановить раздачу (ICS)', fn: "cmd('reapply-ics','восстановление раздачи')" }], t1: 'Маршрутизация', r: null, t3: 'раздача ICS' + (cz.running ? ` · zapret ↓ ${mbs(czr[0])}` : vpnOn ? ' из туннеля' : ' напрямую'),
+  N.push({ id: 'pc', col: 2, href: '#ics', dot: lvl(comp('ics')), acts: [{ t: '⟳', tip: 'Восстановить раздачу (ICS)', fn: "cmd('reapply-ics','восстановление раздачи')" }], t1: 'Маршрутизация', r: null, t3: 'раздача ICS' + (cz.running ? ` · zapret ↓ ${mbs(czr[0])}` : vpnOn ? ' из туннеля' : ' напрямую'),
     t4: cz.running && cz.bypass ? `${cz.bypass} адр. временно через VPN` : '' });
   // какой туннель несёт трафик; в режиме «два туннеля» второй — отдельным узлом «Резерв»
   const KN = { meduza: 'MeduzaVPN', amnezia: 'AmneziaVPN' }, kind = (S.vpn && S.vpn.kind) || (mode === 'amnezia' ? 'amnezia' : 'meduza'), other = kind === 'meduza' ? 'amnezia' : 'meduza';
@@ -340,12 +340,12 @@ function flowModel() {
   if (mode === 'dual') {
     const sb = (comp('ultra') || {}).standby || {}, rd = sb.ok === true;
     N.push({ id: 'vpn2', col: 3, href: '#' + other, dot: sb.blocked ? 2 : rd ? 0 : sb.up ? 1 : 2, dim: true,
-      acts: [{ t: 'сделать активным', tip: 'Переключить трафик на ' + KN[other], fn: `cmd('dual-switch','переключение на ${KN[other]}','Переключить трафик на ${KN[other]}?${rd ? '' : ' Он сейчас не проходит проверку — клиенты могут остаться без интернета.'}')` }], c: 'var(--vpn)', t1: KN[other], r: null,
+      acts: [{ t: '⇄', tip: 'Сделать активным — переключить трафик на ' + KN[other], fn: `cmd('dual-switch','переключение на ${KN[other]}','Переключить трафик на ${KN[other]}?${rd ? '' : ' Он сейчас не проходит проверку — клиенты могут остаться без интернета.'}')` }], c: 'var(--vpn)', t1: KN[other], r: null,
       t3: 'резерв: ' + (sb.state ? (rd ? 'готов, трафик проходит' : sb.state === 'нет трафика' ? (sb.why || 'НЕ пропускает трафик') : sb.state) : 'нет данных') });
   }
   if (lanOn) N.push({ id: 'lan', col: 3, dot: 0, c: 'var(--lan)', t1: 'Локальная сеть', r: l, t3: (lanI.net || 'домашняя сеть') + ' · не интернет' });
   const zc = comp('zapret'), zOn = !!(zc && zc.enabled);
-  N.push({ id: 'zp', col: 3, href: '#zapret', dot: lvl(comp('zapret')), acts: vpnOn ? [zOn ? { t: 'выкл', bad: 1, tip: 'Выключить zapret', fn: "cmd('zapret-off','выключение zapret')" } : { t: 'вкл', tip: 'Включить zapret', fn: "cmd('zapret-on','включение zapret','Включить zapret? YouTube и Discord этого ПК пойдут мимо VPN.')" }] : [], c: 'var(--zp)', t1: vpnOn ? 'Мимо VPN · zapret' : 'Напрямую', r: byp, t3: vpnOn ? 'YouTube, Discord …' : '' });
+  N.push({ id: 'zp', col: 3, href: '#zapret', dot: lvl(comp('zapret')), acts: vpnOn ? [zOn ? { t: '⏻', bad: 1, tip: 'Выключить zapret', fn: "cmd('zapret-off','выключение zapret')" } : { t: '⏻', tip: 'Включить zapret', fn: "cmd('zapret-on','включение zapret','Включить zapret? YouTube и Discord этого ПК пойдут мимо VPN.')" }] : [], c: 'var(--zp)', t1: vpnOn ? 'Мимо VPN · zapret' : 'Напрямую', r: byp, t3: vpnOn ? 'YouTube, Discord …' : '' });
   const ni = comp('inet'), nOk = LIVE && LIVE.inet !== undefined ? LIVE.inet : ni ? (ni.level === 0 ? 0 : ni.level === 2 ? 1 : -1) : -1;
   N.push({ id: 'net', col: 4, dot: nOk === 0 ? 0 : nOk === 1 ? 2 : -1, dim: nOk === 1, t1: nOk === 1 ? 'Интернет · НЕТ СВЯЗИ' : 'Интернет', r: p,
     t3: nOk === 1 ? (ni && ni.details && ni.details[0]) || 'провайдер не отвечает' : (nm.p || 'физический адаптер') + (ni && ni.level === 0 ? ' · ' + ni.state.replace(/^Есть · /, '') : '') });
