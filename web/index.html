@@ -12,14 +12,6 @@
   --hud-grid: rgba(57, 208, 255, .035); --hud-line: rgba(57, 208, 255, .25); --hud-sel: rgba(57, 208, 255, .14); --hud-card2: #081320; --hud-on-accent: #031019;
   color-scheme: dark;
 }
-@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
-  --bg: #f4f5f7; --nav: #ffffff; --card: #ffffff; --row: #f3f4f6; --border: #dde1e6; --grid: #e6e9ed;
-  --text: #1c2128; --dim: #5f6773; --accent: #2f6fe4; --btn: #eef0f3; --btn-h: #e2e5ea; --input: #ffffff;
-  --ok: #1f883d; --warn: #9a6700; --bad: #cf222e; --none: #b8bec6; --rx: #a87b00; --tx: #8250df; --vpn: #2f6fe4; --zp: #c2501f; --lan: #57606a; --hud-grid: rgba(47, 111, 228, .05); --hud-line: rgba(47, 111, 228, .2); --hud-sel: rgba(47, 111, 228, .1); --hud-card2: #fbfcfd; --hud-on-accent: #fff; color-scheme: light; } }
-:root[data-theme="light"] {
-  --bg: #f4f5f7; --nav: #ffffff; --card: #ffffff; --row: #f3f4f6; --border: #dde1e6; --grid: #e6e9ed;
-  --text: #1c2128; --dim: #5f6773; --accent: #2f6fe4; --btn: #eef0f3; --btn-h: #e2e5ea; --input: #ffffff;
-  --ok: #1f883d; --warn: #9a6700; --bad: #cf222e; --none: #b8bec6; --rx: #a87b00; --tx: #8250df; --vpn: #2f6fe4; --zp: #c2501f; --lan: #57606a; --hud-grid: rgba(47, 111, 228, .05); --hud-line: rgba(47, 111, 228, .2); --hud-sel: rgba(47, 111, 228, .1); --hud-card2: #fbfcfd; --hud-on-accent: #fff; color-scheme: light; }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
 a { color: var(--accent); }
@@ -50,6 +42,10 @@ h1 { font-size: 22px; margin: 0; font-weight: 600; }
 .c0 { color: var(--ok); } .c1 { color: var(--warn); } .c2 { color: var(--bad); } .c-1 { color: var(--dim); }
 .hero { display: flex; flex-wrap: wrap; gap: 14px; justify-content: space-between; align-items: flex-start; }
 .hero .big { font-size: 24px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+.hsplit { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 12px; }
+.hsplit .hev { margin-bottom: 12px; display: flex; flex-direction: column; min-height: 0; }
+.hsplit .hev pre { margin: 0; white-space: pre-wrap; font-size: 12px; max-height: 320px; overflow: auto; }
+@media (min-width: 1500px) { .hsplit { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); } .hsplit .hev pre { max-height: none; flex: 1 1 0; } }
 button, select, input[type=text], input[type=password] { font: inherit; color: var(--text); background: var(--btn); border: 1px solid var(--border); border-radius: 6px; padding: 7px 12px; }
 input[type=text], input[type=password], select { background: var(--input); }
 button { cursor: pointer; } button:hover { background: var(--btn-h); }
@@ -85,6 +81,9 @@ canvas { width: 100%; height: 190px; display: block; }
 .fl-btn { cursor: pointer; } .fl-btn rect { fill: var(--card, var(--row)); stroke: var(--accent); stroke-opacity: .6; }
 .fl-btn text { font-size: 11px; fill: var(--accent); } .fl-btn:hover rect { fill: var(--accent); fill-opacity: .25; stroke-opacity: 1; }
 .fl-btn.bad rect { stroke: var(--bad); } .fl-btn.bad text { fill: var(--bad); }
+.busy .fl-node { stroke: var(--accent) !important; stroke-width: 1.6; stroke-dasharray: 8 5; animation: flBusy .8s linear infinite; }
+.busy .f3 { fill: var(--accent); }
+@keyframes flBusy { to { stroke-dashoffset: -13; } }
 .flow .fl-chv { font: bold 10px Consolas, "Courier New", monospace; letter-spacing: 5.5px; dominant-baseline: central; }
 .legend b { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 #toast { position: fixed; right: 16px; bottom: 16px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; max-width: 420px; display: none; box-shadow: 0 4px 18px rgba(0,0,0,.3); }
@@ -202,8 +201,7 @@ tr.cur td:first-child { box-shadow: inset 3px 0 var(--accent); }
     <header>
       <div class="row"><button class="menu-btn" onclick="nav.classList.toggle('open')">☰</button><h1 id="title">Главная</h1></div>
       <div class="row"><span class="dot" id="adot"></span><span class="sub" id="agent">загрузка…</span>
-        <button onclick="cmd('check-now','проверка')">⟳ Проверить сейчас</button>
-        <button onclick="toggleTheme()" title="Тема">◐</button></div>
+        <button onclick="cmd('check-now','проверка')">⟳ Проверить сейчас</button></div>
     </header>
     <div id="page"></div>
   </main>
@@ -232,8 +230,8 @@ async function api(path, body) {
 }
 function toast(t, bad) { const e = $('#toast'); e.textContent = t; e.style.color = bad ? 'var(--bad)' : ''; e.style.display = 'block'; clearTimeout(e._t); e._t = setTimeout(() => e.style.display = 'none', 4500); }
 async function cmd(c, label, confirmText) {
-  if (confirmText && !confirm(confirmText)) return;
-  try { await api('/api/cmd', { c }); toast('Отправлено агенту: ' + (label || c)); setTimeout(load, 2500); } catch (e) { toast(e.message, true); }
+  if (confirmText && !confirm(confirmText)) return false;
+  try { await api('/api/cmd', { c }); toast('Отправлено агенту: ' + (label || c)); setTimeout(load, 2500); return true; } catch (e) { toast(e.message, true); return false; }
 }
 async function setCfg(key, value, label) {
   try { await api('/api/config', { key, value }); toast('Сохранено: ' + (label || key) + ' — агент применит на следующей проверке'); setTimeout(load, 2500); } catch (e) { toast(e.message, true); }
@@ -342,7 +340,7 @@ function flowModel() {
     t4: cz.running && cz.bypass ? `${cz.bypass} адр. временно через VPN` : '' });
   // какой туннель несёт трафик; в режиме «два туннеля» второй — отдельным узлом «Резерв»
   const KN = { meduza: 'MeduzaVPN', amnezia: 'AmneziaVPN' }, kind = (S.vpn && S.vpn.kind) || (mode === 'amnezia' ? 'amnezia' : 'meduza'), other = kind === 'meduza' ? 'amnezia' : 'meduza';
-  if (vpnOn) N.push({ id: 'vpn', col: 3, href: '#' + kind, dot: lvl(comp('ultra')), acts: [{ t: '⟳', tip: 'Переподключить туннель', fn: "cmd('reconnect','переподключение туннеля')" }], c: 'var(--vpn)', t1: 'VPN · ' + KN[kind], r: u, t3: (mode === 'dual' ? 'активный · ' : '') + (nm.u || 'туннель') });
+  if (vpnOn) N.push({ id: 'vpn', col: 3, href: '#' + kind, dot: lvl(comp('ultra')), acts: [{ t: '⟳', tip: 'Переподключить туннель', fn: "cmd('reconnect','переподключение туннеля')" }], c: 'var(--vpn)', t1: KN[kind], r: u, t3: (mode === 'dual' ? 'активный · ' : '') + (nm.u || 'туннель') });
   if (mode === 'dual') {
     const sb = (comp('ultra') || {}).standby || {}, rd = sb.ok === true;
     N.push({ id: 'vpn2', col: 3, href: '#' + other, dot: sb.blocked ? 2 : rd ? 0 : sb.up ? 1 : 2, dim: true,
@@ -351,7 +349,7 @@ function flowModel() {
   }
   if (lanOn) N.push({ id: 'lan', col: 3, dot: 0, c: 'var(--lan)', t1: 'Локальная сеть', r: l, t3: (lanI.net || 'домашняя сеть') + ' · не интернет' });
   const zc = comp('zapret'), zOn = !!(zc && zc.enabled);
-  N.push({ id: 'zp', col: 3, href: '#zapret', dot: lvl(comp('zapret')), acts: vpnOn ? [zOn ? { t: '⏻', bad: 1, tip: 'Выключить zapret', fn: "cmd('zapret-off','выключение zapret')" } : { t: '⏻', tip: 'Включить zapret', fn: "cmd('zapret-on','включение zapret','Включить zapret? YouTube и Discord этого ПК пойдут мимо VPN.')" }] : [], c: 'var(--zp)', t1: vpnOn ? 'Мимо VPN · zapret' : 'Напрямую', r: byp, t3: vpnOn ? 'YouTube, Discord …' : '' });
+  N.push({ id: 'zp', col: 3, href: '#zapret', dot: lvl(comp('zapret')), acts: vpnOn ? [zOn ? { t: '⏻', bad: 1, tip: 'Выключить zapret', fn: "cmd('zapret-off','выключение zapret')" } : { t: '⏻', tip: 'Включить zapret', fn: "cmd('zapret-on','включение zapret','Включить zapret? YouTube и Discord этого ПК пойдут мимо VPN.')" }] : [], c: 'var(--zp)', t1: 'zapret', r: byp, t3: vpnOn ? 'YouTube, Discord …' : '' });
   const ni = comp('inet'), nOk = LIVE && LIVE.inet !== undefined ? LIVE.inet : ni ? (ni.level === 0 ? 0 : ni.level === 2 ? 1 : -1) : -1;
   N.push({ id: 'net', col: 4, dot: nOk === 0 ? 0 : nOk === 1 ? 2 : -1, dim: nOk === 1, t1: nOk === 1 ? 'Интернет · НЕТ СВЯЗИ' : 'Интернет', r: p,
     t3: nOk === 1 ? (ni && ni.details && ni.details[0]) || 'провайдер не отвечает' : (nm.p || 'физический адаптер') + (ni && ni.level === 0 ? ' · ' + ni.state.replace(/^Есть · /, '') : '') });
@@ -368,12 +366,31 @@ const mbs = v => { v = (+v || 0) * 8; return v >= 1e7 ? (v / 1e6).toFixed(0) : v
 const laneSpeed = r => (r = +r || 0) < 400 ? 0 : 12 + 20 * Math.log10(r / 400);
 
 // кнопки узла: справа сверху; клик не открывает вкладку узла
-const FBS = 20, FBG = 5;                         // кнопка узла: квадрат 20 px, зазор 5
+const FBS = 20, FBG = 5, FLB = {};
+// кнопка узла нажата и команда ушла агенту — узел «в работе»: бегущая рамка и «выполняется …», пока агент занят (не дольше 45 с)
+async function flowAct(id, p, what) {
+  if (!(await p)) return;
+  FLB[id] = { until: Date.now() + 45000, from: Date.now(), what: String(what || '').toLowerCase() };
+  flowBusyPaint();
+}
+function flowBusyPaint() {
+  if (!FL || !FL.svg) return;
+  const now = Date.now();
+  for (const id in FLB) {
+    const b = FLB[id], g = FL.svg.querySelector(`#fln-${id}`);
+    // готово: время вышло или агент уже ничем не занят (после первых 8 с)
+    const done = now > b.until || (now - b.from > 8000 && S && !S.activity);
+    if (g) g.classList.toggle('busy', !done);
+    const t = FL.svg.querySelector(`#fl-${id}-3`);
+    if (t && !done) t.textContent = '⟳ ' + clip(b.what + (S && S.activity ? ' · ' + S.activity : '') + ' …', +t.dataset.w + 20 || 200, 6.1);
+    if (done) delete FLB[id];
+  }
+}                         // кнопка узла: квадрат 20 px, зазор 5
 function flowBtns(n) {
   let out = ''; const x = n.x + n.w - FBS - 8;
   (n.acts || []).forEach((a, i) => {
     const y = n.y + 8 + i * (FBS + FBG);
-    out += `<g class="fl-btn${a.bad ? ' bad' : ''}" onclick="event.preventDefault();event.stopPropagation();${esc(a.fn)}"><title>${esc(a.tip)}</title>
+    out += `<g class="fl-btn${a.bad ? ' bad' : ''}" onclick="event.preventDefault();event.stopPropagation();flowAct('${n.id}', ${esc(a.fn)}, '${esc(a.tip)}')"><title>${esc(a.tip)}</title>
       <rect x="${x}" y="${y}" width="${FBS}" height="${FBS}" rx="2"/><text x="${x + FBS / 2}" y="${y + 14}" text-anchor="middle">${esc(a.t)}</text></g>`;
   });
   return out;
@@ -382,7 +399,9 @@ function flowBuild(m) {
   const { N, E } = m, byId = {}; N.forEach(n => byId[n.id] = n);
   const W = 200, H = 84, G = 14, X = [0, 265, 510, 755, 1000], VW = X[4] + W, TOP = 24, APPG = 18;
   const col0 = N.filter(n => n.col === 0), cli = col0.filter(n => n.id !== 'apps');
-  const VH = Math.max(TOP + col0.length * (H + G) - G + APPG, byId.lan || byId.vpn2 ? 4 * H + 60 : 2 * H + 40) + 4, mid = VH / 2;
+  // столбец туннелей: над серединой — VPN (и резерв) с подписью рамки, под ней — zapret и локальная сеть
+  const up3 = (byId.vpn2 ? 2 * H + 28 : byId.vpn ? H + 14 : H / 2) + (byId.vpn ? 26 : 0), dn3 = (byId.lan ? 2 * H + 28 : H + 14) + 4;
+  const VH = Math.max(TOP + col0.length * (H + G) - G + APPG, 2 * Math.max(up3, dn3)) + 4, mid = VH / 2;
   col0.forEach((n, i) => Object.assign(n, { x: X[0], y: TOP + i * (H + G) + (n.id === 'apps' ? APPG : 0) }));
   for (const n of N) if (n.col > 0) Object.assign(n, { x: X[n.col], y: mid - H / 2 });
   if (cli.length && byId.wg) byId.wg.y = (cli[0].y + cli[cli.length - 1].y) / 2;
@@ -418,6 +437,10 @@ function flowBuild(m) {
     }
   });
   let nodes = '';
+  if (byId.vpn) {                                  // туннели VPN (активный и резерв) — один модуль
+    const t = (byId.vpn2 || byId.vpn).y - 20, b = byId.vpn.y + H + 6, x = byId.vpn.x - 8;
+    nodes += `<rect class="fl-grp" x="${x}" y="${t}" width="${W + 16}" height="${b - t}" rx="6"/><text class="fgl" x="${x + 10}" y="${t + 13}">ТУННЕЛИ</text>`;
+  }
   if (cli.length && byId.wg) {                     // WG-Server и его клиенты — один модуль
     const t = cli[0].y - 20, b = Math.max(cli[cli.length - 1].y, byId.wg.y) + H + 8, r = byId.wg.x + W + 8;
     nodes += `<rect class="fl-grp" x="-8" y="${t}" width="${r + 8}" height="${b - t}" rx="6"/><text class="fgl" x="2" y="${t + 13}">WG-SERVER · КЛИЕНТЫ</text>`;
@@ -448,7 +471,7 @@ function flowUpdate(m) {
   for (const n of m.N) {
     const st = FL.nodes[n.id] || (FL.nodes[n.id] = { el: svg.querySelector(`#fl-${n.id}-r`), v: n.r ? n.r.slice() : null, txt: '' });
     st.t = n.r ? n.r.slice() : null; if (st.t && !st.v) st.v = st.t.slice();
-    const t = svg.querySelector(`#fl-${n.id}-3`); if (t) t.textContent = clip(n.t4 || n.t3, +t.dataset.w + 20 || 200, 6.1);
+    const t = svg.querySelector(`#fl-${n.id}-3`); if (t && !FLB[n.id]) t.textContent = clip(n.t4 || n.t3, +t.dataset.w + 20 || 200, 6.1);
   }
   m.E.forEach((e, i) => {
     for (const [lane, v] of [['u', e.r[1]], ['d', e.r[0]]]) {
@@ -507,6 +530,7 @@ async function liveTick() {
   try { LIVE = await api('/api/live'); if (!LIVE || !LIVE.rate) LIVE = null; } catch (e) { LIVE = null; }
   if (!FL) return;
   flowMount();                                     // состав узлов изменился (клиент пропал/появился) — пересобрать
+  flowBusyPaint();
   for (const n of flowModel().N) { const h = SPK[n.id] || (SPK[n.id] = []); h.push(n.r ? [+n.r[0] || 0, +n.r[1] || 0] : [0, 0]); if (h.length > SPN) h.shift(); }
   flowSpark();
 }
@@ -537,7 +561,9 @@ function head() {
 
 // ---------------------------------------------------------------- страницы
 const P = {};
-P.home = () => `<div id="htop">${P.home.top()}</div><div id="hflow">${flowBlock()}</div><div id="hbot">${P.home.bot()}</div>`;
+P.home = () => `<div id="htop">${P.home.top()}</div><div class="hsplit"><div id="htiles">${P.home.tiles()}</div>
+  <div class="card hev"><div class="sec" style="margin-top:0">Последние предупреждения и ошибки</div><pre id="events" class="muted">${esc(P.home.ev || 'загрузка…')}</pre></div></div>
+  <div id="hflow">${flowBlock()}</div>`;
 P.home.top = () => {
   const keys = [['inet', 'Интернет'], ['ultra', 'Туннель'], ['meduza', 'MeduzaVPN'], ['amnezia', 'AmneziaVPN'], ['wg', 'WG-Server'], ['ics', 'Раздача ICS'], ['zapret', 'zapret']];
   let worst = -1; const probs = [];
@@ -551,8 +577,14 @@ P.home.top = () => {
   return `<div class="card hero st${worst}"><div><div class="big"><span class="dot l${worst}" style="width:18px;height:18px"></span><span class="c${worst}">${ht}</span></div>
       <div class="muted" style="margin-top:6px">${esc(probs.join('  ·  ') || 'Туннель, WG-Server и раздача в порядке')}</div>
 </div>
-    <div><div class="sub">Режим работы</div><select onchange="setMode(this.value)">${MODES.map(([v, t]) => `<option value="${v}"${v === mode ? ' selected' : ''}>${t}</option>`).join('')}</select></div></div>
-  <div class="grid">${keys.map(([k, n]) => { const o = comp(k), l = lvl(o); return `<div class="tile" onclick="location.hash='${k === 'inet' ? 'home' : k}'" title="${esc(o && o.details && o.details.join(' · '))}"><div class="t"><span class="dot l${l}"></span>${n}</div><div class="s c${l}" title="${esc(o && o.state)}">${esc(o ? String(o.state).split(' · ')[0] : 'нет данных')}</div><div class="d">${esc(o && o.details && o.details[0])}</div></div>`; }).join('')}</div>
+    <div><div class="sub">Режим работы</div><select onchange="setMode(this.value)">${MODES.map(([v, t]) => `<option value="${v}"${v === mode ? ' selected' : ''}>${t}</option>`).join('')}</select></div></div>`;
+};
+P.home.tiles = () => {
+  const keys = [['inet', 'Интернет'], ['ultra', 'Туннель'], ['meduza', 'MeduzaVPN'], ['amnezia', 'AmneziaVPN'], ['wg', 'WG-Server'], ['ics', 'Раздача ICS'], ['zapret', 'zapret']];
+  const peers = (comp('wg') && comp('wg').peers) || [];
+  const tr = S.traffic, today = tr && tr.days && tr.days.find(d => d.d === new Date().toISOString().slice(0, 10));
+  const h = S.history || []; let ok = 0, all = 0; for (const p of h) if (p.u >= 0) { all++; if (p.u == 0) ok++; }
+  return `<div class="grid">${keys.map(([k, n]) => { const o = comp(k), l = lvl(o); return `<div class="tile" onclick="location.hash='${k === 'inet' ? 'home' : k}'" title="${esc(o && o.details && o.details.join(' · '))}"><div class="t"><span class="dot l${l}"></span>${n}</div><div class="s c${l}" title="${esc(o && o.state)}">${esc(o ? String(o.state).split(' · ')[0] : 'нет данных')}</div><div class="d">${esc(o && o.details && o.details[0])}</div></div>`; }).join('')}</div>
   <div class="grid">
     <div class="tile kpi"><div class="t">Доступность туннеля · 2 ч</div><div class="v ${all ? (ok / all > .99 ? 'c0' : ok / all > .9 ? 'c1' : 'c2') : ''}">${all ? (100 * ok / all).toFixed(1) + ' %' : '—'}</div></div>
     <div class="tile kpi"><div class="t">Скорость туннеля</div><div class="v">${tr && tr.rate && tr.rate.u ? '↓ ' + fmtR(tr.rate.u[0]) : '—'}</div><div class="d">${tr && tr.rate && tr.rate.u ? '↑ ' + fmtR(tr.rate.u[1]) : ''}</div></div>
@@ -561,8 +593,6 @@ P.home.top = () => {
   </div>
 `;
 };
-P.home.bot = () => `${chartBlock('u', 'Трафик туннеля — последние 2 часа')}
-  <div class="sec">Последние предупреждения и ошибки</div><pre id="events" class="muted">${esc(P.home.ev || 'загрузка…')}</pre>`;
 P.home.after = async () => { flowMount(); if (Date.now() - (P.home.evAt || 0) < 60000) return; P.home.evAt = Date.now(); try { const t = await api('/api/logs?minutes=720&lines=3000'); const l = t.split('\n').filter(s => /\[(WARN|ERROR)\]/.test(s)).slice(-15).reverse(); P.home.ev = l.join('\n') || 'за 12 часов — ничего'; if ($('#events')) $('#events').textContent = P.home.ev; } catch (e) { } };
 async function setZVer() {
   const v = $('#zver').value;
@@ -627,8 +657,8 @@ async function addClient() {
   try { const r = await api('/api/wg/add', { name: n }); wgList = null; toast(`Клиент «${r.name}» создан: ${r.ip}`); showConfText(r.name, r.ip, r.text); P.wg.after(); } catch (e) { toast('Не удалось: ' + e.message, true); }
 }
 async function cliSet(ip, o, name) {
-  if (o.off === true && !confirm(`Отключить клиента «${name}» (${ip})? Он перестанет подключаться, пока его не включат обратно. Настройки клиента сохранятся.`)) return;
-  try { await api('/api/wg/client-set', Object.assign({ ip }, o)); toast(`«${name}»: ` + (o.off !== undefined ? (o.off ? 'отключён' : 'включён') : (o.zapret ? 'zapret включён' : 'zapret выключен — весь трафик через VPN')) + ' — агент применит за 10–30 с'); setTimeout(load, 3000); setTimeout(load, 12000); } catch (e) { toast(e.message, true); }
+  if (o.off === true && !confirm(`Отключить клиента «${name}» (${ip})? Он перестанет подключаться, пока его не включат обратно. Настройки клиента сохранятся.`)) return false;
+  try { await api('/api/wg/client-set', Object.assign({ ip }, o)); toast(`«${name}»: ` + (o.off !== undefined ? (o.off ? 'отключён' : 'включён') : (o.zapret ? 'zapret включён' : 'zapret выключен — весь трафик через VPN')) + ' — агент применит за 10–30 с'); setTimeout(load, 3000); setTimeout(load, 12000); return true; } catch (e) { toast(e.message, true); return false; }
 }
 async function delClient(ip, name) {
   if (!confirm(`Удалить клиента «${name}» (${ip})? Он сразу перестанет подключаться.`)) return;
@@ -777,7 +807,7 @@ function render(force) {
   const ae = document.activeElement; if (!force && ae && ['SELECT', 'INPUT', 'TEXTAREA'].includes(ae.tagName) && page !== 'home') return;
   if ((page === 'logs' && $('#log') || page === 'diag' && $('#remote') || page === 'settings' && $('#setbox')) && !force) return;
   const keep = page === 'zapret' && $('#zltext') ? { text: $('#zltext').value, sel: $('#zlsel') && $('#zlsel').value } : null;
-  if (!force && page === 'home' && $('#hflow')) { $('#htop').innerHTML = P.home.top(); $('#hbot').innerHTML = P.home.bot(); }   // схему не трогаем — анимация не сбивается
+  if (!force && page === 'home' && $('#hflow')) { $('#htop').innerHTML = P.home.top(); $('#htiles').innerHTML = P.home.tiles(); }   // схему и журнал не трогаем
   else $('#page').innerHTML = (P[page] || P.home)();
   for (const cv of document.querySelectorAll('canvas[data-chart]')) drawChart(cv, cv.dataset.chart);
   if (keep && keep.text !== undefined && zl) { loadZListsKeep(keep); } else if (P[page] && P[page].after) P[page].after();
@@ -788,8 +818,6 @@ function go() {
   for (const a of document.querySelectorAll('nav a')) a.classList.toggle('sel', a.dataset.p === page);
   nav.classList.remove('open'); logCache = ''; render(true);
 }
-function toggleTheme() { const r = document.documentElement, cur = r.dataset.theme || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'); r.dataset.theme = cur === 'light' ? 'dark' : 'light'; try { localStorage.setItem('vg-theme', r.dataset.theme); } catch (e) { } render(true); }
-try { const t = localStorage.getItem('vg-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) { }
 const nav = $('#nav');
 window.addEventListener('hashchange', go);
 window.addEventListener('resize', () => { for (const cv of document.querySelectorAll('canvas[data-chart]')) drawChart(cv, cv.dataset.chart); });
