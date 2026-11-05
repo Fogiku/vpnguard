@@ -101,6 +101,7 @@ namespace VpnGuard
                 "zapret-on", "zapret-off", "zapret-check", "zapret-releases", "zapret-update", "zapret-reload", "zapret-test")
                 .State = () => new Dictionary<string, object> { { "zapret", ZSnapshotSafe() }, { "cz", CzSnapshot() } };
             AddModule("ps", "Часть PowerShell", () => 10000, PsPartWatch);
+            AddModule("web", "Веб-сервер и значок", () => 30000, WebHostTick);
             AddModule("status", "Сводка", () => 10000, Snapshot);
             var comp = AddModule("components", "Компоненты", () => 60000, ComponentsTick, ComponentsCmd, "software-check", "install-missing", "check-update");
             comp.Prefixes = new[] { "install " }; comp.WarnAfterSec = 1200;                 // установка может идти минутами

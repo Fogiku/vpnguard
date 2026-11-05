@@ -630,7 +630,7 @@ namespace VpnGuard
                 case "/net": Text(ctx, 200, HideSecrets(DiagNet())); return;
                 case "/system": Text(ctx, 200, HideSecrets(DiagSystem())); return;
                 case "/files": RawJson(ctx, DiagFiles()); return;
-                case "/bundle": Text(ctx, 200, HideSecrets(q["diag"] == "1" ? PsTask("bundle-diag", "", 420) : DiagBundle())); return;
+                case "/bundle": Text(ctx, 200, HideSecrets(DiagBundle() + (q["diag"] == "1" ? "\n################ ДИАГНОСТИКА ################\n" + PsTask("diag", "", 300) : ""))); return;
                 default: Text(ctx, 404, "нет такого адреса. Список: /"); return;
             }
         }

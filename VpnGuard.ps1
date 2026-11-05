@@ -29,7 +29,7 @@ param(
     [string]$ConfigPath = ''
 )
 
-$AgentVersion = '3.39.0'
+$AgentVersion = '3.40.0'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -451,9 +451,6 @@ else {
 $RemoteModule = Join-Path $Root 'Remote.ps1'
 if (Test-Path $RemoteModule) { . $RemoteModule }
 else {
-    function Invoke-RemoteWatch { }
-    function Invoke-TrayWatch { }
-    function Get-RemoteSnapshot { $null }
     function Invoke-RemoteServer { }
 }
 
@@ -541,7 +538,6 @@ function Start-CsAgent {
 function Write-PsStatus {
     $o = [ordered]@{
         updated  = (Get-Date).ToString('o'); pid = $PID; activity = "$($State.activity)"
-        remote   = $(try { Get-RemoteSnapshot } catch { $null })
         app      = $(try { Get-AppSnapshot } catch { $null })
     }
     $tmp = "$PsStatusPath.tmp"
@@ -571,7 +567,7 @@ function Invoke-PsPart {
     if (-not (Test-Path $CmdDir)) { New-Item -ItemType Directory $CmdDir -Force | Out-Null }
     try {
         # zapret ведёт сам агент на C# (Zapret.cs)
-        foreach ($step in 'Remove-ObsoleteFiles', 'Invoke-Commands', 'Invoke-RemoteWatch', 'Invoke-AppUpdateWatch', 'Invoke-TrayWatch') {
+        foreach ($step in 'Remove-ObsoleteFiles', 'Invoke-Commands', 'Invoke-AppUpdateWatch') {
             try { & $step } catch { Write-Log "$step : $($_.Exception.Message)" 'ERROR' }
             if (((Get-Date) - $State.lastSnapshot).TotalSeconds -ge 10) { try { Write-PsStatus } catch { } }
         }
