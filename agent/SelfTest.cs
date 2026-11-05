@@ -99,6 +99,16 @@ namespace VpnGuard
                 St(AppPathOk("agent/Core.cs") && AppPathOk("web/index.html") && AppPathOk("VpnGuard.ps1") && AppPathOk("config-schema.txt"), "обновление: файлы приложения принимаются");
                 St(!AppPathOk("../x.ps1") && !AppPathOk("config.json") && !AppPathOk("data/x.ps1") && !AppPathOk("bin/VpnGuardAgent.exe") && !AppPathOk("C:/x.ps1") && !AppPathOk("x.exe"), "обновление: опасные пути и чужие файлы отброшены");
 
+                // ---- самообновление: пробная сборка нового кода — с ошибкой не проходит, правильный проходит
+                if (CscPath().Length > 0) {
+                    var stage = Path.Combine(Root, "stage"); Directory.CreateDirectory(Path.Combine(stage, "agent"));
+                    File.WriteAllText(Path.Combine(stage, "agent", "Good.cs"), "static class P { static void Main() { } }");
+                    St(AppTryBuild(stage, "t1", new[] { Path.Combine("agent", "Good.cs") }, "exe", new string[0]) == null, "обновление: правильный новый код собирается");
+                    File.WriteAllText(Path.Combine(stage, "agent", "Bad.cs"), "static class P { static void Main() { int x = ; } }");
+                    var be = AppTryBuild(stage, "t2", new[] { Path.Combine("agent", "Bad.cs") }, "exe", new string[0]);
+                    St(be != null && be.Contains("error"), "обновление: новый код с ошибкой не проходит пробную сборку");
+                }
+
                 // ---- подпись установщиков (компоненты, MeduzaVPN): неподписанный файл — «не подписан»; подписанный — с верным издателем
                 var unsigned = Path.Combine(Root, "unsigned.exe"); File.WriteAllBytes(unsigned, new byte[] { 0x4D, 0x5A, 0, 0 });
                 St(SignStatus(unsigned) != "Valid" && !SignedBy(unsigned, "WireGuard LLC"), "подпись: неподписанный файл не проходит проверку");
