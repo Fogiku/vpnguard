@@ -415,6 +415,14 @@ namespace VpnGuard
                 if (File.Exists(f)) Bytes(ctx, 200, File.ReadAllBytes(f), "text/html; charset=utf-8"); else Text(ctx, 404, "нет файла web\\index.html");
                 return;
             }
+            // стили и скрипты веб-интерфейса: только файлы web\имя.js|css (без подпапок и «..»)
+            var asset = Regex.Match(path, @"^/([a-z0-9_\-]+)\.(js|css)$");
+            if (asset.Success && WebOn()) {
+                string f = Path.Combine(Root, "web", asset.Groups[1].Value + "." + asset.Groups[2].Value);
+                if (File.Exists(f)) Bytes(ctx, 200, File.ReadAllBytes(f), asset.Groups[2].Value == "js" ? "application/javascript; charset=utf-8" : "text/css; charset=utf-8");
+                else Text(ctx, 404, "нет файла web\\" + asset.Groups[0].Value.TrimStart('/'));
+                return;
+            }
             if (path == "/api/login" && req.HttpMethod == "POST") {
                 if (Banned(ip)) { JsonOut(ctx, Err("слишком много попыток, подождите 15 минут"), 403); return; }
                 var b = Body(req); string pw = WebPass();

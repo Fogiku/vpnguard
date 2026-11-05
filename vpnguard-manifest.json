@@ -1,8 +1,8 @@
 {
-    "version":  "3.29.0",
-    "build":  "20261105-1500",
+    "version":  "3.30.0",
+    "build":  "20261105-1503",
     "notes":  "",
-    "date":  "2026-11-05T15:00:12.1770881+03:00",
+    "date":  "2026-11-05T15:03:35.3118870+03:00",
     "files":  [
                   {
                       "path":  "agent/Amnezia.cs",
@@ -151,8 +151,8 @@
                   },
                   {
                       "path":  "Test.ps1",
-                      "sha256":  "7720fec2f8bc5d3da07d2794300f933d354e8bf413c9bae060a63e831a1d8dd0",
-                      "size":  28315
+                      "sha256":  "94609868499e13e4568d7828156fe1b55b1c5a436f5704dcdda8029bec6dfc78",
+                      "size":  28540
                   },
                   {
                       "path":  "Tray.cs",
@@ -176,18 +176,33 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "21dce3d0041551e9344f304248caff31d5b223e597e35c0e2e52b1ebe8a8c865",
+                      "sha256":  "ef2bc18cd114b8c99c2f8843850a1efa313e35e375b95302932d468a46a2dd68",
                       "size":  76453
                   },
                   {
                       "path":  "Web.cs",
-                      "sha256":  "cebda7fc0be44922c2b60f43d30aacc2c408ea5ead55bd5fdbd2bea4d3a03188",
-                      "size":  58609
+                      "sha256":  "6c761bdc6efb56d2ec04eb5086e81019feb86c62e1f2bb396c3cfd145106c259",
+                      "size":  59303
+                  },
+                  {
+                      "path":  "web/app.js",
+                      "sha256":  "3f9a7579146fd8dd0fb765609097c93f064593986408bd68a534459f408da718",
+                      "size":  56880
+                  },
+                  {
+                      "path":  "web/flow.js",
+                      "sha256":  "beeeb2f3b1860169fab01dd9cad68e475226d44e728d665fbb2b7e08f8d88d55",
+                      "size":  23835
                   },
                   {
                       "path":  "web/index.html",
-                      "sha256":  "899e88579158f56c7909755df738e79c9d5d41a9c9f99901c571d3b30aab6250",
-                      "size":  97111
+                      "sha256":  "4a950dece46f557ea9116ec37186b6d6d8daff7954541a18f2b12058f2fad274",
+                      "size":  1996
+                  },
+                  {
+                      "path":  "web/style.css",
+                      "sha256":  "9a1fb85b671b40ff38d73a2b68ab060a1df8bfcc367745bb404cfe4c91cb9ee3",
+                      "size":  14838
                   },
                   {
                       "path":  "Wg.ps1",

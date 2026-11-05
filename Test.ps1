@@ -40,6 +40,7 @@ if (Test-Path $web) {
     $h = [IO.File]::ReadAllText($web)
     if ($h -notmatch '</html>\s*$') { Fail 'web\index.html: файл обрезан' }
     if ($h -match '(src|href)="https?://') { Fail 'web\index.html: внешние ссылки на скрипты/стили — веб-интерфейс должен работать без интернета' }
+    foreach ($m in [regex]::Matches($h, '(?:src|href)="([^"]+\.(?:js|css))"')) { if (-not (Test-Path (Join-Path $Root ('web\' + $m.Groups[1].Value)))) { Fail "web\index.html: нет файла web\$($m.Groups[1].Value)" } }
 }
 if (-not $fail.Count) { Ok "файлов: $($files.Count), без синтаксических ошибок" }
 
