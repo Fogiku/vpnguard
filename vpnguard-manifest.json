@@ -1,8 +1,8 @@
 {
-    "version":  "3.24.0",
-    "build":  "20261105-1422",
+    "version":  "3.25.0",
+    "build":  "20261105-1428",
     "notes":  "",
-    "date":  "2026-11-05T14:22:59.0411792+03:00",
+    "date":  "2026-11-05T14:28:40.3105041+03:00",
     "files":  [
                   {
                       "path":  "Agent.cs",
@@ -26,18 +26,18 @@
                   },
                   {
                       "path":  "agent/Commands.cs",
-                      "sha256":  "27b76c6e1a4ae1fcf932b1215019383933abaf82fe4053f0015572b77ec97fca",
-                      "size":  6231
+                      "sha256":  "fe87e0f81eab180ed0197f554de0c7aa1122a80fed950529a011d150323f5cc0",
+                      "size":  4824
                   },
                   {
                       "path":  "agent/Core.cs",
-                      "sha256":  "89c43e3236af0fd987a0fc57f296dc01fdd6ebb7ce9ea748e6900161f2473bcb",
-                      "size":  20950
+                      "sha256":  "0ce86ffdb4efacc41ad36facef25a69710d3c9b37e9ae91454c2dc28ba986737",
+                      "size":  21344
                   },
                   {
                       "path":  "agent/Dual.cs",
-                      "sha256":  "50d0c0dd0789345c4aeadd080f1730259cc2c564ad2443d73daf200703337040",
-                      "size":  17308
+                      "sha256":  "f54dcc5a8518d21cbfffb92ee3a2c61cfb2ec46009b7c76009378edce4c1736e",
+                      "size":  17305
                   },
                   {
                       "path":  "agent/Ics.cs",
@@ -56,8 +56,13 @@
                   },
                   {
                       "path":  "agent/Mode.cs",
-                      "sha256":  "8f3ecf415eaf5680a4fd113d2574b81489c725f62e9532cb97885e0fae440b5c",
-                      "size":  3707
+                      "sha256":  "d1400776c44937c7183772e6d823fb12a01e355766c824f5dd77044dfbf6970d",
+                      "size":  3726
+                  },
+                  {
+                      "path":  "agent/Modules.cs",
+                      "sha256":  "5ee76dc46b7efc97d0146919215f1fc99c9162fc57ebcc7e0b00654e11a7ac43",
+                      "size":  8464
                   },
                   {
                       "path":  "agent/PsPart.cs",
@@ -66,8 +71,8 @@
                   },
                   {
                       "path":  "agent/Snapshot.cs",
-                      "sha256":  "aec8feadb8087ff0e47869bb42bc5495c950c4cf751bde85dda89b863fa1c231",
-                      "size":  26372
+                      "sha256":  "ac4af74942658db75c81cf1312c32204ff04555d9942aaeccf5b467f6dbaba8f",
+                      "size":  26738
                   },
                   {
                       "path":  "agent/Traffic.cs",
@@ -166,7 +171,7 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "08ce5c8405a3ad7b6b1c574b588c21dc6bd374d491ad9f51510f01f38635156b",
+                      "sha256":  "203bb2f66caf7eafad973607a4b41c53d81e5e00acb4f29370706ac7c6176d06",
                       "size":  82234
                   },
                   {

@@ -23,46 +23,30 @@ namespace VpnGuard
 {
     public static partial class Agent
     {
-        // ---------------------------------------------------------------- команды
-        static readonly string[] OwnCmds = { "check-now", "reconnect", "reconnect-meduza", "reconnect-awg", "restart-meduza", "restart-wg", "reapply-ics", "meduza-test", "meduza-catalog", "meduza-proto-reset", "dual-switch",
-            "zapret-on", "zapret-off", "zapret-check", "zapret-releases", "zapret-update", "zapret-reload", "zapret-test" };
-        static void Commands()
+        // ---------------------------------------------------------------- команды туннелей (раздачу команд по модулям ведёт Modules.cs)
+        static void TunnelCmd(string a)
         {
-            var files = Directory.GetFiles(CmdDir, "*.cmd").OrderBy(f => f).ToList();
-            foreach (var f in files) {
-                string a = ""; try { a = File.ReadAllText(f).Trim(); } catch { }
-                if (!OwnCmds.Contains(a)) {                  // остальное — PowerShell (zapret, обновления, установка компонентов …)
-                    try { File.Move(f, Path.Combine(CmdPsDir, Path.GetFileName(f))); } catch { try { File.Delete(f); } catch { } }
-                    PsPartAt = DateTime.MinValue; continue;
-                }
-                try { File.Delete(f); } catch { }
-                Log("Команда из монитора: " + a, "INFO");
-                switch (a) {
-                    case "reconnect":
-                        if (TunnelKind() == "amnezia") { AwgRestarts.Clear(); AwgRestart("по команде из окна"); }
-                        else if (TunnelKind() == "meduza") { MzReconnectCmd(); }
-                        break;
-                    case "reconnect-meduza": MzReconnectCmd(); break;
-                    case "reconnect-awg": AwgRestarts.Clear(); AwgRestart("по команде из окна"); break;
-                    case "restart-meduza": Restarts.Clear(); MzRestart("по команде из монитора"); break;
-                    case "restart-wg": SvcRestart(CfgStr("ws4w.serviceName", "")); ForceIcs = true; break;
-                    case "reapply-ics": ForceIcs = true; break;
-                    case "meduza-test": MzProtoTest(); break;
-                    case "meduza-catalog": MzCatalog(true); break;
-                    case "meduza-proto-reset": if (MzOverride.Length > 0) { MzReturnAt = DateTime.MinValue; MzProtoReturn(); } break;
-                    case "dual-switch":
-                        if (Mode() == "dual") { string to = OtherKind(DualAct()); if (KindOk(to)) DualSwitch(to, "вручную из окна"); else Log("Два туннеля: " + ModeNames[to] + " сейчас не пропускает трафик — не переключаю", "WARN"); }
-                        break;
-                    default: try { ZCommand(a); } catch (Exception e) { Log("zapret: " + a + ": " + e.Message, "ERROR"); } break;
-                }
+            switch (a) {
+                case "reconnect":
+                    if (TunnelKind() == "amnezia") { AwgRestarts.Clear(); AwgRestart("по команде из окна"); }
+                    else if (TunnelKind() == "meduza") { MzReconnectCmd(); }
+                    break;
+                case "reconnect-meduza": MzReconnectCmd(); break;
+                case "reconnect-awg": AwgRestarts.Clear(); AwgRestart("по команде из окна"); break;
+                case "restart-meduza": Restarts.Clear(); MzRestart("по команде из монитора"); break;
+                case "meduza-test": MzProtoTest(); break;
+                case "meduza-catalog": MzCatalog(true); break;
+                case "meduza-proto-reset": if (MzOverride.Length > 0) { MzReturnAt = DateTime.MinValue; MzProtoReturn(); } break;
+                case "dual-switch":
+                    if (Mode() == "dual") { string to = OtherKind(DualAct()); if (KindOk(to)) DualSwitch(to, "вручную из окна"); else Log("Два туннеля: " + ModeNames[to] + " сейчас не пропускает трафик — не переключаю", "WARN"); }
+                    break;
             }
-            if (files.Count > 0) Snapshot();
         }
         static void MzReconnectCmd() { MzDisconnect(); Thread.Sleep(3000); if (!MzConnect(0)) MzRestart("переподключение из монитора не удалось"); }
         // перезапуск службы, которая не принимает «стоп» (AmneziaVPN-service): штатно не вышло — завершить её процесс
         // перенастроить раздачу, только если этот туннель сейчас несёт трафик (резерв перезапустился — раздачу не трогать, клиенты не рвутся;
         // если у раздаваемого адаптера сменилось имя, SharingWatch и так это увидит)
-        static void IcsIfUplink(string kind) { if (TunnelKind() == kind) ForceIcs = true; }
+        static void IcsIfUplink(string kind) { if (TunnelKind() == kind) RequestIcs(); }
         static void SvcHardRestart(string name)
         {
             var s = Svc(name); if (s == null) return;

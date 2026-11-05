@@ -47,7 +47,7 @@ namespace VpnGuard
         static DateTime CatalogAt = DateTime.MinValue, MzFallbackAt = DateTime.MinValue, MzReturnAt = DateTime.MinValue, MzProtoSince = DateTime.MinValue, LastSnapshot = DateTime.MinValue;
         static string LastRestartReason = "", AwgLastReason = "", MzOverride = "", MzAdapter = "", Activity = "", LastMode = null;
         static DateTime ActivitySince = DateTime.MinValue;
-        static bool ForceIcs;
+        static volatile bool ForceIcs;          // раздаче — перенастроиться (ставить через RequestIcs)
         static Dictionary<string, object> Catalog, ProtoTest;
         static readonly List<Dictionary<string, object>> History = new List<Dictionary<string, object>>();
         static Process PsPart; static DateTime PsPartAt = DateTime.MinValue;
@@ -125,21 +125,21 @@ namespace VpnGuard
             MeduzaStartedAt = DateTime.Now;
             new Thread(LiveLoop) { IsBackground = true, Name = "live" }.Start();
             new Thread(InetLoop) { IsBackground = true, Name = "inet" }.Start();
+            StartModules();
+            // главный поток: настройки, команды по модулям, обновление кода, зависшие модули, чистка журналов
+            DateTime sigAt = DateTime.Now, cleanAt = DateTime.MinValue;
             while (true) {
-                var t0 = DateTime.Now;
-                PerfRun("LoadCfg", () => LoadCfg(false));
-                if (SourceSig() != CodeSig) { Log("Агент C#: код обновлён — перезапуск на новой версии", "INFO"); HandOver(); return; }
-                foreach (var step in new Action[] { Commands, WgWatch, WgClientsWatch, VpnWatch, SharingWatch, ZapretWatch, ClientZapretWatch, LanWatch, PsPartWatch }) {
-                    try { PerfRun(step.Method.Name, step); } catch (Exception e) { Log("Агент C#: " + step.Method.Name + ": " + e.Message, "ERROR"); }
-                    if ((DateTime.Now - LastSnapshot).TotalSeconds >= 10) PerfRun("Snapshot", Snapshot);
-                }
-                Activity = ""; PerfRun("Snapshot", Snapshot);
-                if (DateTime.Now.Hour == 3 && DateTime.Now.Minute < 2) RemoveOldLogs();
-                int iv = Math.Max(10, CfgInt("checkIntervalSec", 30)) * 1000;
-                while ((DateTime.Now - t0).TotalMilliseconds < iv) {
-                    Thread.Sleep(1000);
-                    if (Directory.GetFiles(CmdDir, "*.cmd").Length > 0) break;
-                }
+                Thread.Sleep(1000);
+                try {
+                    LoadCfg(false);
+                    DispatchCommands();
+                    WatchModules();
+                    if ((DateTime.Now - sigAt).TotalSeconds >= 10) {
+                        sigAt = DateTime.Now;
+                        if (SourceSig() != CodeSig) { Log("Агент C#: код обновлён — перезапуск на новой версии", "INFO"); Stopping = true; HandOver(); return; }
+                    }
+                    if (DateTime.Now.Hour == 3 && DateTime.Now.Minute < 2 && (DateTime.Now - cleanAt).TotalMinutes > 10) { cleanAt = DateTime.Now; RemoveOldLogs(); }
+                } catch (Exception e) { Log("Агент C#: главный поток: " + e.Message, "ERROR"); Thread.Sleep(5000); }
             }
         }
 
@@ -204,7 +204,10 @@ namespace VpnGuard
             int keep = CfgInt("logRetentionDays", 14);
             foreach (var f in Directory.GetFiles(LogDir, "vpnguard-*.log")) { try { if ((DateTime.Now - File.GetLastWriteTime(f)).TotalDays > keep) File.Delete(f); } catch { } }
         }
-        static void SetActivity(string t) { Activity = t; ActivitySince = DateTime.Now; Snapshot(); }
+        // что агент делает сейчас (видно в окне и вебе); модуль, начавший действие, сам сбрасывает его по окончании проверки
+        [ThreadStatic] static string CurModule;
+        static string ActivityBy = "";
+        static void SetActivity(string t) { Activity = t; ActivitySince = DateTime.Now; ActivityBy = CurModule ?? ""; Wake("status"); }
 
         // ---------------------------------------------------------------- помощники: процессы, адаптеры, сеть
         class ExeResult { public int Code; public string Out = "", Err = ""; }

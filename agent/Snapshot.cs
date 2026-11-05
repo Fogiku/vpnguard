@@ -34,10 +34,14 @@ namespace VpnGuard
             try { using (var fs = new FileStream(PsStatusPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete)) using (var rd = new StreamReader(fs, Encoding.UTF8)) return Json.DeserializeObject(rd.ReadToEnd()) as Dictionary<string, object>; }
             catch { return null; }
         }
+        static readonly object SnapLock = new object(); static string SnapErr = "";
         static void Snapshot()
         {
-            LastSnapshot = DateTime.Now;
-            try { SnapshotCore(); } catch (Exception e) { Log("Агент C#: состояние: " + e.Message, "ERROR"); }
+            lock (SnapLock) {
+                LastSnapshot = DateTime.Now;
+                try { SnapshotCore(); SnapErr = ""; }
+                catch (Exception e) { if (e.Message != SnapErr) Log("Агент C#: состояние: " + e.Message, "ERROR"); SnapErr = e.Message; }      // одна и та же ошибка — в журнал один раз
+            }
         }
         static void SnapshotCore()
         {
@@ -63,14 +67,14 @@ namespace VpnGuard
             string started = ""; try { if (proc != null) started = proc.StartTime.ToString("dd.MM HH:mm"); } catch { }
             var meduza = Comp(mL, mS, new[] { "Версия " + ver + (remoteVer.Length > 0 && remoteVer != ver ? " (есть " + remoteVer + ")" : ""), proc != null ? "PID " + proc.Id + (started.Length > 0 ? ", с " + started : "") : "процесс отсутствует",
                 "Канал CLI: " + (pipe ? "доступен" : "нет") + " · протокол " + MzProtocol() + (MzOverride.Length > 0 ? " (запасной вместо " + CfgStr("meduza.protocol", "ultra") + ")" : ""),
-                "Перезапуски: " + Restarts.Count(d => d > DateTime.Now.AddMinutes(-30)) + " за 30 мин, посл. " + When(LastRestart) }, new List<object[]> {
+                "Перезапуски: " + Restarts.ToArray().Count(d => d > DateTime.Now.AddMinutes(-30)) + " за 30 мин, посл. " + When(LastRestart) }, new List<object[]> {
                 Kv("Версия", ver), Kv("Доступная версия", remoteVer.Length > 0 ? remoteVer : "—"), Kv("Последняя проверка обновлений", ps.ContainsKey("meduzaLastCheck") ? ps["meduzaLastCheck"] : "—"),
                 Kv("Процесс", proc != null ? "PID " + proc.Id + (responding ? "" : " (не отвечает)") : "не запущен"), Kv("Память", proc != null ? (proc.WorkingSet64 / 1048576) + " МБ" : "—"),
                 Kv("Канал CLI", pipe ? "доступен" : "нет — включите управление из командной строки"),
                 Kv("VPN (страна)", CfgStr("meduza.serviceId", "").Length > 0 ? CfgStr("meduza.serviceId", "") : "по умолчанию (единственный на аккаунте)"),
                 Kv("Протокол", MzProtocol() + (MzOverride.Length > 0 ? " — запасной, выбранный " + CfgStr("meduza.protocol", "ultra") + " не работал (с " + When(MzProtoSince) + ")" : "") + " · адаптер «" + MzAdapterName() + "»"),
                 Kv("Автоподбор протокола", CfgBool("meduza.autoProtocol", true) ? "включён — при потере связи пробует другие протоколы" : "выключен"),
-                Kv("Перезапусков за 30 мин", Restarts.Count(d => d > DateTime.Now.AddMinutes(-30)) + " из " + CfgInt("meduza.maxRestartsPer30Min", 5) + " допустимых"),
+                Kv("Перезапусков за 30 мин", Restarts.ToArray().Count(d => d > DateTime.Now.AddMinutes(-30)) + " из " + CfgInt("meduza.maxRestartsPer30Min", 5) + " допустимых"),
                 Kv("Перезапусков с запуска агента", RestartCount), Kv("Последний перезапуск", When(LastRestart)), Kv("Причина", LastRestartReason.Length > 0 ? LastRestartReason : "—") });
             meduza["serviceId"] = CfgStr("meduza.serviceId", ""); meduza["protocol"] = CfgStr("meduza.protocol", "ultra"); meduza["adapter"] = MzAdapterName();
             meduza["catalog"] = Catalog; meduza["protoTest"] = ProtoTest; meduza["protocolNow"] = MzProtocol(); meduza["protocolOverride"] = MzOverride;
@@ -158,7 +162,7 @@ namespace VpnGuard
             long avMem = 0; try { if (avProc != null) avMem = avProc.WorkingSet64 / 1048576; } catch { }
             var awg = Comp(aL, aS, new[] { inst ? "AmneziaVPN " + aVer + " · " + (avProc != null ? "PID " + avProc.Id : "не запущен") : "AmneziaVPN не установлен",
                 "Туннель: " + (aUp ? avNic.Name + " · IP " + aIp : avNic != null ? avNic.Name + " — " + avNic.OperationalStatus : "не подключён"),
-                "Трафик: " + aTr + ", проверка " + When(AwgTrafficAt) + (AwgDiag != null && !AwgDiag.Ok ? " — " + AwgDiag.Short : ""), "Перезапуски: " + AwgRestarts.Count(d => d > DateTime.Now.AddMinutes(-30)) + " за 30 мин, посл. " + When(AwgLastRestart), agTxt }, new List<object[]> {
+                "Трафик: " + aTr + ", проверка " + When(AwgTrafficAt) + (AwgDiag != null && !AwgDiag.Ok ? " — " + AwgDiag.Short : ""), "Перезапуски: " + AwgRestarts.ToArray().Count(d => d > DateTime.Now.AddMinutes(-30)) + " за 30 мин, посл. " + When(AwgLastRestart), agTxt }, new List<object[]> {
                 Kv("Диагностика туннеля", AwgDiag == null ? "ещё не было" : AwgDiag.At.ToString("HH:mm:ss") + " — " + AwgDiag.Text),
                 Kv("Защита локальной сети", agTxt + (AgBaseAt != DateTime.MinValue ? " · без AmneziaVPN: роутер " + (AgGwBase ? "отвечал" : "не отвечал") + ", клиентов WG на связи " + Math.Max(0, AgPeersBase) : "")),
                 Kv("Приложение AmneziaVPN", inst ? "установлено · версия " + aVer : "не установлено (" + avExe + ")"),
@@ -167,7 +171,7 @@ namespace VpnGuard
                 Kv("Используется", mode == "dual" ? (kind == "amnezia" ? "да — активный из двух туннелей" : "да — резерв из двух туннелей") : used ? "да — режим AmneziaVPN" : "нет (другой режим)"),
                 Kv("Адаптер туннеля", avNic != null ? avNic.Name + " · " + avNic.Description + " · " + avNic.OperationalStatus : "не найден (туннель не подключён)"), Kv("IP", aIp ?? "—"),
                 Kv("Проверка трафика", aTr + " · " + When(AwgTrafficAt)), Kv("Сбоев проверки подряд", AwgProbeFailures + " (перезапуск после " + CfgInt("meduza.probeFailuresBeforeReconnect", 3) + ")"),
-                Kv("Перезапусков за 30 мин", AwgRestarts.Count(d => d > DateTime.Now.AddMinutes(-30)) + " из " + CfgInt("meduza.maxRestartsPer30Min", 5) + " допустимых"),
+                Kv("Перезапусков за 30 мин", AwgRestarts.ToArray().Count(d => d > DateTime.Now.AddMinutes(-30)) + " из " + CfgInt("meduza.maxRestartsPer30Min", 5) + " допустимых"),
                 Kv("Последний перезапуск", When(AwgLastRestart)), Kv("Причина", AwgLastReason.Length > 0 ? AwgLastReason : "—"),
                 Kv("Сервер и протокол", "выбираются в приложении AmneziaVPN; там же включите «Автоподключение»") });
             awg["installed"] = inst; awg["running"] = avProc != null; awg["active"] = avNic != null ? avNic.Name : ""; awg["adapter"] = avNic != null ? avNic.Name : "";
@@ -194,7 +198,7 @@ namespace VpnGuard
                 { "activitySince", busy ? ActivitySince.ToString("o") : "" }, { "agentStarted", StartedAt.ToString("o") }, { "agentPid", Process.GetCurrentProcess().Id },
                 { "agentVersion", Version + " C#" }, { "engine", "csharp" }, { "intervalSec", CfgInt("checkIntervalSec", 30) }, { "lastUpdateCheck", ps.ContainsKey("meduzaLastCheck") ? ps["meduzaLastCheck"] : "" },
                 { "inet", inet }, { "meduza", meduza }, { "ultra", ultra }, { "wg", wg }, { "ics", icsC }, { "zapret", zapret },
-                { "perf", PerfInfo() }, { "traffic", new Dictionary<string, object> { { "names", adNames }, { "rate", TrafRate }, { "lan", new Dictionary<string, object> { { "on", LanH != WdInvalid }, { "net", LanNet }, { "error", LanError } } }, { "days", TrafDays.Reverse().Take(14).Reverse().Select(kv => (object)new Dictionary<string, object> { { "d", kv.Key }, { "u", kv.Value["u"] }, { "w", kv.Value["w"] }, { "p", kv.Value["p"] } }).ToArray() } } },
+                { "perf", PerfInfo() }, { "modules", ModulesInfo() }, { "traffic", new Dictionary<string, object> { { "names", adNames }, { "rate", TrafRate }, { "lan", new Dictionary<string, object> { { "on", LanH != WdInvalid }, { "net", LanNet }, { "error", LanError } } }, { "days", TrafDays.Reverse().Take(14).Reverse().Select(kv => (object)new Dictionary<string, object> { { "d", kv.Key }, { "u", kv.Value["u"] }, { "w", kv.Value["w"] }, { "p", kv.Value["p"] } }).ToArray() } } },
                 { "counters", new Dictionary<string, object> { { "restarts", RestartCount }, { "reconnects", ReconnectCount }, { "icsFixes", IcsFixCount } } },
                 { "vpn", new Dictionary<string, object> { { "mode", mode }, { "name", ModeNames[mode] }, { "uplink", upN }, { "kind", kind }, { "primary", DualPrimary() } } },
                 { "amnezia", awg }, { "software", ps.ContainsKey("software") ? ps["software"] : new object[0] }, { "remote", ps.ContainsKey("remote") ? ps["remote"] : null }, { "app", ps.ContainsKey("app") ? ps["app"] : null },
