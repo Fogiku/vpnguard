@@ -395,6 +395,9 @@ namespace VpnGuard
         }
         static void MzReconnectCmd() { MzDisconnect(); Thread.Sleep(3000); if (!MzConnect(0)) MzRestart("переподключение из монитора не удалось"); }
         // перезапуск службы, которая не принимает «стоп» (AmneziaVPN-service): штатно не вышло — завершить её процесс
+        // перенастроить раздачу, только если этот туннель сейчас несёт трафик (резерв перезапустился — раздачу не трогать, клиенты не рвутся;
+        // если у раздаваемого адаптера сменилось имя, SharingWatch и так это увидит)
+        static void IcsIfUplink(string kind) { if (TunnelKind() == kind) ForceIcs = true; }
         static void SvcHardRestart(string name)
         {
             var s = Svc(name); if (s == null) return;
@@ -570,7 +573,7 @@ namespace VpnGuard
                 MzOverride = (p == chosen || p == "meduza-" + chosen) ? "" : p;
                 bool conn = MzConnect(60);
                 if (conn && MzTraffic()) {
-                    MzProtoSince = DateTime.Now; MzReturnAt = DateTime.Now; ProbeFailures = 0; DownTicks = 0; ForceIcs = true;
+                    MzProtoSince = DateTime.Now; MzReturnAt = DateTime.Now; ProbeFailures = 0; DownTicks = 0; IcsIfUplink("meduza");
                     Log(MzOverride.Length > 0 ? "MeduzaVPN: протокол " + cur + " не работает — переключился на " + p + " (выбран в настройках: " + chosen + "; агент будет пробовать вернуть его)" : "MeduzaVPN: снова работает выбранный протокол " + p, "WARN");
                     return true;
                 }
@@ -592,9 +595,9 @@ namespace VpnGuard
             MzReturnAt = DateTime.Now; string alt = MzOverride, chosen = CfgStr("meduza.protocol", "ultra");
             Log("MeduzaVPN: пробую вернуть выбранный протокол " + chosen + " (сейчас работает " + alt + ")", "INFO");
             MzDisconnect(); Thread.Sleep(2000); MzOverride = "";
-            if (MzConnect(60) && MzTraffic()) { Log("MeduzaVPN: выбранный протокол " + chosen + " снова работает", "INFO"); ForceIcs = true; return; }
+            if (MzConnect(60) && MzTraffic()) { Log("MeduzaVPN: выбранный протокол " + chosen + " снова работает", "INFO"); IcsIfUplink("meduza"); return; }
             Log("MeduzaVPN: " + chosen + " по-прежнему не работает — остаюсь на " + alt, "WARN");
-            MzOverride = alt; MzDisconnect(); Thread.Sleep(2000); MzConnect(0); ForceIcs = true;
+            MzOverride = alt; MzDisconnect(); Thread.Sleep(2000); MzConnect(0); IcsIfUplink("meduza");
         }
         static void MzProtoTest()
         {
@@ -622,7 +625,7 @@ namespace VpnGuard
             }
             ProtoTest["running"] = false; ProtoTest["current"] = ""; ProtoTest["at"] = DateTime.Now.ToString("dd.MM HH:mm");
             SetActivity("возвращаю протокол " + MzProtocol());
-            MzDisconnect(); Thread.Sleep(2000); MzConnect(0); MzResolveAdapter(); ForceIcs = true;
+            MzDisconnect(); Thread.Sleep(2000); MzConnect(0); MzResolveAdapter(); IcsIfUplink("meduza");
             var ok = res.Cast<Dictionary<string, object>>().Where(x => (bool)x["ok"]).OrderBy(x => (int)x["pingMs"]).Select(x => x["protocol"] + " (" + x["pingMs"] + " мс)").ToList();
             Log("MeduzaVPN: тест протоколов завершён — работают: " + (ok.Count > 0 ? string.Join(", ", ok) : "ни один"), "INFO");
         }
@@ -775,7 +778,7 @@ namespace VpnGuard
             AvpnStop(); Thread.Sleep(3000);
             try { AvpnStart(); ReconnectCount++; } catch (Exception e) { Log("AmneziaVPN: " + e.Message, "ERROR"); return; }
             var n = WaitAvpnUp(60);
-            if (n != null) { Log("AmneziaVPN: туннель поднят (" + n + ")", "INFO"); ForceIcs = true; AwgDownTicks = 0; }
+            if (n != null) { Log("AmneziaVPN: туннель поднят (" + n + ")", "INFO"); IcsIfUplink("amnezia"); AwgDownTicks = 0; }
             else Log("AmneziaVPN: после перезапуска туннель не поднялся — проверьте, что в AmneziaVPN включено «Автоподключение»", "WARN");
         }
         // выбран другой режим: туннель AmneziaVPN не должен работать (closeApp — закрыть и само приложение)
@@ -896,7 +899,7 @@ namespace VpnGuard
             Log("Защита AmneziaVPN: AmneziaVPN отрезал локальную сеть (" + bad + "; без него всё вернулось). Он отключён на " + min + " мин. " +
                 "В приложении AmneziaVPN выключите Kill Switch (или разрешите в нём локальную сеть), затем снова выберите режим", "ERROR");
             if (Mode() == "amnezia") { CfgSet("vpn.mode", "meduza"); Log("Защита AmneziaVPN: режим переключён на MeduzaVPN, чтобы клиенты не остались без VPN", "WARN"); }
-            ForceIcs = true;
+            IcsIfUplink("amnezia");
         }
         static bool Wait(Func<bool> ok, int sec)
         {
