@@ -147,5 +147,21 @@ namespace VpnGuard
                 } catch { Thread.Sleep(5000); }
             }
         }
+        // скорость (байт/с) по приращению счётчиков между снимками состояния
+        static readonly Dictionary<string, KeyValuePair<DateTime, long[]>> RatePrev = new Dictionary<string, KeyValuePair<DateTime, long[]>>();
+        static long[] RateOf(string key, params long[] vals)
+        {
+            lock (RatePrev) {
+                KeyValuePair<DateTime, long[]> p; var now = DateTime.UtcNow; var res = new long[vals.Length];
+                if (RatePrev.TryGetValue(key, out p) && p.Value.Length == vals.Length) {
+                    double dt = (now - p.Key).TotalSeconds;
+                    if (dt < 1) return RatePrevRes.ContainsKey(key) ? RatePrevRes[key] : res;
+                    for (int i = 0; i < vals.Length; i++) res[i] = vals[i] >= p.Value[i] ? (long)((vals[i] - p.Value[i]) / dt) : 0;
+                }
+                RatePrev[key] = new KeyValuePair<DateTime, long[]>(now, vals); RatePrevRes[key] = res;
+                return res;
+            }
+        }
+        static readonly Dictionary<string, long[]> RatePrevRes = new Dictionary<string, long[]>();
     }
 }

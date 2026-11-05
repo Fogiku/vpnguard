@@ -1,8 +1,8 @@
 {
-    "version":  "3.30.0",
-    "build":  "20261105-1505",
+    "version":  "3.31.0",
+    "build":  "20261105-1507",
     "notes":  "",
-    "date":  "2026-11-05T15:05:55.5949887+03:00",
+    "date":  "2026-11-05T15:07:06.7485162+03:00",
     "files":  [
                   {
                       "path":  "agent/Amnezia.cs",
@@ -16,8 +16,8 @@
                   },
                   {
                       "path":  "agent/ClientZapret.cs",
-                      "sha256":  "9d8e353c05d6e24d41e47d23182cec90b3ba7e7a69412bcd38e3fb8e8dbbb78c",
-                      "size":  81485
+                      "sha256":  "de7eaa5c865fc6ee396d13398b956c871d94680580a70d3109953c339dd3b51f",
+                      "size":  37972
                   },
                   {
                       "path":  "agent/Commands.cs",
@@ -28,6 +28,26 @@
                       "path":  "agent/Core.cs",
                       "sha256":  "ca519fc768f41e4568e2f67e9d3f538801e5121c8f36a46642a5e1ae1f1942ac",
                       "size":  21241
+                  },
+                  {
+                      "path":  "agent/CzHosts.cs",
+                      "sha256":  "f1920bff8c00d1f79d44537a69e30ef39a21d628d5c226a0affd450a397355c7",
+                      "size":  11574
+                  },
+                  {
+                      "path":  "agent/CzRelay.cs",
+                      "sha256":  "d7dbbbe21f0991e4731a88831ae2f80f748162f80d0cc931052c9fd6898fb62e",
+                      "size":  14717
+                  },
+                  {
+                      "path":  "agent/CzRoute.cs",
+                      "sha256":  "08333961ded3cbad9e8dd230823b6bbf39a5721cb8c4fc3304041736297f282e",
+                      "size":  13070
+                  },
+                  {
+                      "path":  "agent/Divert.cs",
+                      "sha256":  "4fab4a054db76c00e2817006ddf650f0bedf34c140802dd3b3864c7cea629713",
+                      "size":  5545
                   },
                   {
                       "path":  "agent/Dual.cs",
@@ -81,8 +101,8 @@
                   },
                   {
                       "path":  "agent/Traffic.cs",
-                      "sha256":  "9498cb655db4b04fcf971046afdf37ef357e1daf0725d990f793281b37685486",
-                      "size":  11771
+                      "sha256":  "ccd75253be48fe4e3573f1ba5b664b9ab289cff3809cecc430868db133d3b9eb",
+                      "size":  12923
                   },
                   {
                       "path":  "agent/TunnelDiag.cs",
@@ -176,7 +196,7 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "ef2bc18cd114b8c99c2f8843850a1efa313e35e375b95302932d468a46a2dd68",
+                      "sha256":  "2207fd956f7da9783128711038a8cba5aa701c3c8a6db3b40dc939cab4daf386",
                       "size":  76453
                   },
                   {
