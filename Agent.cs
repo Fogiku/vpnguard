@@ -223,10 +223,21 @@ namespace VpnGuard
         {
             try { var p = Process.Start(new ProcessStartInfo(file, args) { UseShellExecute = false, CreateNoWindow = true }); if (wait) p.WaitForExit(60000); } catch (Exception e) { Log("Запуск " + file + ": " + e.Message, "ERROR"); }
         }
+        // ---------------------------------------------------------------- кэш медленных запросов Windows (адаптеры, службы, реестр, WMI)
+        static readonly Dictionary<string, KeyValuePair<DateTime, object>> CacheMap = new Dictionary<string, KeyValuePair<DateTime, object>>();
+        static T Cached<T>(string key, double sec, Func<T> f)
+        {
+            KeyValuePair<DateTime, object> e;
+            lock (CacheMap) if (CacheMap.TryGetValue(key, out e) && (DateTime.UtcNow - e.Key).TotalSeconds < sec) return (T)e.Value;
+            var v = f(); lock (CacheMap) CacheMap[key] = new KeyValuePair<DateTime, object>(DateTime.UtcNow, v); return v;
+        }
+        static void Uncache(string key) { lock (CacheMap) CacheMap.Remove(key); }
+        // перечень адаптеров: полный обход Windows дорог (десятки вызовов за цикл) — не чаще раза в 2 с
+        static NetworkInterface[] AllNics() { return Cached("nics", 2, () => { try { return NetworkInterface.GetAllNetworkInterfaces(); } catch { return new NetworkInterface[0]; } }); }
         static NetworkInterface Nic(string name)
         {
             if (string.IsNullOrEmpty(name)) return null;
-            try { return NetworkInterface.GetAllNetworkInterfaces().FirstOrDefault(n => string.Equals(n.Name, name, StringComparison.OrdinalIgnoreCase)); } catch { return null; }
+            try { return AllNics().FirstOrDefault(n => string.Equals(n.Name, name, StringComparison.OrdinalIgnoreCase)); } catch { return null; }
         }
         static bool Up(string name) { var n = Nic(name); return n != null && n.OperationalStatus == OperationalStatus.Up; }
         static string Ipv4(string name)
@@ -294,10 +305,12 @@ namespace VpnGuard
         }
         static ServiceController Svc(string name)
         {
-            try { var s = ServiceController.GetServices().FirstOrDefault(x => string.Equals(x.ServiceName, name, StringComparison.OrdinalIgnoreCase)); return s; } catch { return null; }
+            if (string.IsNullOrEmpty(name)) return null;
+            try { var s = new ServiceController(name); var st = s.Status; return s; } catch { return null; }      // нет такой службы — исключение
         }
-        static void SetAutoStart(string svc) { Exe("sc.exe", "config \"" + svc + "\" start= auto", 30); }
-        static string StartMode(string svc) { try { using (var mo = new ManagementObject("Win32_Service.Name='" + svc.Replace("'", "\\'").Replace("\\", "\\\\") + "'")) return Convert.ToString(mo["StartMode"]); } catch { return ""; } }
+        static void SetAutoStart(string svc) { Exe("sc.exe", "config \"" + svc + "\" start= auto", 30); Uncache("sm:" + svc); }
+        static string StartMode(string svc) { return Cached("sm:" + svc, 300, () => StartModeWmi(svc)); }
+        static string StartModeWmi(string svc) { try { using (var mo = new ManagementObject("Win32_Service.Name='" + svc.Replace("'", "\\'").Replace("\\", "\\\\") + "'")) return Convert.ToString(mo["StartMode"]); } catch { return ""; } }
         static string When(DateTime d)
         {
             if (d == DateTime.MinValue) return "не было";
@@ -314,7 +327,7 @@ namespace VpnGuard
         static string PhysAlias()
         {
             try {
-                foreach (var n in NetworkInterface.GetAllNetworkInterfaces().OrderBy(n => n.NetworkInterfaceType == NetworkInterfaceType.Ethernet ? 0 : 1)) {
+                foreach (var n in AllNics().OrderBy(n => n.NetworkInterfaceType == NetworkInterfaceType.Ethernet ? 0 : 1)) {
                     if (n.OperationalStatus != OperationalStatus.Up || IsTunnel(n.Name)) continue;
                     var gw = n.GetIPProperties().GatewayAddresses.FirstOrDefault(g => g.Address.AddressFamily == AddressFamily.InterNetwork && g.Address.ToString() != "0.0.0.0");
                     if (gw != null) return n.Name;
@@ -465,7 +478,8 @@ namespace VpnGuard
             var loc = MzUninstall("InstallLocation"); if (!string.IsNullOrEmpty(loc)) return Path.Combine(loc, "medusa_vpn.exe");
             return @"C:\Program Files\MeduzaVPN\medusa_vpn.exe";
         }
-        static string MzUninstall(string value)
+        static string MzUninstall(string value) { return Cached("mzu:" + value, 300, () => MzUninstallReg(value)); }
+        static string MzUninstallReg(string value)
         {
             foreach (var root in new[] { @"Software\Microsoft\Windows\CurrentVersion\Uninstall", @"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall" }) {
                 try {
@@ -712,7 +726,8 @@ namespace VpnGuard
             if (!string.IsNullOrEmpty(loc) && File.Exists(Path.Combine(loc, "AmneziaVPN.exe"))) return Path.Combine(loc, "AmneziaVPN.exe");
             return @"C:\Program Files\AmneziaVPN\AmneziaVPN.exe";
         }
-        static string AppUninstall(string nameRx, string value)
+        static string AppUninstall(string nameRx, string value) { return Cached("au:" + nameRx + "|" + value, 300, () => AppUninstallReg(nameRx, value)); }
+        static string AppUninstallReg(string nameRx, string value)
         {
             foreach (var hive in new[] { Registry.LocalMachine, Registry.CurrentUser })
                 foreach (var root in new[] { @"Software\Microsoft\Windows\CurrentVersion\Uninstall", @"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall" }) {
@@ -738,7 +753,7 @@ namespace VpnGuard
             try {
                 var rx = new Regex(AvpnPattern(), RegexOptions.IgnoreCase);
                 var old = OldAwgNames();
-                a = NetworkInterface.GetAllNetworkInterfaces().Where(n => (rx.IsMatch(n.Name) || rx.IsMatch(n.Description)) && !old.Contains(n.Name))
+                a = AllNics().Where(n => (rx.IsMatch(n.Name) || rx.IsMatch(n.Description)) && !old.Contains(n.Name))
                     .OrderBy(n => n.OperationalStatus == OperationalStatus.Up ? 0 : 1).FirstOrDefault();
             } catch { }
             if (a != null) AvpnLastAdapter = a.Name;
@@ -1019,7 +1034,7 @@ namespace VpnGuard
         static readonly List<string[]> EpRoutes = new List<string[]>();     // prefix, ifIndex, gw
         static string AvpnEndpoint()
         {
-            if ((DateTime.Now - AvpnEpAt).TotalSeconds < 60 && AvpnEp.Length > 0) return AvpnEp;
+            if ((DateTime.Now - AvpnEpAt).TotalSeconds < (AvpnEp.Length > 0 ? 300 : 600)) return AvpnEp;     // не нашли — следующая попытка через 10 мин
             AvpnEpAt = DateTime.Now;
             var confs = new List<string>();
             try {
@@ -1074,8 +1089,12 @@ namespace VpnGuard
             AvpnEpPinned = "";
         }
 
+        static string DualSyncSig = ""; static DateTime DualSyncAt = DateTime.MinValue;
         static void DualSyncRoutes()
         {
+            string sig = DualAct() + "|" + string.Join("|", new[] { "meduza", "amnezia" }.Select(k => { var n = KindAdapter(k); return n + ":" + Up(n) + ":" + IfIndexOf(n); }));
+            if (sig == DualSyncSig && (DateTime.Now - DualSyncAt).TotalMinutes < 2) return;
+            DualSyncSig = sig; DualSyncAt = DateTime.Now;
             try { PinEndpoints(); } catch (Exception e) { Log("Два туннеля: сервер AmneziaVPN: " + e.Message, "WARN"); }
             string act = DualAct(); int physM = 25, best = int.MaxValue;
             foreach (var r in Cim("SELECT InterfaceIndex, InterfaceAlias, RouteMetric, NextHop FROM MSFT_NetRoute WHERE DestinationPrefix='0.0.0.0/0' AND AddressFamily=2")) {
@@ -1286,6 +1305,7 @@ namespace VpnGuard
             return res;
         }
         class IcsState { public List<IcsConn> All; public IcsConn Pub, Priv; public bool Ok; }
+        static IcsState IcsLast; static DateTime IcsLastAt = DateTime.MinValue;
         static IcsState IcsStatus()
         {
             string up = UplinkName(), wg = WgIf(); var all = IcsConnections();
@@ -1379,7 +1399,7 @@ namespace VpnGuard
             if (!CfgBool("sharing.enabled", true)) return;
             string up = UplinkName(), wg = WgIf();
             if (string.IsNullOrEmpty(up) || !Up(up) || !Up(wg)) return;
-            string addr = WgServerAddress(); var st = IcsStatus(); string wgIp = Ipv4(wg);
+            string addr = WgServerAddress(); var st = IcsStatus(); IcsLast = st; IcsLastAt = DateTime.UtcNow; string wgIp = Ipv4(wg);
             bool ipOk = addr == null || wgIp == addr || (DateTime.Now - LastIpFix).TotalMinutes < 10;
             if (st.Ok && ipOk && !ForceIcs) return;
             if (!ForceIcs && (DateTime.Now - LastIcsApply).TotalSeconds < 20) return;
@@ -1673,7 +1693,7 @@ namespace VpnGuard
             wg["clientZapret"] = CzSnapshot();
 
             // ICS
-            IcsState ics = null; try { ics = IcsStatus(); } catch { }
+            IcsState ics = IcsLast != null && (DateTime.UtcNow - IcsLastAt).TotalSeconds < 45 ? IcsLast : null; if (ics == null) try { ics = IcsStatus(); } catch { }
             var icsSvc = Svc("SharedAccess"); int iL; string iS;
             if (!CfgBool("sharing.enabled", true)) { iL = 1; iS = "Отключено в config"; } else if (ics == null) { iL = 1; iS = "Нет данных"; } else if (ics.Ok) { iL = 0; iS = "Включена"; } else if ((!uUp && mode != "zapret") || !wUp) { iL = 1; iS = "Ждёт адаптеры"; } else { iL = 2; iS = "Не настроена"; }
             Func<IcsConn, int, string> fi = (c, want) => c == null ? "не найдено" : !c.Enabled ? c.Name + ": общий доступ выключен" : c.Type != want ? c.Name + ": НЕВЕРНАЯ роль" : c.Name + ": OK";
@@ -1696,7 +1716,7 @@ namespace VpnGuard
             if (used && AvpnBlocked()) { aL = 2; aS = "Отключён защитой до " + AgBlockedUntil.ToString("HH:mm") + " — отрезал локальную сеть"; }
             string agTxt = !CfgBool("amnezia.lanGuard", true) ? "Защита локальной сети: выключена" : AvpnBlocked() ? "Защита: отключён до " + AgBlockedUntil.ToString("HH:mm") + " — " + AgTripWhy + ". Выключите в AmneziaVPN Kill Switch"
                 : AgTrips > 0 ? "Защита: срабатывала " + When(AgTripAt) + " (" + AgTripWhy + ")" : "Защита локальной сети: включена, срабатываний не было";
-            string aVer = ""; try { if (inst) aVer = FileVersionInfo.GetVersionInfo(avExe).ProductVersion; } catch { }
+            string aVer = ""; try { if (inst) aVer = Cached("fv:" + avExe, 300, () => FileVersionInfo.GetVersionInfo(avExe).ProductVersion); } catch { }
             string aTr = AwgTraffic == true ? "OK" : AwgTraffic == false ? "НЕТ" : "—";
             long avMem = 0; try { if (avProc != null) avMem = avProc.WorkingSet64 / 1048576; } catch { }
             var awg = Comp(aL, aS, new[] { inst ? "AmneziaVPN " + aVer + " · " + (avProc != null ? "PID " + avProc.Id : "не запущен") : "AmneziaVPN не установлен",

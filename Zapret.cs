@@ -349,7 +349,7 @@ namespace VpnGuard
         static ZPath ZPhys()
         {
             try {
-                var nics = NetworkInterface.GetAllNetworkInterfaces().Where(n => n.OperationalStatus == OperationalStatus.Up && !IsTunnel(n.Name)).ToList();
+                var nics = AllNics().Where(n => n.OperationalStatus == OperationalStatus.Up && !IsTunnel(n.Name)).ToList();
                 var byIdx = new Dictionary<int, NetworkInterface>();
                 foreach (var n in nics) { try { var p = n.GetIPProperties().GetIPv4Properties(); if (p != null) byIdx[p.Index] = n; } catch { } }
                 MIB_IPFORWARDROW best = new MIB_IPFORWARDROW(); bool found = false;
