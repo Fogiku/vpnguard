@@ -1,9 +1,10 @@
-// Модуль «Обновление VpnGuard»: автообновление самого приложения из репозитория GitHub (раньше — Update.ps1 в части PowerShell).
+﻿// Модуль «Обновление VpnGuard»: автообновление самого приложения из репозитория GitHub (раньше — Update.ps1 в части PowerShell).
 // Источник: https://github.com/<update.repo> (ветка update.branch), в корне — vpnguard-manifest.json { version, build, notes, files: [{ path, sha256, size }] }.
 // Файлы — по SHA коммита (raw.githubusercontent.com/<repo>/<sha>/<path>): неизменяемые адреса, без кэша. Каждый сверяется с sha256 из манифеста,
 // .ps1 — проверяются парсером PowerShell, новый код агента и веб-сервера сначала пробно собирается (не собрался — обновление не ставится:
 // иначе на ПК остался бы агент, который уже не может обновиться сам). Старые файлы — в data\backup\app-* (5 последних).
 // config.json, data\, zapret\, bin\ не трогаются никогда. Запасной путь — Update.ps1 (команда app-update-ps).
+// Проверено на ПК выпуском 3.42.1: установлен этим модулем.
 using System;
 using System.Collections.Generic;
 using System.IO;
