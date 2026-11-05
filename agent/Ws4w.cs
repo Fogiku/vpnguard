@@ -95,12 +95,43 @@ namespace VpnGuard
         }
 
         // WS4W закрывает доступ к конфигам клиентов (только пользователю) — забрать владение администраторам, сбросить права, снять «только чтение»
+        // (у SYSTEM привилегии смены владельца есть, но выключены — icacls /setowner без них получает «отказано в доступе»)
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, Pack = 4)] struct Ws4wTokPriv { public int Count; public long Luid; public int Attr; }
+        [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(IntPtr h, uint acc, out IntPtr tok);
+        [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Unicode)] static extern bool LookupPrivilegeValue(string sys, string name, out long luid);
+        [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true)] static extern bool AdjustTokenPrivileges(IntPtr tok, bool disableAll, ref Ws4wTokPriv np, int len, IntPtr prev, IntPtr retLen);
+        static void Ws4wPrivileges()
+        {
+            IntPtr tok; if (!OpenProcessToken(Process.GetCurrentProcess().Handle, 0x0020 | 0x0008, out tok)) return;      // ADJUST_PRIVILEGES | QUERY
+            foreach (var n in new[] { "SeTakeOwnershipPrivilege", "SeRestorePrivilege", "SeBackupPrivilege" }) {
+                var tp = new Ws4wTokPriv { Count = 1, Attr = 2 };        // SE_PRIVILEGE_ENABLED
+                if (LookupPrivilegeValue(null, n, out tp.Luid)) AdjustTokenPrivileges(tok, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero);
+            }
+        }
         static void Ws4wUnlock(string dir)
         {
-            Exe("icacls.exe", "\"" + dir + "\" /setowner *S-1-5-32-544 /T /C /Q", 120);
-            Exe("icacls.exe", "\"" + dir + "\" /reset /T /C /Q", 120);
-            Exe("icacls.exe", "\"" + dir + "\" /grant *S-1-5-32-544:(OI)(CI)F *S-1-5-18:(OI)(CI)F /T /C /Q", 120);
-            foreach (var f in Directory.GetFiles(dir, "*", SearchOption.AllDirectories)) { try { File.SetAttributes(f, FileAttributes.Normal); } catch { } }
+            Ws4wPrivileges();
+            var admins = new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid, null);
+            var system = new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.LocalSystemSid, null);
+            var fc = System.Security.AccessControl.FileSystemRights.FullControl; var allow = System.Security.AccessControl.AccessControlType.Allow;
+            var inh = System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit; var np = System.Security.AccessControl.PropagationFlags.None;
+            Action<string> fixDir = null;
+            fixDir = d => {
+                try { var o = new System.Security.AccessControl.DirectorySecurity(); o.SetOwner(admins); Directory.SetAccessControl(d, o); } catch { }
+                try {
+                    var a = Directory.GetAccessControl(d); a.SetAccessRuleProtection(false, false);
+                    a.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(admins, fc, inh, np, allow)); a.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(system, fc, inh, np, allow));
+                    Directory.SetAccessControl(d, a);
+                } catch { }
+                try { new DirectoryInfo(d).Attributes = FileAttributes.Directory; } catch { }
+                foreach (var f in Directory.GetFiles(d)) {
+                    try { var o = new System.Security.AccessControl.FileSecurity(); o.SetOwner(admins); File.SetAccessControl(f, o); } catch { }
+                    try { var a = File.GetAccessControl(f); a.SetAccessRuleProtection(false, false); a.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(admins, fc, allow)); File.SetAccessControl(f, a); } catch { }
+                    try { File.SetAttributes(f, FileAttributes.Normal); } catch { }
+                }
+                foreach (var s in Directory.GetDirectories(d)) fixDir(s);
+            };
+            fixDir(dir);
         }
         static void Ws4wCmd(string c)
         {
