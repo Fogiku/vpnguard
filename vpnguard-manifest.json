@@ -1,8 +1,8 @@
 {
-    "version":  "3.36.0",
-    "build":  "20261105-1540",
+    "version":  "3.37.0",
+    "build":  "20261105-1556",
     "notes":  "",
-    "date":  "2026-11-05T15:40:45.8945965+03:00",
+    "date":  "2026-11-05T15:56:28.0123008+03:00",
     "files":  [
                   {
                       "path":  "agent/Amnezia.cs",
@@ -206,8 +206,8 @@
                   },
                   {
                       "path":  "Remote.ps1",
-                      "sha256":  "71a2e306c992ac2d75c01ac1aa448826fb63f26089c2136637c255c69b4699d3",
-                      "size":  30363
+                      "sha256":  "94e8164acd05bf641473e679e903e363621744508ea3b4dffc9d573253f84875",
+                      "size":  30487
                   },
                   {
                       "path":  "RemoteDiag.ps1",
@@ -226,8 +226,8 @@
                   },
                   {
                       "path":  "Test.ps1",
-                      "sha256":  "aaf6e0b777295b752979d269bbfe9bee129cda90c361dfb5867155c78642db7e",
-                      "size":  31889
+                      "sha256":  "00809f4e5a3cab319e3f4791e4426d6ee3dba5b56a32531d6a2bed771c81feca",
+                      "size":  32017
                   },
                   {
                       "path":  "Tray.cs",
@@ -251,13 +251,13 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "e25b145e1dbad5afeaddec03d4bdaad93096abcd0324c642732364a129e28f06",
+                      "sha256":  "14340833346d66651897f0c97f83524a29b02f8a5e1bc479893764da43efb9b9",
                       "size":  33074
                   },
                   {
                       "path":  "Web.cs",
-                      "sha256":  "88149c05e1eb921b49a13097cacc2bb4a4bc7cbfca976935bbfda1313efc92f2",
-                      "size":  54895
+                      "sha256":  "bedfbeb998679fd0f7a5eee8a5dac21cbf905048a415903006349dcab287962e",
+                      "size":  54998
                   },
                   {
                       "path":  "web/app.js",
@@ -278,6 +278,11 @@
                       "path":  "web/style.css",
                       "sha256":  "9a1fb85b671b40ff38d73a2b68ab060a1df8bfcc367745bb404cfe4c91cb9ee3",
                       "size":  14838
+                  },
+                  {
+                      "path":  "WebDiag.cs",
+                      "sha256":  "b4b285b6fb9990f134f226b2d3006ae40fb39088767d81eb54f95ce458630552",
+                      "size":  31771
                   },
                   {
                       "path":  "Wg.ps1",

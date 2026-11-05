@@ -1,6 +1,6 @@
 ﻿// VpnGuard — веб-сервер (веб-интерфейс + удалённая диагностика) на C#.
 // Собирается агентом на месте встроенным компилятором .NET Framework (csc.exe, C# 5):
-//   csc /target:exe /out:bin\VpnGuardWeb.exe /r:System.Web.Extensions.dll /r:System.Drawing.dll Web.cs Qr.cs
+//   csc /target:exe /out:bin\VpnGuardWeb.exe /r:System.Web.Extensions.dll /r:System.Drawing.dll /r:System.Management.dll /r:System.ServiceProcess.dll /r:System.Core.dll /r:Microsoft.CSharp.dll Web.cs Qr.cs WebDiag.cs
 // Запуск: VpnGuardWeb.exe <папка VpnGuard> [config.json] [папка data]. Работает, пока включён веб-интерфейс (web.enabled) или удалённая диагностика;
 // сам выходит, когда их выключили, сменили порт или обновили исходник (агент пересоберёт и запустит снова).
 // Лёгкие запросы (состояние, журнал, команды агенту, настройки, вход) — здесь; тяжёлые и редкие (проверки сети, отчёт,
@@ -23,7 +23,7 @@ using System.Web.Script.Serialization;
 
 namespace VpnGuard
 {
-    public static class Web
+    public static partial class Web
     {
         static DateTime LiveWantAt = DateTime.MinValue;
         static string Root, DataDir, LogDir, CmdDir, ConfigPath, StatusPath, StatePath, VersionText = "";
@@ -227,7 +227,7 @@ namespace VpnGuard
         static string CodeStamp()
         {
             var sb = new StringBuilder();
-            foreach (var f in new[] { "Web.cs", "Qr.cs" }) { var p = Path.Combine(Root, f); if (File.Exists(p)) sb.Append(File.GetLastWriteTimeUtc(p).Ticks).Append('|'); }
+            foreach (var f in new[] { "Web.cs", "Qr.cs", "WebDiag.cs" }) { var p = Path.Combine(Root, f); if (File.Exists(p)) sb.Append(File.GetLastWriteTimeUtc(p).Ticks).Append('|'); }
             return sb.ToString();
         }
 
@@ -391,7 +391,7 @@ namespace VpnGuard
         {
             var safe = RemoteCmds.Where(k => !k.Value).Select(k => k.Key); var act = RemoteCmds.Where(k => k.Value).Select(k => k.Key);
             return "VpnGuard " + VersionText + " — удалённая диагностика (включена до " + RemoteUntil().ToString("dd.MM.yyyy HH:mm") + ")\nТокен — заголовок X-Token или параметр ?t=…\n\n" +
-                "GET /status              состояние агента (status.json)\nGET /check               живые проверки: туннели, внешний IP, DNS, сайты напрямую и через туннель, клиенты wg_server\n" +
+                "GET /status              состояние агента (status.json)\nGET /check               живые проверки: туннели, внешний IP, DNS, сайты напрямую (?speed=1 — и замер скорости), клиенты wg_server\n" +
                 "GET /diag                полный отчёт «Диагностика» (до 3 мин)\nGET /net                 сеть: ipconfig, маршруты, метрики, DNS, брандмауэр\n" +
                 "GET /system              Windows, процессы, службы, задачи, журналы событий\nGET /logs?days=2         журнал агента (можно minutes=30, lines=5000)\n" +
                 "GET /files               config.json, state, zapret-state, результаты подбора, список data\nGET /bundle              всё сразу (кроме /diag; добавьте ?diag=1)\n" +
@@ -625,12 +625,12 @@ namespace VpnGuard
                     JsonOut(ctx, new Dictionary<string, object> { { "ok", true } }); return;
                 }
                 case "/": Text(ctx, 200, RemoteIndex()); return;
-                case "/check": Text(ctx, 200, HideSecrets(PsTask("check", "", 180))); return;
+                case "/check": Text(ctx, 200, HideSecrets(DiagCheck(q["speed"] == "1"))); return;
                 case "/diag": Text(ctx, 200, HideSecrets(PsTask("diag", "", 240))); return;
-                case "/net": Text(ctx, 200, HideSecrets(PsTask("net", "", 120))); return;
-                case "/system": Text(ctx, 200, HideSecrets(PsTask("system", "", 120))); return;
-                case "/files": RawJson(ctx, HideSecrets(PsTask("files", "", 120))); return;
-                case "/bundle": Text(ctx, 200, HideSecrets(PsTask(q["diag"] == "1" ? "bundle-diag" : "bundle", "", 420))); return;
+                case "/net": Text(ctx, 200, HideSecrets(DiagNet())); return;
+                case "/system": Text(ctx, 200, HideSecrets(DiagSystem())); return;
+                case "/files": RawJson(ctx, DiagFiles()); return;
+                case "/bundle": Text(ctx, 200, HideSecrets(q["diag"] == "1" ? PsTask("bundle-diag", "", 420) : DiagBundle())); return;
                 default: Text(ctx, 404, "нет такого адреса. Список: /"); return;
             }
         }

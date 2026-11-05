@@ -189,7 +189,7 @@ if ($r.Out -match 'R True True True True') { Ok 'обновление стави
 Write-Host '5. Веб-сервер на C# (сборка встроенным csc, вход, защита, настройки, задачи PowerShell)'
 $csc = @("$env:windir\Microsoft.NET\Framework64\v4.0.30319\csc.exe", "$env:windir\Microsoft.NET\Framework\v4.0.30319\csc.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
 $exe = Join-Path $tmp 'VpnGuardWeb.exe'
-$co = & $csc /nologo /target:exe /optimize+ "/out:$exe" /r:System.Web.Extensions.dll /r:System.Drawing.dll (Join-Path $Root 'Web.cs') (Join-Path $Root 'Qr.cs') 2>&1
+$co = & $csc /nologo /target:exe /optimize+ "/out:$exe" /r:System.Web.Extensions.dll /r:System.Drawing.dll /r:System.Management.dll /r:System.ServiceProcess.dll /r:System.Core.dll /r:Microsoft.CSharp.dll (Join-Path $Root 'Web.cs') (Join-Path $Root 'Qr.cs') (Join-Path $Root 'WebDiag.cs') 2>&1
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $exe)) { foreach ($l in @($co) | Where-Object { "$_" -match 'error' } | Select-Object -First 5) { Fail "сборка Web.cs: $l" } }
 else {
     $wd = Join-Path $tmp 'webdata'; New-Item -ItemType Directory (Join-Path $wd 'cmd'), (Join-Path $wd 'logs') -Force | Out-Null

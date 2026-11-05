@@ -92,8 +92,8 @@ function Invoke-TrayWatch {
     }
 }
 
-# веб-сервер на C# (Web.cs + Qr.cs → bin\VpnGuardWeb.exe)
-function Build-WebExe { Build-CsExe $WebExe @('Web.cs', 'Qr.cs') 'exe' @('System.Web.Extensions.dll', 'System.Drawing.dll') }
+# веб-сервер на C# (Web.cs + Qr.cs + WebDiag.cs → bin\VpnGuardWeb.exe)
+function Build-WebExe { Build-CsExe $WebExe @('Web.cs', 'Qr.cs', 'WebDiag.cs') 'exe' @('System.Web.Extensions.dll', 'System.Drawing.dll', 'System.Management.dll', 'System.ServiceProcess.dll', 'System.Core.dll', 'Microsoft.CSharp.dll') }
 function Start-WebServer {
     if (-not (Build-WebExe)) { return '' }
     $a = "`"$Root`""; if ($ConfigPath -ne (Join-Path $Root 'config.json')) { $a += " `"$ConfigPath`"" }
