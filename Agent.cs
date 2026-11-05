@@ -394,6 +394,22 @@ namespace VpnGuard
             if (files.Count > 0) Snapshot();
         }
         static void MzReconnectCmd() { MzDisconnect(); Thread.Sleep(3000); if (!MzConnect(0)) MzRestart("переподключение из монитора не удалось"); }
+        // перезапуск службы, которая не принимает «стоп» (AmneziaVPN-service): штатно не вышло — завершить её процесс
+        static void SvcHardRestart(string name)
+        {
+            var s = Svc(name); if (s == null) return;
+            try { if (s.Status != ServiceControllerStatus.Stopped) { s.Stop(); s.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(15)); } }
+            catch {
+                int pid = 0;
+                try { using (var mo = new ManagementObject("Win32_Service.Name='" + name.Replace("\\", "\\\\").Replace("'", "\\'") + "'")) pid = Convert.ToInt32(mo["ProcessId"]); } catch { }
+                if (pid > 4) {
+                    try { var p = Process.GetProcessById(pid); p.Kill(); p.WaitForExit(10000); Log(name + ": служба не останавливается штатно — завершил её процесс (PID " + pid + ")", "INFO"); }
+                    catch (Exception e) { Log(name + ": не удалось завершить процесс службы (PID " + pid + "): " + e.Message, "WARN"); }
+                }
+            }
+            try { s.Refresh(); if (s.Status != ServiceControllerStatus.Running) { if (s.Status == ServiceControllerStatus.Stopped) s.Start(); s.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(30)); } }
+            catch (Exception e) { Log(name + ": не запускается: " + e.Message, "WARN"); }
+        }
         static void SvcRestart(string name)
         {
             try {
@@ -545,19 +561,27 @@ namespace VpnGuard
             var order = tested.Concat(MzProtocols()).Concat(new[] { chosen }).Where(p => p.Length > 0 && !same.Contains(p)).Distinct().ToList();
             if (order.Count == 0) { Log("MeduzaVPN: " + reason + " — других протоколов нет (список не получен), пробовать нечего", "WARN"); return false; }
             Log("MeduzaVPN: " + reason + ", протокол " + cur + " — пробую другие: " + string.Join(", ", order), "WARN");
-            string prev = MzOverride;
+            string prev = MzOverride; int noConn = 0, maxNoConn = Math.Max(2, CfgInt("meduza.fallbackMaxTimeouts", 3));
             foreach (var p in order) {
                 if (InetDown()) { MzOverride = prev; Log("MeduzaVPN: пропал интернет — перебор протоколов прерван", "WARN"); MzDisconnect(); Thread.Sleep(1000); MzConnect(0); return true; }
                 DualMidCheck();
                 SetActivity("MeduzaVPN: пробую протокол " + p);
                 MzDisconnect(); Thread.Sleep(2000);
                 MzOverride = (p == chosen || p == "meduza-" + chosen) ? "" : p;
-                if (MzConnect(60) && MzTraffic()) {
+                bool conn = MzConnect(60);
+                if (conn && MzTraffic()) {
                     MzProtoSince = DateTime.Now; MzReturnAt = DateTime.Now; ProbeFailures = 0; DownTicks = 0; ForceIcs = true;
                     Log(MzOverride.Length > 0 ? "MeduzaVPN: протокол " + cur + " не работает — переключился на " + p + " (выбран в настройках: " + chosen + "; агент будет пробовать вернуть его)" : "MeduzaVPN: снова работает выбранный протокол " + p, "WARN");
                     return true;
                 }
-                Log("MeduzaVPN: протокол " + p + " тоже не работает", "WARN");
+                Log("MeduzaVPN: протокол " + p + " тоже не работает" + (conn ? "" : " (не подключился)"), "WARN");
+                noConn = conn ? 0 : noConn + 1;
+                if (noConn >= maxNoConn) {
+                    MzOverride = prev;
+                    Log("MeduzaVPN: " + noConn + " протокола подряд не подключились, а интернет есть — похоже, недоступен сам сервис MeduzaVPN, перебирать дальше бессмысленно. Перебор прерван, повторю через 15 мин", "WARN");
+                    MzDisconnect(); Thread.Sleep(1000); MzConnect(0); return false;
+                }
+                try { WgWatch(); } catch { }                 // перебор долгий — WG-Server не должен ждать
             }
             MzOverride = prev; Log("MeduzaVPN: ни один протокол не заработал", "WARN"); return false;
         }
@@ -721,7 +745,7 @@ namespace VpnGuard
         {
             foreach (var p in Process.GetProcessesByName("AmneziaVPN")) { try { p.Kill(); p.WaitForExit(10000); } catch { } }
             try { foreach (var s in ServiceController.GetServices().Where(x => x.ServiceName.StartsWith("AmneziaWGTunnel$", StringComparison.OrdinalIgnoreCase) && x.ServiceName.IndexOf("AmneziaVPN", StringComparison.OrdinalIgnoreCase) >= 0 && x.Status == ServiceControllerStatus.Running)) s.Stop(); } catch { }
-            SvcRestart(AvpnSvcName());
+            SvcHardRestart(AvpnSvcName());
         }
         static string WaitAvpnUp(int sec)
         {
@@ -760,7 +784,7 @@ namespace VpnGuard
             var a = AvpnNic(); bool up = a != null && a.OperationalStatus == OperationalStatus.Up;
             if (up || (closeApp && AvpnProc() != null)) { Log("AmneziaVPN: отключаю (выбран другой режим)", "INFO"); AvpnStop(); }
         }
-        static DateTime AwgWarnAt = DateTime.MinValue;
+        static DateTime AwgWarnAt = DateTime.MinValue, AwgSrvDownSince = DateTime.MinValue; static bool AwgSrvRestarted;
         static void AmneziaWatch()
         {
             if (AvpnBlocked()) {
@@ -776,10 +800,24 @@ namespace VpnGuard
             var a = AvpnNic();
             if (a != null && a.OperationalStatus == OperationalStatus.Up) {
                 AwgDownTicks = 0;
-                if (AwgTrafficOk(a.Name)) { AwgProbeFailures = 0; return; }
+                bool srvDown = AwgSrvDownSince != DateTime.MinValue;
+                // сервер не отвечает: перезапуск приложения его не починит — проверяем реже и без перезапусков
+                if (srvDown && (DateTime.Now - AwgTrafficAt).TotalMinutes < Math.Max(1, CfgInt("amnezia.serverDownCheckMin", 5))) return;
+                if (AwgTrafficOk(a.Name)) {
+                    if (srvDown) Log("AmneziaVPN: сервер снова отвечает — туннель пропускает трафик (не отвечал " + Dur(DateTime.Now - AwgSrvDownSince) + ")", "WARN");
+                    AwgSrvDownSince = DateTime.MinValue; AwgSrvRestarted = false; AwgProbeFailures = 0; return;
+                }
+                bool noServer = AwgDiag != null && !AwgDiag.Ok && AwgDiag.Short == "сервер VPN не отвечает";
+                if (srvDown) { if (!noServer) { AwgSrvDownSince = DateTime.MinValue; AwgSrvRestarted = false; } return; }
                 AwgProbeFailures++;
-                Log("AmneziaVPN: нет трафика через туннель (" + AwgProbeFailures + "/" + CfgInt("meduza.probeFailuresBeforeReconnect", 3) + ")", "WARN");
-                if (AwgProbeFailures >= CfgInt("meduza.probeFailuresBeforeReconnect", 3)) { AwgProbeFailures = 0; AwgRestart("туннель не пропускает трафик"); }
+                Log("AmneziaVPN: нет трафика через туннель (" + AwgProbeFailures + "/" + CfgInt("meduza.probeFailuresBeforeReconnect", 3) + ")" + (AwgDiag != null && !AwgDiag.Ok ? " — " + AwgDiag.Short : ""), "WARN");
+                if (AwgProbeFailures >= CfgInt("meduza.probeFailuresBeforeReconnect", 3)) {
+                    AwgProbeFailures = 0;
+                    if (noServer && AwgSrvRestarted) {
+                        AwgSrvDownSince = DateTime.Now;
+                        Log("AmneziaVPN: сервер VPN не отвечает и после перезапуска — дело не в приложении, перезапуски не помогут. Проверяю раз в " + Math.Max(1, CfgInt("amnezia.serverDownCheckMin", 5)) + " мин без перезапусков; смените сервер или протокол в приложении AmneziaVPN", "WARN");
+                    } else { if (noServer) AwgSrvRestarted = true; AwgRestart(noServer ? "сервер VPN не отвечает — пробую один перезапуск" : "туннель не пропускает трафик"); }
+                }
                 return;
             }
             AwgTraffic = null;
@@ -1238,7 +1276,19 @@ namespace VpnGuard
             }
             var x = Svc("SharedAccess"); return x != null && x.Status == ServiceControllerStatus.Running;
         }
-        static void IcsRestartService() { try { var s = Svc("SharedAccess"); if (s != null && s.Status == ServiceControllerStatus.Running) { s.Stop(); s.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(20)); } } catch { } WaitIcs(30); }
+        static void IcsRestartService() { try { var s = Svc("SharedAccess"); if (s != null && s.Status == ServiceControllerStatus.Running) { s.Stop(); s.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(20)); } } catch { } WaitIcs(30); WaitIcsReady(15); }
+        // служба уже «Running», но раздача ещё не готова принимать настройки (0x80040201) — ждать, пока перечисление подключений
+        // станет стабильным (дважды подряд без ошибки и с тем же числом), плюс 2 с
+        static bool WaitIcsReady(int sec)
+        {
+            var dl = DateTime.Now.AddSeconds(sec); int prev = -1;
+            while (DateTime.Now < dl) {
+                int n = -1; try { n = IcsConnections().Count; } catch { }
+                if (n > 0 && n == prev) { Thread.Sleep(2000); return true; }
+                prev = n; Thread.Sleep(1000);
+            }
+            return false;
+        }
         // записи раздачи удалённых адаптеров (старый ULTRA) мешают включить раздачу на новом (0x80040201)
         static int ClearStaleIcs()
         {
@@ -1278,8 +1328,9 @@ namespace VpnGuard
                 catch (Exception e) {
                     last = e.InnerException ?? e; var s = Svc("SharedAccess");
                     Log("ICS: '" + name + "' попытка " + t + "/3: " + last.Message + " (служба: " + (s == null ? "?" : s.Status.ToString()) + ")", "WARN");
-                    if (t == 1) ResetAllIcs(); else { Log("ICS: перезапуск службы SharedAccess", "INFO"); IcsRestartService(); }
-                    Thread.Sleep(3000);
+                    if (t == 1) { WaitIcsReady(15); Thread.Sleep(3000); }                 // обычно служба просто ещё не готова
+                    else if (t == 2) ResetAllIcs();
+                    Thread.Sleep(2000);
                 }
             }
             throw last;

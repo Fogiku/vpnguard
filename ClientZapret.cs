@@ -934,6 +934,22 @@ namespace VpnGuard
             }
             return res.Where(p => p.Key != null && p.Ip != null).ToList();
         }
+        // клиенты, которых туннель не принимает: «ключ|AllowedIPs» → когда последний раз напоминали (data\wg-rejected.txt)
+        static Dictionary<string, DateTime> WcRej;
+        static Dictionary<string, DateTime> WcRejected()
+        {
+            if (WcRej != null) return WcRej;
+            WcRej = new Dictionary<string, DateTime>();
+            try {
+                var f = Path.Combine(DataDir, "wg-rejected.txt");
+                if (File.Exists(f)) foreach (var l in File.ReadAllLines(f)) { var x = l.Split('\t'); long t; if (x.Length == 2 && long.TryParse(x[1], out t)) WcRej[x[0]] = new DateTime(t); }
+            } catch { }
+            return WcRej;
+        }
+        static void WcRejSave()
+        {
+            try { File.WriteAllLines(Path.Combine(DataDir, "wg-rejected.txt"), WcRejected().Select(kv => kv.Key + "\t" + kv.Value.Ticks)); } catch { }
+        }
         static void WgClientsWatch()
         {
             // wg.exe — раз в минуту или сразу, когда список отключённых изменился
@@ -950,12 +966,21 @@ namespace VpnGuard
                 if (off.Contains(p.Ip) && live.Contains(p.Key)) {
                     var x = Exe(wg, "set " + WgIf() + " peer " + p.Key + " remove", 10);
                     if (x.Code == 0) Log("WG-Server: клиент «" + nm + "» (" + p.Ip + ") отключён", "WARN"); else err = "не удалось отключить " + p.Ip + ": " + x.Err.Trim();
-                } else if (live.Contains(p.Key)) WcTries.Remove(p.Key);
+                } else if (live.Contains(p.Key)) { WcTries.Remove(p.Key); if (WcRejected().Remove(p.Key + "|" + p.Allowed)) WcRejSave(); }
                 else if (!off.Contains(p.Ip)) {
                     // включили обратно (или убрали вручную) — вернуть из конфига. Туннель может такого клиента не принимать
                     // (например, ключ совпадает с ключом сервера) — тогда после двух попыток больше не пытаться
                     int tries; WcTries.TryGetValue(p.Key, out tries);
-                    if (tries >= 2) { if (tries == 2) { WcTries[p.Key] = 3; Log("WG-Server: туннель не принимает клиента «" + nm + "» (" + p.Ip + ") из конфига: после добавления он снова пропадает. Больше не пытаюсь — проверьте клиента в WS4W или пересоздайте его", "WARN"); } continue; }
+                    string rsig = p.Key + "|" + p.Allowed; DateTime rw;
+                    if (WcRejected().TryGetValue(rsig, out rw)) {           // уже знаем: туннель его не принимает (запомнено на диске)
+                        if ((DateTime.Now - rw).TotalHours >= 24) { WcRej[rsig] = DateTime.Now; WcRejSave(); Log("WG-Server: клиент «" + nm + "» (" + p.Ip + ") по-прежнему не принимается туннелем — пересоздайте его на вкладке WG-Server (напоминание раз в сутки)", "WARN"); }
+                        continue;
+                    }
+                    if (tries >= 2) {
+                        WcRej[rsig] = DateTime.Now; WcRejSave();
+                        Log("WG-Server: туннель не принимает клиента «" + nm + "» (" + p.Ip + ") из конфига: после добавления он снова пропадает. Больше не пытаюсь (запомнено; напомню раз в сутки) — пересоздайте клиента", "WARN");
+                        continue;
+                    }
                     WcTries[p.Key] = tries + 1;
                     string tmp = null;
                     try {
