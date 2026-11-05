@@ -262,7 +262,7 @@ namespace VpnGuard
             return SwDefs.Select(d => {
                 var it = SwItem(d.Id); string inst = ""; try { inst = SwInstalled(d.Id) ?? ""; } catch { }
                 string latest = it.ContainsKey("latest") ? Convert.ToString(it["latest"]) : "";
-                bool upd = inst.Length > 0 && latest.Length > 0 && inst != "есть" && Ver2(latest) > Ver2(inst);
+                bool upd = inst.Length > 0 && latest.Length > 0 && Ver2(inst) > new Version(0, 0) && Ver2(latest) > Ver2(inst);
                 return (object)new Dictionary<string, object> { { "id", d.Id }, { "name", d.Name }, { "purpose", d.Purpose }, { "installed", inst }, { "latest", latest }, { "update", upd },
                     { "needed", SwNeeded(d.Id) }, { "status", it.ContainsKey("status") ? it["status"] : "" }, { "error", it.ContainsKey("error") ? it["error"] : "" } };
             }).ToArray();

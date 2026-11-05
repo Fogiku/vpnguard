@@ -94,6 +94,14 @@ namespace VpnGuard
             return l.Any(x => x.Kind == "folder" || x.Kind == "process") ? "есть" : l.Any(x => x.Kind == "data") ? "только данные" : "";
         }
 
+        // WS4W закрывает доступ к конфигам клиентов (только пользователю) — забрать владение администраторам, сбросить права, снять «только чтение»
+        static void Ws4wUnlock(string dir)
+        {
+            Exe("icacls.exe", "\"" + dir + "\" /setowner *S-1-5-32-544 /T /C /Q", 120);
+            Exe("icacls.exe", "\"" + dir + "\" /reset /T /C /Q", 120);
+            Exe("icacls.exe", "\"" + dir + "\" /grant *S-1-5-32-544:(OI)(CI)F *S-1-5-18:(OI)(CI)F /T /C /Q", 120);
+            foreach (var f in Directory.GetFiles(dir, "*", SearchOption.AllDirectories)) { try { File.SetAttributes(f, FileAttributes.Normal); } catch { } }
+        }
         static void Ws4wCmd(string c)
         {
             if (c == "ws4w-scan") {
@@ -129,9 +137,12 @@ namespace VpnGuard
             // 3. остатки: папки программы, ярлыки, записи «Программы и компоненты»; данные — сначала в архив
             foreach (var x in items.Where(i => i.Kind == "data" && Directory.Exists(i.Path))) step("данные WS4W сохранены в архив и удалены: " + x.Path, () => {
                 var zip = Path.Combine(DataDir, "backup", "ws4w-data-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".zip"); Directory.CreateDirectory(Path.GetDirectoryName(zip));
-                ZipFile.CreateFromDirectory(x.Path, zip); Directory.Delete(x.Path, true);
+                Ws4wUnlock(x.Path);
+                foreach (var old in Directory.GetFiles(Path.GetDirectoryName(zip), "ws4w-data-*.zip")) { try { File.Delete(old); } catch { } }    // прежняя попытка могла оборваться на закрытых файлах
+                ZipFile.CreateFromDirectory(x.Path, zip);
+                Directory.Delete(x.Path, true);
             });
-            foreach (var x in items.Where(i => i.Kind == "folder" && Directory.Exists(i.Path))) step("удалена папка " + x.Path, () => Directory.Delete(x.Path, true));
+            foreach (var x in items.Where(i => i.Kind == "folder" && Directory.Exists(i.Path))) step("удалена папка " + x.Path, () => { Ws4wUnlock(x.Path); Directory.Delete(x.Path, true); });
             foreach (var x in items.Where(i => i.Kind == "shortcut" && File.Exists(i.Path))) step("удалён ярлык " + x.Path, () => File.Delete(x.Path));
             foreach (var x in items.Where(i => i.Kind == "program")) {
                 var hive = x.Path.StartsWith("HKU") ? Registry.Users : Registry.LocalMachine; var sub = x.Path.Substring(4);
