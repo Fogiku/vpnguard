@@ -43,6 +43,46 @@ namespace VpnGuard
                 catch (Exception e) { if (e.Message != SnapErr) Log("Агент C#: состояние: " + e.Message, "ERROR"); SnapErr = e.Message; }      // одна и та же ошибка — в журнал один раз
             }
         }
+        // ---------------------------------------------------------------- история на диске: перезапуск агента (обновление) её не стирает
+        static DateTime HistSavedAt = DateTime.MinValue;
+        static string HistPath { get { return Path.Combine(DataDir, "history.json"); } }
+        static object[] HistoryCopy() { lock (History) return History.ToArray(); }
+        static void SaveHistory()
+        {
+            try {
+                object hist; lock (History) hist = History.ToArray();
+                object lt, lh; lock (LiveH) { lt = LiveT.ToArray(); lh = LiveH.ToDictionary(x => x.Key, x => (object)x.Value.ToArray()); }
+                var tmp = HistPath + ".tmp";
+                File.WriteAllText(tmp, Json.Serialize(new Dictionary<string, object> { { "saved", DateTimeOffset.UtcNow.ToUnixTimeSeconds() }, { "history", hist }, { "liveT", lt }, { "liveH", lh } }), Encoding.UTF8);
+                if (File.Exists(HistPath)) File.Replace(tmp, HistPath, null); else File.Move(tmp, HistPath);
+                HistSavedAt = DateTime.Now;
+            } catch { }
+        }
+        static void LoadHistory()
+        {
+            try {
+                if (!File.Exists(HistPath)) return;
+                var o = Json.DeserializeObject(File.ReadAllText(HistPath, Encoding.UTF8)) as Dictionary<string, object>; if (o == null) return;
+                long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), saved = o.ContainsKey("saved") ? Convert.ToInt64(o["saved"]) : 0;
+                var h = o.ContainsKey("history") ? o["history"] as object[] : null;
+                if (h != null) lock (History) foreach (var x in h.OfType<Dictionary<string, object>>())
+                    if (x.ContainsKey("t") && now - Convert.ToInt64(x["t"]) < 2 * 3600) History.Add(x);
+                // живые скорости — только если агент не работал недолго (иначе это уже не «последние 3 минуты»)
+                if (now - saved < 300 && o.ContainsKey("liveT") && o.ContainsKey("liveH")) {
+                    var lt = (o["liveT"] as object[] ?? new object[0]).Select(x => Convert.ToInt64(x)).ToList();
+                    var lh = o["liveH"] as Dictionary<string, object>;
+                    if (lh != null) lock (LiveH) {
+                        LiveT.AddRange(lt);
+                        foreach (var kv in lh) {
+                            var arr = (kv.Value as object[] ?? new object[0]).Select(v => { var a = v as object[]; return a == null ? null : a.Select(x => Convert.ToInt64(x)).ToArray(); }).ToList();
+                            while (arr.Count < LiveT.Count) arr.Insert(0, null);
+                            LiveH[kv.Key] = arr;
+                        }
+                    }
+                }
+                Log("История восстановлена: состояние — " + History.Count + " точек, живые скорости — " + LiveT.Count + " с", "INFO");
+            } catch (Exception e) { Log("История не восстановлена: " + e.Message, "WARN"); }
+        }
         static void SnapshotCore()
         {
             string mode = Mode(), kind = TunnelKind(), upN = UplinkName(); bool updating = MzUpdating();
@@ -60,8 +100,8 @@ namespace VpnGuard
             var zd = zapret as Dictionary<string, object>; if (zd != null && zd.ContainsKey("conns")) int.TryParse(Convert.ToString(zd["conns"]), out zc);
 
             // история (точка не чаще интервала проверки)
-            long nowTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds(); long lastTs = History.Count > 0 ? Convert.ToInt64(History[History.Count - 1]["t"]) : 0;
-            if (nowTs - lastTs >= Math.Max(10, CfgInt("checkIntervalSec", 30) - 2)) {
+            long nowTs = DateTimeOffset.UtcNow.ToUnixTimeSeconds(); long lastTs; lock (History) lastTs = History.Count > 0 ? Convert.ToInt64(History[History.Count - 1]["t"]) : 0;
+            if (nowTs - lastTs >= Math.Max(10, CfgInt("checkIntervalSec", 30) - 2)) lock (History) {
                 History.Add(new Dictionary<string, object> { { "t", nowTs }, { "n", nL }, { "m", mL }, { "u", uL }, { "w", wL }, { "i", iL }, { "z", zL }, { "a", aL },
                     { "tr", new[] { TrafPending["u"][0], TrafPending["u"][1], TrafPending["w"][0], TrafPending["w"][1], TrafPending["p"][0], TrafPending["p"][1] } }, { "zc", zc } });
                 TrafPending = NewTraf();
@@ -79,9 +119,10 @@ namespace VpnGuard
                 { "counters", new Dictionary<string, object> { { "restarts", RestartCount }, { "reconnects", ReconnectCount }, { "icsFixes", IcsFixCount } } },
                 { "vpn", new Dictionary<string, object> { { "mode", mode }, { "name", ModeNames[mode] }, { "uplink", upN }, { "kind", kind }, { "primary", DualPrimary() } } },
                 { "amnezia", awg }, { "software", ps.ContainsKey("software") ? ps["software"] : new object[0] }, { "remote", ps.ContainsKey("remote") ? ps["remote"] : null }, { "app", ps.ContainsKey("app") ? ps["app"] : null },
-                { "history", History.ToArray() } };
+                { "history", HistoryCopy() }, { "commands", AgentCommands() } };
             var tmp = StatusPath + ".tmp";
             File.WriteAllText(tmp, Json.Serialize(snap), Bom);
+            if ((DateTime.Now - HistSavedAt).TotalSeconds >= 60) SaveHistory();
             try { if (File.Exists(StatusPath)) File.Replace(tmp, StatusPath, null); else File.Move(tmp, StatusPath); } catch { File.Copy(tmp, StatusPath, true); File.Delete(tmp); }
         }
     }

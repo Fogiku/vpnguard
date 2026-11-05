@@ -120,6 +120,7 @@ namespace VpnGuard
             PerfThread("основной цикл");
             LoadCfg(true);
             LoadTrafficDays();
+            LoadHistory();
             Log("VpnGuard " + Version + " запущен — агент на C# (PID " + Process.GetCurrentProcess().Id + ")", "INFO");
             MeduzaStartedAt = DateTime.Now;
             new Thread(LiveLoop) { IsBackground = true, Name = "live" }.Start();
@@ -146,6 +147,7 @@ namespace VpnGuard
         static void HandOver()
         {
             if (Monitor.TryEnter(SnapLock, 3000)) { try { SnapshotCore(); } catch { } finally { Monitor.Exit(SnapLock); } }
+            SaveHistory();
             Run("cmd.exe", "/c ping -n 4 127.0.0.1 >nul & schtasks /run /tn \"VpnGuard\"", false);
         }
         static string SourceSig()

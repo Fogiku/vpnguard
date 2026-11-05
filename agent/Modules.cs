@@ -196,6 +196,11 @@ namespace VpnGuard
             }
             return false;
         }
+        // команды, которые понимает агент (для веб-сервера: какие команды пропускать)
+        static string[] AgentCommands()
+        {
+            lock (Mods) return new[] { "check-now" }.Concat(Mods.SelectMany(m => m.Commands)).Distinct().ToArray();
+        }
         // для окна/веба
         static object[] ModulesInfo()
         {

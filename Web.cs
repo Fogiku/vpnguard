@@ -42,6 +42,23 @@ namespace VpnGuard
             "zapret-on", "zapret-off", "zapret-test", "zapret-update", "zapret-reload", "zapret-check", "zapret-releases", "meduza-test", "meduza-catalog", "meduza-proto-reset",
             "software-check", "install-missing", "app-check", "app-update", "dual-switch" };
         // удалённая диагностика: true — прерывает интернет клиентам (нужно remote.allowActions)
+        // команды модулей агента — из status.json (агент сам объявляет, что умеет); новая команда модуля не требует правки здесь
+        static string[] AgentCmdsCache = new string[0]; static DateTime AgentCmdsAt = DateTime.MinValue;
+        static string[] AgentCmds()
+        {
+            if ((DateTime.Now - AgentCmdsAt).TotalSeconds < 10) return AgentCmdsCache;
+            AgentCmdsAt = DateTime.Now;
+            try {
+                var o = Json.DeserializeObject(ReadShared(StatusPath) ?? "{}") as Dictionary<string, object>;
+                var c = o != null && o.ContainsKey("commands") ? o["commands"] as object[] : null;
+                if (c != null) AgentCmdsCache = c.Select(x => Convert.ToString(x)).Where(x => Regex.IsMatch(x, @"^[a-z0-9\-]{1,40}$")).ToArray();
+            } catch { }
+            return AgentCmdsCache;
+        }
+        static bool WebCmdOk(string c) { return WebCmds.Contains(c) || AgentCmds().Contains(c) || Regex.IsMatch(c, @"^install [a-z]+$"); }
+        // удалённая диагностика: команды не из списка ниже, но известные агенту, считаются прерывающими (нужно remote.allowActions)
+        static bool RemoteCmdKnown(string c) { return RemoteCmds.ContainsKey(c) || AgentCmds().Contains(c); }
+        static bool RemoteCmdInterrupts(string c) { bool v; return RemoteCmds.TryGetValue(c, out v) ? v : true; }
         static readonly Dictionary<string, bool> RemoteCmds = new Dictionary<string, bool> {
             {"check-now",false},{"zapret-check",false},{"meduza-catalog",false},{"software-check",false},{"app-check",false},{"app-update",false},
             {"reconnect",true},{"reconnect-meduza",true},{"reconnect-awg",true},{"restart-wg",true},{"reapply-ics",true},{"zapret-test",true},{"zapret-reload",true},
@@ -477,15 +494,15 @@ namespace VpnGuard
                 case "/api/cmd": {
                     var b = Body(req); string c = BStr(b, "c");
                     if (role == "diag") {
-                        if (!RemoteCmds.ContainsKey(c)) { JsonOut(ctx, Err("команда '" + c + "' недоступна"), 400); return; }
-                        if (RemoteCmds[c] && !CfgBool("remote.allowActions", false)) { JsonOut(ctx, Err("прерывающие команды выключены в окне"), 403); return; }
-                    } else if (!WebCmds.Contains(c) && !Regex.IsMatch(c, @"^install [a-z]+$")) { JsonOut(ctx, Err("неизвестная команда '" + c + "'"), 400); return; }
+                        if (!RemoteCmdKnown(c)) { JsonOut(ctx, Err("команда '" + c + "' недоступна"), 400); return; }
+                        if (RemoteCmdInterrupts(c) && !CfgBool("remote.allowActions", false)) { JsonOut(ctx, Err("прерывающие команды выключены в окне"), 403); return; }
+                    } else if (!WebCmdOk(c)) { JsonOut(ctx, Err("неизвестная команда '" + c + "'"), 400); return; }
                     SendCmd(c, role + ", " + ip); JsonOut(ctx, new Dictionary<string, object> { { "ok", true } }); return;
                 }
                 case "/cmd": {
                     string c = q["c"] ?? "";
-                    if (!RemoteCmds.ContainsKey(c)) { Text(ctx, 400, "неизвестная команда '" + c + "'. Можно: " + string.Join(", ", RemoteCmds.Keys)); return; }
-                    if (RemoteCmds[c] && !CfgBool("remote.allowActions", false) && !web) { Text(ctx, 403, "команда '" + c + "' прерывает интернет клиентам — разрешите такие команды в окне (Диагностика → Удалённая диагностика)"); return; }
+                    if (!RemoteCmdKnown(c)) { Text(ctx, 400, "неизвестная команда '" + c + "'. Можно: " + string.Join(", ", RemoteCmds.Keys)); return; }
+                    if (RemoteCmdInterrupts(c) && !CfgBool("remote.allowActions", false) && !web) { Text(ctx, 403, "команда '" + c + "' прерывает интернет клиентам — разрешите такие команды в окне (Диагностика → Удалённая диагностика)"); return; }
                     SendCmd(c, role + ", " + ip); Text(ctx, 200, "команда '" + c + "' отправлена агенту; результат — в /logs?minutes=10 и /status"); return;
                 }
                 case "/api/config": {

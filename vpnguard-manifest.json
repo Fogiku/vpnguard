@@ -1,8 +1,8 @@
 {
-    "version":  "3.32.0",
-    "build":  "20261105-1519",
+    "version":  "3.33.0",
+    "build":  "20261105-1523",
     "notes":  "",
-    "date":  "2026-11-05T15:19:20.5250706+03:00",
+    "date":  "2026-11-05T15:23:11.5701798+03:00",
     "files":  [
                   {
                       "path":  "agent/Amnezia.cs",
@@ -26,8 +26,8 @@
                   },
                   {
                       "path":  "agent/Core.cs",
-                      "sha256":  "4bd4dbe5a341c42939d5f0949ef73cfb469043f40c65449201331093b3a38742",
-                      "size":  21386
+                      "sha256":  "b087a6775e6201da8ad165430f5bce65a1e16451398c03a74f3834c898c2fe5b",
+                      "size":  21442
                   },
                   {
                       "path":  "agent/CzHosts.cs",
@@ -86,8 +86,8 @@
                   },
                   {
                       "path":  "agent/Modules.cs",
-                      "sha256":  "8f922d515aa70a0f08f89bddb3f3143e13656ec367975d1e3742b2015a52ebc5",
-                      "size":  16242
+                      "sha256":  "0268d489664729f7e7d3246c739463bee00c3ed954429f9cea122eb090591d38",
+                      "size":  16572
                   },
                   {
                       "path":  "agent/PsPart.cs",
@@ -96,8 +96,8 @@
                   },
                   {
                       "path":  "agent/Snapshot.cs",
-                      "sha256":  "c5be3a05f65e55c9e65c4c2ea2d4521f8524c63a644d95f9a0b307dc2be5dd17",
-                      "size":  7373
+                      "sha256":  "8dcaf8bf0b8f4a2373dfde5a8ec420ccbaddd14db01158712248321bf4d82619",
+                      "size":  10703
                   },
                   {
                       "path":  "agent/Traffic.cs",
@@ -196,13 +196,13 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "274b527020badd45be11f968c4b52e039d01f43ec6092b8416f8d0c48ce414d5",
+                      "sha256":  "9a9855a34ff9dfe83cace47a4a8f7966af6ca9c4bcad740fa97c5d6b9a5acc34",
                       "size":  74688
                   },
                   {
                       "path":  "Web.cs",
-                      "sha256":  "f6ad6f1b9bea298ac7416af31ed07169d9eaf176a3f4791443b37a40c051effd",
-                      "size":  60012
+                      "sha256":  "6cf82cf4bc0cc7fd6c42e99cb454a7c3802b11eee32cd0e2ad635b66922c10e1",
+                      "size":  61498
                   },
                   {
                       "path":  "web/app.js",
