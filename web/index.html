@@ -413,12 +413,16 @@ function flowFrame(now) {
   const dt = Math.min(0.1, (now - FL.last) / 1000); FL.last = now;
   if (!document.hidden && FL.svg.isConnected) {
     const ks = 1 - Math.exp(-dt / 0.6), kv = 1 - Math.exp(-dt / 0.4);
+    // стрелки — не чаще 20 кадров/с: каждый сдвиг заново раскладывает текст вдоль линии (на 60 к/с — полядра процессора)
+    FL.atick = (FL.atick || 0) + dt; const draw = FL.atick >= 0.05; if (draw) FL.atick = 0;
     for (const k in FL.lanes) {
       const L = FL.lanes[k]; if (!L.tp) continue;
       L.sp += (L.tsp - L.sp) * ks; L.op += (L.top - L.op) * ks;
       L.ph = (L.ph + L.sp * dt) % FLP;
-      L.tp.setAttribute('startOffset', (L.up ? L.ph - FLP : -L.ph).toFixed(2));
-      L.tx.setAttribute('opacity', L.op.toFixed(3));
+      if (!draw) continue;
+      const so = (L.up ? L.ph - FLP : -L.ph).toFixed(1), op = L.op.toFixed(2);
+      if (so !== L.so) { L.tp.setAttribute('startOffset', so); L.so = so; }       // стоящие полосы не трогать
+      if (op !== L.opS) { L.tx.setAttribute('opacity', op); L.opS = op; }
     }
     FL.tick = (FL.tick || 0) + dt;
     if (FL.tick >= 0.05) {                        // цифры — 20 раз в секунду
