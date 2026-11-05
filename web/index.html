@@ -355,20 +355,21 @@ function flowModel() {
   if (mode === 'dual') { E.push({ a: 'pc', b: 'vpn2', r: [0, 0], c: 'var(--vpn)', off: true }); E.push({ a: 'vpn2', b: 'net', r: [0, 0], c: 'var(--vpn)', off: true }); }
   E.push({ a: 'pc', b: 'zp', r: byp, c: 'var(--zp)' });
   if (lanOn) E.push({ a: 'pc', b: 'lan', r: l, c: 'var(--lan)', near: true }); E.push({ a: 'zp', b: 'net', r: byp, c: 'var(--zp)' });
-  return { N, E, key: N.map(n => n.id + (n.dim ? '-' : '+')).join(',') + '|' + vpnOn + '|' + kind + '|' + zOn };
+  return { N, E, key: N.map(n => n.id + (n.dim ? '-' : '+') + n.dot).join(',') + '|' + vpnOn + '|' + kind + '|' + zOn };
 }
 const mbs = v => { v = (+v || 0) * 8; return v >= 1e7 ? (v / 1e6).toFixed(0) : v >= 1e5 ? (v / 1e6).toFixed(1) : v >= 1e3 ? (v / 1e6).toFixed(2) : '0'; };
 // скорость стрелок, пикс/с: 0 — стоят; дальше растёт с логарифмом трафика
 const laneSpeed = r => (r = +r || 0) < 400 ? 0 : 12 + 20 * Math.log10(r / 400);
 
 // кнопки узла: справа сверху; клик не открывает вкладку узла
+const FBS = 20, FBG = 5;                         // кнопка узла: квадрат 20 px, зазор 5
 function flowBtns(n) {
-  let x = n.x + n.w - 36, out = '';
-  for (const a of (n.acts || []).slice().reverse()) {
-    const w = Math.max(18, 8 + a.t.length * 5.6); x -= w + 4;
+  let out = ''; const x = n.x + n.w - FBS - 8;
+  (n.acts || []).forEach((a, i) => {
+    const y = n.y + 8 + i * (FBS + FBG);
     out += `<g class="fl-btn${a.bad ? ' bad' : ''}" onclick="event.preventDefault();event.stopPropagation();${esc(a.fn)}"><title>${esc(a.tip)}</title>
-      <rect x="${x.toFixed(1)}" y="${n.y + 4}" width="${w.toFixed(1)}" height="15" rx="3"/><text x="${(x + w / 2).toFixed(1)}" y="${n.y + 15}" text-anchor="middle">${esc(a.t)}</text></g>`;
-  }
+      <rect x="${x}" y="${y}" width="${FBS}" height="${FBS}" rx="2"/><text x="${x + FBS / 2}" y="${y + 14}" text-anchor="middle">${esc(a.t)}</text></g>`;
+  });
   return out;
 }
 function flowBuild(m) {
@@ -418,14 +419,17 @@ function flowBuild(m) {
   for (const n of N) {
     const c = 10, sh = `M${n.x + c},${n.y} H${n.x + n.w} V${n.y + n.h - c} L${n.x + n.w - c},${n.y + n.h} H${n.x} V${n.y + c} Z`;
     const lc = n.dot >= 0 ? `var(--${['ok', 'warn', 'bad'][n.dot]})` : 'var(--none)';
-    const g = `<g id="fln-${n.id}"${n.dim ? ' opacity=".5"' : ''}><path d="${sh}" class="fl-node"${n.c ? ` style="stroke:${n.c}"` : ''}/>
+    const ba = (n.acts || []).length ? FBS + 12 : 0, rx = n.x + n.w - 14 - ba;     // правый край текста и графика
+    // цвет блока по состоянию: предупреждение — жёлтая рамка, сбой — красная рамка и красноватый фон
+    const sst = n.dot === 2 ? 'stroke:var(--bad);stroke-width:1.6;fill:color-mix(in srgb, var(--bad) 12%, var(--row))' : n.dot === 1 ? 'stroke:var(--warn);stroke-width:1.4;fill:color-mix(in srgb, var(--warn) 8%, var(--row))' : n.c ? `stroke:${n.c}` : '';
+    const g = `<g id="fln-${n.id}"${n.dim ? ' opacity=".5"' : ''}><path d="${sh}" class="fl-node"${sst ? ` style="${sst}"` : ''}/>
       <path d="M${n.x},${n.y} h13 L${n.x},${n.y + 13} Z" fill="${n.c || 'var(--accent)'}"/>
-      <rect x="${n.x + n.w - 30}" y="${n.y + 10}" width="18" height="3" fill="${lc}"/>
-      <text x="${n.x + 14}" y="${n.y + 21}" class="f1">${esc(clip(n.t1, n.w - 30 - (n.acts || []).reduce((s, a) => s + Math.max(18, 8 + a.t.length * 5.6) + 4, 0), 8.6))}</text>
+      <rect x="${rx - 18}" y="${n.y + 10}" width="18" height="3" fill="${lc}"/>
+      <text x="${n.x + 14}" y="${n.y + 21}" class="f1">${esc(clip(n.t1, n.w - 30 - ba, 8.6))}</text>
       <text x="${n.x + 14}" y="${n.y + 38}" class="f2" id="fl-${n.id}-r"></text>
-      ${n.r ? `<line class="fl-spb" x1="${n.x + 14}" x2="${n.x + n.w - 14}" y1="${n.y + 63.5}" y2="${n.y + 63.5}"/>
+      ${n.r ? `<line class="fl-spb" id="fl-${n.id}-sb" x1="${n.x + 14}" x2="${rx}" y1="${n.y + 63.5}" y2="${n.y + 63.5}"/>
       <path class="fl-sp rx" id="fl-${n.id}-sr"/><path class="fl-sp tx" id="fl-${n.id}-st"/>` : ''}${flowBtns(n)}
-      <text x="${n.x + 14}" y="${n.y + 77}" class="f3" id="fl-${n.id}-3"></text></g>`;
+      <text x="${n.x + 14}" y="${n.y + 77}" class="f3" id="fl-${n.id}-3" data-w="${n.w - 20 - ba}"></text></g>`;
     nodes += n.href ? `<a href="${n.href}">${g}</a>` : g;
   }
   const el = document.createElement('div');
@@ -440,7 +444,7 @@ function flowUpdate(m) {
   for (const n of m.N) {
     const st = FL.nodes[n.id] || (FL.nodes[n.id] = { el: svg.querySelector(`#fl-${n.id}-r`), v: n.r ? n.r.slice() : null, txt: '' });
     st.t = n.r ? n.r.slice() : null; if (st.t && !st.v) st.v = st.t.slice();
-    const t = svg.querySelector(`#fl-${n.id}-3`); if (t) t.textContent = clip(n.t4 || n.t3, 200, 6.1);
+    const t = svg.querySelector(`#fl-${n.id}-3`); if (t) t.textContent = clip(n.t4 || n.t3, +t.dataset.w + 20 || 200, 6.1);
   }
   m.E.forEach((e, i) => {
     for (const [lane, v] of [['u', e.r[1]], ['d', e.r[0]]]) {
@@ -507,8 +511,8 @@ function flowSpark() {
   const svg = FL && FL.svg; if (!svg) return;
   for (const id in SPK) {
     const pr = svg.querySelector(`#fl-${id}-sr`), pt = svg.querySelector(`#fl-${id}-st`); if (!pr || !pt) continue;
-    const n = svg.querySelector(`#fln-${id} .fl-node`); if (!n) continue;
-    const bb = n.getBBox(), h = SPK[id], x0 = bb.x + 14, w = bb.width - 28, y0 = bb.y + 63, hh = 17;
+    const bl = svg.querySelector(`#fl-${id}-sb`); if (!bl) continue;
+    const h = SPK[id], x0 = +bl.getAttribute('x1'), w = +bl.getAttribute('x2') - x0, y0 = +bl.getAttribute('y1') - .5, hh = 17;
     let mx = 12500; for (const v of h) mx = Math.max(mx, v[0], v[1]);
     const d = k => h.length < 2 ? '' : 'M' + h.map((v, i) => (x0 + w - (h.length - 1 - i) * w / (SPN - 1)).toFixed(1) + ',' + (y0 - hh * v[k] / mx).toFixed(1)).join(' L');
     pr.setAttribute('d', d(0)); pt.setAttribute('d', d(1));
@@ -542,7 +546,7 @@ P.home.top = () => {
   const h = S.history || []; let ok = 0, all = 0; for (const p of h) if (p.u >= 0) { all++; if (p.u == 0) ok++; }
   return `<div class="card hero"><div><div class="big"><span class="dot l${worst}" style="width:18px;height:18px"></span><span class="c${worst}">${ht}</span></div>
       <div class="muted" style="margin:6px 0 12px">${esc(probs.join('  ·  ') || 'Туннель, WG-Server и раздача в порядке')}</div>
-      <div class="sub">Действия — кнопками на схеме трафика ниже</div></div>
+</div>
     <div><div class="sub">Режим работы</div><select onchange="setMode(this.value)">${MODES.map(([v, t]) => `<option value="${v}"${v === mode ? ' selected' : ''}>${t}</option>`).join('')}</select></div></div>
   <div class="grid">${keys.map(([k, n]) => { const o = comp(k), l = lvl(o); return `<div class="tile" onclick="location.hash='${k === 'inet' ? 'home' : k}'" title="${esc(o && o.details && o.details.join(' · '))}"><div class="t"><span class="dot l${l}"></span>${n}</div><div class="s c${l}" title="${esc(o && o.state)}">${esc(o ? String(o.state).split(' · ')[0] : 'нет данных')}</div><div class="d">${esc(o && o.details && o.details[0])}</div></div>`; }).join('')}</div>
   <div class="grid">
