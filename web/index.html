@@ -429,7 +429,7 @@ function flowBuild(m) {
     const g = `<g id="fln-${n.id}"${n.dim ? ' opacity=".5"' : ''}><path d="${sh}" class="fl-node"${n.c ? ` style="stroke:${n.c}"` : ''}/>
       <path d="M${n.x},${n.y} h13 L${n.x},${n.y + 13} Z" fill="${n.c || 'var(--accent)'}"/>
       <rect x="${ba ? n.x + n.w - FBS - 8 - 6 - 18 : rx - 18}" y="${n.y + 10}" width="18" height="3" fill="${lc}"/>
-      <text x="${n.x + 14}" y="${n.y + 21}" class="f1">${esc(clip(n.t1, n.w - 30 - (ba ? FBS + 8 : 0), 9.4))}</text>
+      <text x="${n.x + 14}" y="${n.y + 21}" class="f1">${esc(clip(n.t1, ba ? n.w - 46 : n.w - 30, 9.2))}</text>
       <text x="${n.x + 14}" y="${n.y + 38}" class="f2" id="fl-${n.id}-r"></text>
       ${n.r ? `<line class="fl-spb" id="fl-${n.id}-sb" x1="${n.x + 14}" x2="${rx}" y1="${n.y + 63.5}" y2="${n.y + 63.5}"/>
       <path class="fl-sp rx" id="fl-${n.id}-sr"/><path class="fl-sp tx" id="fl-${n.id}-st"/>` : ''}${flowBtns(n)}
