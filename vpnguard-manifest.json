@@ -1,8 +1,8 @@
 {
-    "version":  "3.44.1",
-    "build":  "20261106-0055",
+    "version":  "3.45.0",
+    "build":  "20261106-0106",
     "notes":  "",
-    "date":  "2026-11-06T00:55:37.6241240+03:00",
+    "date":  "2026-11-06T01:06:10.9735336+03:00",
     "files":  [
                   {
                       "path":  "agent/Amnezia.cs",
@@ -96,8 +96,8 @@
                   },
                   {
                       "path":  "agent/Modules.cs",
-                      "sha256":  "0e6805be93b90091a7c1c63135a9142e65a5e02701ef6133d0503257caac6a85",
-                      "size":  17881
+                      "sha256":  "4fbd9973e60a5d0b10259a048bc2ddc687686285cff629c6317a219fe7e73a0f",
+                      "size":  17909
                   },
                   {
                       "path":  "agent/Net.cs",
@@ -121,8 +121,8 @@
                   },
                   {
                       "path":  "agent/Software.cs",
-                      "sha256":  "4b66fea64576897f154d4ec44c6f435150cd6a61753c7d1afa02630a6f02fa93",
-                      "size":  23829
+                      "sha256":  "c391d6eb7df3b4ac517852ef98bba5425e952246318b6d79bc409318e0028761",
+                      "size":  24176
                   },
                   {
                       "path":  "agent/Traffic.cs",
@@ -153,6 +153,11 @@
                       "path":  "agent/WgServer.cs",
                       "sha256":  "374256b94e15af1933b3098b0b36108adda7d720ecfdbaff97a7ab1ff5cef43d",
                       "size":  18432
+                  },
+                  {
+                      "path":  "agent/Ws4w.cs",
+                      "sha256":  "cde67eaab9bfa900a7f828901e49c35f1125d2462556c2ae42ea9f3cbbae7dac",
+                      "size":  16922
                   },
                   {
                       "path":  "agent/Zapret.cs",
@@ -266,7 +271,7 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "4a29f0aec200811b7d835417e2425dfc15c4dcb69b396f252e72c3d1fa0e1cbb",
+                      "sha256":  "8b829029ae1338b7aeb87b56cc9d819bbdcdc11de37b51853ce042d110e4d920",
                       "size":  30497
                   },
                   {
@@ -276,8 +281,8 @@
                   },
                   {
                       "path":  "web/app.js",
-                      "sha256":  "be7f44e28caf35fb2cae1d558b2df0baa20ffd2a28b1502f26a7ea0ba434b4f8",
-                      "size":  72434
+                      "sha256":  "6e01624e974dda1466f892c231b39a5b4239b4d8e4eaafdce897013da4b395c7",
+                      "size":  72889
                   },
                   {
                       "path":  "web/flow.js",

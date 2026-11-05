@@ -106,7 +106,7 @@ namespace VpnGuard
             var upd = AddModule("update", "Обновление VpnGuard", () => 60000, AppUpdateTick, AppUpdateCmd, "app-check", "app-update");
             upd.WarnAfterSec = 900; upd.State = () => new Dictionary<string, object> { { "app", AppSnapshot() } };
             AddModule("status", "Сводка", () => 10000, Snapshot);
-            var comp = AddModule("components", "Компоненты", () => 60000, ComponentsTick, ComponentsCmd, "software-check", "install-missing", "check-update");
+            var comp = AddModule("components", "Компоненты", () => 60000, ComponentsTick, ComponentsCmd, "software-check", "install-missing", "check-update", "ws4w-scan", "ws4w-remove");
             comp.Prefixes = new[] { "install " }; comp.WarnAfterSec = 1200;                 // установка может идти минутами
             comp.State = () => new Dictionary<string, object> { { "software", SoftwareSnapshot() }, { "meduzaRemoteVersion", SwS("meduzaRemote") }, { "meduzaLastCheck", When(SwD("meduzaChecked")) } };
             AddModule("failover", "Быстрое переключение", () => Math.Max(2, CfgInt("vpn.fastCheckSec", 5)) * 1000, FailoverTick);
