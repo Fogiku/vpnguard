@@ -28,7 +28,7 @@ param(
     [string]$ConfigPath = ''
 )
 
-$AgentVersion = '3.41.0'
+$AgentVersion = '3.42.0'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -396,8 +396,9 @@ function Invoke-Commands {
         Remove-Item $f.FullName -Force -ErrorAction SilentlyContinue
         Write-Log "Команда из монитора: $a"
         switch ($a) {
-            'app-check'      { Invoke-AppUpdateCheck }
-            'app-update'     { Invoke-AppUpdateCheck -Install }
+            # самообновление — модуль агента «Обновление VpnGuard»; здесь — запасной путь, если тот когда-нибудь сломается
+            'app-check-ps'   { Invoke-AppUpdateCheck }
+            'app-update-ps'  { Invoke-AppUpdateCheck -Install }
             'check-now'      { }
             'wg-create'      {
                 if (-not (Get-Service -Name $W.serviceName -ErrorAction SilentlyContinue) -and -not (Find-WgConf)) {
@@ -527,7 +528,6 @@ function Start-CsAgent {
 function Write-PsStatus {
     $o = [ordered]@{
         updated  = (Get-Date).ToString('o'); pid = $PID; activity = "$($State.activity)"
-        app      = $(try { Get-AppSnapshot } catch { $null })
     }
     $tmp = "$PsStatusPath.tmp"
     $o | ConvertTo-Json -Depth 8 -Compress | Set-Content $tmp -Encoding UTF8
@@ -556,7 +556,7 @@ function Invoke-PsPart {
     if (-not (Test-Path $CmdDir)) { New-Item -ItemType Directory $CmdDir -Force | Out-Null }
     try {
         # zapret ведёт сам агент на C# (Zapret.cs)
-        foreach ($step in 'Remove-ObsoleteFiles', 'Invoke-Commands', 'Invoke-AppUpdateWatch') {
+        foreach ($step in 'Remove-ObsoleteFiles', 'Invoke-Commands') {
             try { & $step } catch { Write-Log "$step : $($_.Exception.Message)" 'ERROR' }
             if (((Get-Date) - $State.lastSnapshot).TotalSeconds -ge 10) { try { Write-PsStatus } catch { } }
         }

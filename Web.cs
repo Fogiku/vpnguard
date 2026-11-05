@@ -38,7 +38,7 @@ namespace VpnGuard
 
         class Ban { public int Count; public DateTime Until = DateTime.MinValue; }
 
-        static readonly string[] WebCmds = { "check-now", "reconnect", "reconnect-meduza", "reconnect-awg", "restart-meduza", "restart-wg", "reapply-ics", "check-update",
+        static readonly string[] WebCmds = { "check-now", "app-update-ps", "app-check-ps", "reconnect", "reconnect-meduza", "reconnect-awg", "restart-meduza", "restart-wg", "reapply-ics", "check-update",
             "zapret-on", "zapret-off", "zapret-test", "zapret-update", "zapret-reload", "zapret-check", "zapret-releases", "meduza-test", "meduza-catalog", "meduza-proto-reset",
             "software-check", "install-missing", "app-check", "app-update", "dual-switch" };
         // удалённая диагностика: true — прерывает интернет клиентам (нужно remote.allowActions)
@@ -60,7 +60,7 @@ namespace VpnGuard
         static bool RemoteCmdKnown(string c) { return RemoteCmds.ContainsKey(c) || AgentCmds().Contains(c); }
         static bool RemoteCmdInterrupts(string c) { bool v; return RemoteCmds.TryGetValue(c, out v) ? v : true; }
         static readonly Dictionary<string, bool> RemoteCmds = new Dictionary<string, bool> {
-            {"check-now",false},{"zapret-check",false},{"meduza-catalog",false},{"software-check",false},{"app-check",false},{"app-update",false},
+            {"check-now",false},{"app-update-ps",false},{"app-check-ps",false},{"zapret-check",false},{"meduza-catalog",false},{"software-check",false},{"app-check",false},{"app-update",false},
             {"reconnect",true},{"reconnect-meduza",true},{"reconnect-awg",true},{"restart-wg",true},{"reapply-ics",true},{"zapret-test",true},{"zapret-reload",true},
             {"meduza-test",true},{"dual-switch",true},{"meduza-proto-reset",true},{"restart-meduza",true} };
         static readonly Dictionary<string, string> WebCfgKeys = new Dictionary<string, string> {

@@ -103,6 +103,8 @@ namespace VpnGuard
             FindModule("zapret").WarnAfterSec = 900;                                    // подбор стратегии идёт несколько минут
             AddModule("ps", "Часть PowerShell", () => 10000, PsPartWatch);
             AddModule("web", "Веб-сервер и значок", () => 30000, WebHostTick);
+            var upd = AddModule("update", "Обновление VpnGuard", () => 60000, AppUpdateTick, AppUpdateCmd, "app-check", "app-update");
+            upd.WarnAfterSec = 900; upd.State = () => new Dictionary<string, object> { { "app", AppSnapshot() } };
             AddModule("status", "Сводка", () => 10000, Snapshot);
             var comp = AddModule("components", "Компоненты", () => 60000, ComponentsTick, ComponentsCmd, "software-check", "install-missing", "check-update");
             comp.Prefixes = new[] { "install " }; comp.WarnAfterSec = 1200;                 // установка может идти минутами

@@ -91,6 +91,7 @@ namespace VpnGuard
             var cp = Published("components") as Dictionary<string, object>;
             if (cp != null) foreach (var kv in cp) ps[kv.Key] = kv.Value;
             try { ps["remote"] = RemoteSnapshot(); } catch { }
+            var up = Published("update") as Dictionary<string, object>; if (up != null && up.ContainsKey("app")) ps["app"] = up["app"];
             // части от модулей; zapret и ретранслятор — копия, опубликованная модулем zapret из своего потока
             var zp = Published("zapret") as Dictionary<string, object>;
             if (zp == null && FindModule("zapret") == null) zp = new Dictionary<string, object> { { "zapret", ZSnapshotSafe() }, { "cz", CzSnapshot() } };   // без модулей (проверка --snapshot)

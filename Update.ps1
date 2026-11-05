@@ -1,4 +1,4 @@
-﻿# VpnGuard — автообновление самого приложения из репозитория GitHub.
+﻿# VpnGuard — ЗАПАСНОЙ путь самообновления (команда app-update-ps). Основной — модуль агента «Обновление VpnGuard» (agent\AppUpdate.cs), та же логика.
 # Источник: https://github.com/<update.repo> (ветка update.branch). В корне репозитория — vpnguard-manifest.json:
 #   { "version": "2.2", "build": "20261103-1530", "notes": "...", "files": [ { "path": "VpnGuard.ps1", "sha256": "...", "size": 123 }, ... ] }
 # Файлы берутся по SHA коммита (raw.githubusercontent.com/<repo>/<sha>/<path>) — неизменяемые адреса, без кэша.
