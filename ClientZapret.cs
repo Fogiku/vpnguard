@@ -1011,7 +1011,7 @@ namespace VpnGuard
             if (!WdLoaded) { if (LoadLibrary(dll) == IntPtr.Zero) { LanError = "не загрузился " + dll; return; } WdLoaded = true; }
             string f = "ifIdx == " + phys.IfIndex + " and ip and ip.SrcAddr >= " + IpS(lo) + " and ip.SrcAddr <= " + IpS(hi) +
                 " and ((ip.DstAddr >= " + IpS(lo) + " and ip.DstAddr <= " + IpS(hi) + ") or ip.DstAddr >= 224.0.0.0)" +
-                (port > 0 ? " and !(udp and (udp.SrcPort == " + port + " or udp.DstPort == " + port + "))" : "");
+                (port > 0 ? " and (not udp or (udp.SrcPort != " + port + " and udp.DstPort != " + port + "))" : "");
             var h = WinDivertOpen(f, WdLayerNetwork, 1000, 1 | 4);
             if (h == WdInvalid || h == IntPtr.Zero) { LanError = "WinDivert: код " + Marshal.GetLastWin32Error(); return; }
             LanH = h; LanSig = sig; LanError = ""; LanNet = IpS(lo) + "/" + bits;
