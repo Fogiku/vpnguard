@@ -94,6 +94,15 @@ namespace VpnGuard
                 LoadHistory();
                 St(History.Count == 1, "история: восстановлена, точки старше 2 ч отброшены");
                 St(LiveT.Count == 1 && LiveH.ContainsKey("r:p") && LiveH["r:p"][0][1] == 20, "история: живые скорости восстановлены");
+
+                // ---- подпись установщиков (компоненты, MeduzaVPN): неподписанный файл — «не подписан»; подписанный — с верным издателем
+                var unsigned = Path.Combine(Root, "unsigned.exe"); File.WriteAllBytes(unsigned, new byte[] { 0x4D, 0x5A, 0, 0 });
+                St(SignStatus(unsigned) != "Valid" && !SignedBy(unsigned, "WireGuard LLC"), "подпись: неподписанный файл не проходит проверку");
+                var wgx = @"C:\Program Files\WireGuard\wireguard.exe";
+                if (File.Exists(wgx)) {
+                    St(SignStatus(wgx) == "Valid" && SignedBy(wgx, "WireGuard LLC"), "подпись: wireguard.exe подписан «WireGuard LLC»");
+                    St(!SignedBy(wgx, "IPFB LLC"), "подпись: чужой издатель не принимается");
+                }
             } catch (Exception e) { St(false, "самопроверка упала: " + e); }
             Console.WriteLine(StFails == 0 ? "ВСЁ OK" : "НЕУДАЧ: " + StFails);
             return StFails;

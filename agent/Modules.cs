@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 
 namespace VpnGuard
@@ -19,7 +20,7 @@ namespace VpnGuard
             public Func<int> IntervalMs;                 // ритм (может зависеть от настроек)
             public Action Tick;                          // одна проверка модуля
             public Action<string> OnCmd;                 // команда, адресованная модулю, — выполняется в его потоке
-            public string[] Commands = new string[0];
+            public string[] Commands = new string[0], Prefixes = new string[0];      // команды целиком и по началу («install …»)
             public int WarnAfterSec = 180;               // одно действие дольше — предупреждение в журнале
             public readonly AutoResetEvent Wake = new AutoResetEvent(false);
             public readonly ConcurrentQueue<string> Cmds = new ConcurrentQueue<string>();
@@ -101,6 +102,9 @@ namespace VpnGuard
                 .State = () => new Dictionary<string, object> { { "zapret", ZSnapshotSafe() }, { "cz", CzSnapshot() } };
             AddModule("ps", "Часть PowerShell", () => 10000, PsPartWatch);
             AddModule("status", "Сводка", () => 10000, Snapshot);
+            var comp = AddModule("components", "Компоненты", () => 60000, ComponentsTick, ComponentsCmd, "software-check", "install-missing", "check-update");
+            comp.Prefixes = new[] { "install " }; comp.WarnAfterSec = 1200;                 // установка может идти минутами
+            comp.State = () => new Dictionary<string, object> { { "software", SoftwareSnapshot() }, { "meduzaRemoteVersion", SwS("meduzaRemote") }, { "meduzaLastCheck", When(SwD("meduzaChecked")) } };
             AddModule("failover", "Быстрое переключение", () => Math.Max(2, CfgInt("vpn.fastCheckSec", 5)) * 1000, FailoverTick);
             Subscribe();
             foreach (var m in Mods.ToList()) { var mm = m; new Thread(() => ModuleLoop(mm)) { IsBackground = true, Name = "mod-" + m.Name }.Start(); }
@@ -169,7 +173,7 @@ namespace VpnGuard
                     lock (Mods) foreach (var m in Mods) { m.TickNow = true; m.Wake.Set(); }
                     continue;
                 }
-                Module to; lock (Mods) to = Mods.FirstOrDefault(m => m.Commands.Contains(a));
+                Module to; lock (Mods) to = Mods.FirstOrDefault(m => m.Commands.Contains(a) || m.Prefixes.Any(p => a.StartsWith(p) && Regex.IsMatch(a.Substring(p.Length), "^[a-z]{1,20}$")));
                 if (to == null) {                            // остальное — PowerShell (обновления, установка компонентов …)
                     try { File.Move(f, Path.Combine(CmdPsDir, Path.GetFileName(f))); } catch { try { File.Delete(f); } catch { } }
                     PsPartAt = DateTime.MinValue; Wake("ps"); continue;

@@ -187,7 +187,8 @@ function Invoke-Diag([switch]$TryFix) {
         Write-Host "AmneziaVPN: $(Get-AwgExe) (есть: $(Test-Path (Get-AwgExe))) · процесс: $(if ($avp) { "PID $($avp.Id)" } else { 'не запущен' }) · адаптер: $(if ($ava) { "$($ava.Name) ($($ava.Description)) $($ava.OperationalStatus)" } else { 'не найден' })"
         Get-Service | Where-Object { $_.Name -like 'Amnezia*' -or $_.Name -like 'WireGuardTunnel*' -or $_.Name -like 'WireGuardManager*' } |
             ForEach-Object { Write-Host "  служба $($_.Name): $($_.Status) / $($_.StartType)" }
-        foreach ($s in @(Get-SoftwareSnapshot)) { Write-Host ("Компонент {0,-24} установлен: {1,-12} последний: {2,-10} нужен: {3} {4}" -f $s.name, $(if ($s.installed) { $s.installed } else { '—' }), $s.latest, $s.needed, $s.error) }
+        $swl = @(); try { $swl = @(([IO.File]::ReadAllText($StatusPath) | ConvertFrom-Json).software) } catch { }
+        foreach ($s in $swl) { Write-Host ("Компонент {0,-24} установлен: {1,-12} последний: {2,-10} нужен: {3} {4}" -f $s.name, $(if ($s.installed) { $s.installed } else { '—' }), $s.latest, $s.needed, $s.error) }
     }
 
     Section 'zapret-discord-youtube'

@@ -1,8 +1,8 @@
 {
-    "version":  "3.38.0",
-    "build":  "20261105-1605",
+    "version":  "3.39.0",
+    "build":  "20261105-1618",
     "notes":  "",
-    "date":  "2026-11-05T16:05:35.1516875+03:00",
+    "date":  "2026-11-05T16:18:12.2281574+03:00",
     "files":  [
                   {
                       "path":  "agent/Amnezia.cs",
@@ -91,8 +91,8 @@
                   },
                   {
                       "path":  "agent/Modules.cs",
-                      "sha256":  "5b8cf5effc18a71a1c8686d6995fd6d60336e0760851bc5a1225a755308998e4",
-                      "size":  16597
+                      "sha256":  "950820b15e1364316b9dea93a00d594b374f0b4d2d36aa4785133da3eff8cf12",
+                      "size":  17360
                   },
                   {
                       "path":  "agent/Net.cs",
@@ -106,13 +106,18 @@
                   },
                   {
                       "path":  "agent/SelfTest.cs",
-                      "sha256":  "156c96236921548678525a0bab7e985af692febd5c63edab4ba96fecc3dfb5d5",
-                      "size":  9476
+                      "sha256":  "57b0b4e832bab970447855b60462142d55eafca77451b4df3265a566fe1c3d27",
+                      "size":  10441
                   },
                   {
                       "path":  "agent/Snapshot.cs",
-                      "sha256":  "8dcaf8bf0b8f4a2373dfde5a8ec420ccbaddd14db01158712248321bf4d82619",
-                      "size":  10703
+                      "sha256":  "2ab0ccd8a9dca5f5599c6646a4e965f684b3f31cbffdac5a5ef0d0a14260ab35",
+                      "size":  10855
+                  },
+                  {
+                      "path":  "agent/Software.cs",
+                      "sha256":  "4b66fea64576897f154d4ec44c6f435150cd6a61753c7d1afa02630a6f02fa93",
+                      "size":  23829
                   },
                   {
                       "path":  "agent/Traffic.cs",
@@ -171,8 +176,8 @@
                   },
                   {
                       "path":  "Diag.ps1",
-                      "sha256":  "178217a38d4497d722342b8e091cc5bdc5f3dab5e60362efdc3426ebd6391885",
-                      "size":  19806
+                      "sha256":  "2a0858360517d7d15a43d8627f827fd0431982cd68ef14644a9a2b700f6fb19d",
+                      "size":  19902
                   },
                   {
                       "path":  "Install.cmd",
@@ -186,8 +191,8 @@
                   },
                   {
                       "path":  "Meduza.ps1",
-                      "sha256":  "0171443b7d6bb83d39c51b2e20f4c87229cf443693022df37a78c2f8713f61d0",
-                      "size":  10821
+                      "sha256":  "381c5044123c64ed3ae59f6e6641c79722171d2ac60a29c69ff807979b35d649",
+                      "size":  7920
                   },
                   {
                       "path":  "Publish.ps1",
@@ -220,14 +225,9 @@
                       "size":  4039
                   },
                   {
-                      "path":  "Software.ps1",
-                      "sha256":  "56d343cf2b7cc5ce212872ce925ea75fdc7f8a927533d21f7a778b737996e65a",
-                      "size":  11732
-                  },
-                  {
                       "path":  "Test.ps1",
-                      "sha256":  "00809f4e5a3cab319e3f4791e4426d6ee3dba5b56a32531d6a2bed771c81feca",
-                      "size":  32017
+                      "sha256":  "cba8a9f72b38a3f644a6c071a1a750789d3e83f19aaacaba383c024236bebdd1",
+                      "size":  32028
                   },
                   {
                       "path":  "Tray.cs",
@@ -251,8 +251,8 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "07760dd13524ffafdb0da0243d14cd3246b0495c166f9ee0f378525a161a6f91",
-                      "size":  33074
+                      "sha256":  "dbcf934b81bf5390e9736881782a329c5c8c4b8bdbd895d141bb1f62452d0ebb",
+                      "size":  32396
                   },
                   {
                       "path":  "Web.cs",

@@ -88,6 +88,8 @@ namespace VpnGuard
             string mode = Mode(), kind = TunnelKind(), upN = UplinkName(); bool updating = MzUpdating();
             var adNames = UpdateTraffic();
             var ps = ReadPsStatus() ?? new Dictionary<string, object>();
+            var cp = Published("components") as Dictionary<string, object>;
+            if (cp != null) foreach (var kv in cp) ps[kv.Key] = kv.Value;
             // части от модулей; zapret и ретранслятор — копия, опубликованная модулем zapret из своего потока
             var zp = Published("zapret") as Dictionary<string, object>;
             if (zp == null && FindModule("zapret") == null) zp = new Dictionary<string, object> { { "zapret", ZSnapshotSafe() }, { "cz", CzSnapshot() } };   // без модулей (проверка --snapshot)

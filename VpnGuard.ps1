@@ -29,7 +29,7 @@ param(
     [string]$ConfigPath = ''
 )
 
-$AgentVersion = '3.38.0'
+$AgentVersion = '3.39.0'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -399,7 +399,6 @@ function Invoke-Commands {
         switch ($a) {
             'app-check'      { Invoke-AppUpdateCheck }
             'app-update'     { Invoke-AppUpdateCheck -Install }
-            'check-update'   { Invoke-MeduzaUpdate -Force }
             'check-now'      { }
             'wg-create'      {
                 if (-not (Get-Service -Name $W.serviceName -ErrorAction SilentlyContinue) -and -not (Find-WgConf)) {
@@ -407,12 +406,7 @@ function Invoke-Commands {
                     catch { Write-Log "wg_server: не удалось создать сервер: $($_.Exception.Message)" 'ERROR' }
                 }
             }
-            'software-check' { Invoke-SoftwareCheck -Force }
-            'install-missing' { Install-MissingSoftware; Invoke-SoftwareCheck -Force }
-            default {
-                if ($a -match '^install ([a-z]+)$') { Install-Software $Matches[1]; Invoke-SoftwareCheck -Force }
-                else { Write-Log "Неизвестная команда: $a" 'WARN' }
-            }
+            default { Write-Log "Неизвестная команда: $a" 'WARN' }     # компоненты, обновление MeduzaVPN — модуль агента «Компоненты»
         }
     }
     # окно сразу видит результат команды
@@ -461,14 +455,6 @@ else {
     function Invoke-TrayWatch { }
     function Get-RemoteSnapshot { $null }
     function Invoke-RemoteServer { }
-}
-$SoftwareModule = Join-Path $Root 'Software.ps1'
-if (Test-Path $SoftwareModule) { . $SoftwareModule }
-else {
-    function Invoke-SoftwareCheck([switch]$Force) { }
-    function Install-Software([string]$Id) { Write-Log 'Компоненты: нет модуля Software.ps1' 'ERROR' }
-    function Install-MissingSoftware { }
-    function Get-SoftwareSnapshot { @() }
 }
 
 # ---------------------------------------------------------------- модули: MeduzaVPN, диагностика, задачи планировщика
@@ -555,11 +541,8 @@ function Start-CsAgent {
 function Write-PsStatus {
     $o = [ordered]@{
         updated  = (Get-Date).ToString('o'); pid = $PID; activity = "$($State.activity)"
-        software = $(try { @(Get-SoftwareSnapshot) } catch { @() })
         remote   = $(try { Get-RemoteSnapshot } catch { $null })
         app      = $(try { Get-AppSnapshot } catch { $null })
-        meduzaRemoteVersion = "$($State.remoteVersion)"
-        meduzaLastCheck     = Format-When $State.lastUpdateCheck
     }
     $tmp = "$PsStatusPath.tmp"
     $o | ConvertTo-Json -Depth 8 -Compress | Set-Content $tmp -Encoding UTF8
@@ -568,7 +551,7 @@ function Write-PsStatus {
 }
 
 function Remove-ObsoleteFiles {
-    foreach ($n in 'Agent.cs', 'Zapret.cs', 'ClientZapret.cs', 'VpnGuardMonitor.ps1', 'VpnGuardMonitor.cmd') {
+    foreach ($n in 'Agent.cs', 'Zapret.cs', 'ClientZapret.cs', 'VpnGuardMonitor.ps1', 'VpnGuardMonitor.cmd', 'Software.ps1') {
         $f = Join-Path $Root $n
         if (-not (Test-Path $f)) { continue }
         if ($n -like '*.cs' -and -not ("$(Get-Content $f -TotalCount 1 -ErrorAction SilentlyContinue)" -match 'Перенесено в agent')) { continue }   # только заглушки
@@ -588,7 +571,7 @@ function Invoke-PsPart {
     if (-not (Test-Path $CmdDir)) { New-Item -ItemType Directory $CmdDir -Force | Out-Null }
     try {
         # zapret ведёт сам агент на C# (Zapret.cs)
-        foreach ($step in 'Remove-ObsoleteFiles', 'Invoke-Commands', 'Invoke-MeduzaUpdate', 'Invoke-SoftwareCheck', 'Invoke-RemoteWatch', 'Invoke-AppUpdateWatch', 'Invoke-TrayWatch') {
+        foreach ($step in 'Remove-ObsoleteFiles', 'Invoke-Commands', 'Invoke-RemoteWatch', 'Invoke-AppUpdateWatch', 'Invoke-TrayWatch') {
             try { & $step } catch { Write-Log "$step : $($_.Exception.Message)" 'ERROR' }
             if (((Get-Date) - $State.lastSnapshot).TotalSeconds -ge 10) { try { Write-PsStatus } catch { } }
         }
@@ -616,7 +599,7 @@ if ($SetupTask) { Invoke-SetupTask $SetupTask; return }
 if ($Diag)      { try { [Console]::OutputEncoding = New-Object Text.UTF8Encoding $false } catch { }; Invoke-Diag -TryFix:$TryFix; return }
 if ($ZapretTest) { Invoke-ZapretTestRun; return }
 if ($WebTask) { Invoke-WebTask $WebTask $WebArg; return }
-if ($CheckUpdate) { Invoke-MeduzaUpdate -Force; return }
+if ($CheckUpdate) { Set-Content (Join-Path $DataDir ('cmd\{0}.cmd' -f [DateTime]::UtcNow.Ticks)) 'check-update' -Encoding ASCII; Write-Host 'Команда агенту: проверить обновление MeduzaVPN'; return }
 if ($InstallCli)  { Update-MeduzaCli (Get-Release); return }
 if ($PsPart)      { Invoke-PsPart; return }
 if (-not (Start-CsAgent)) { exit 1 }
