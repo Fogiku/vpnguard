@@ -297,9 +297,29 @@ namespace VpnGuard
             return r;
         }
 
+        // хотя бы один узел открывается через адрес ip — все сразу, ответ по первому успеху (не дольше timeoutMs)
+        static bool AnyVia(string ip, string[] hosts, int timeoutMs)
+        {
+            if (ip == null || hosts.Length == 0) return false;
+            using (var done = new ManualResetEvent(false)) {
+                int left = hosts.Length, ok = 0;
+                foreach (var h in hosts) {
+                    var hh = h;
+                    ThreadPool.QueueUserWorkItem(_ => {
+                        bool r = TcpVia(ip, hh, timeoutMs);
+                        if (r) Interlocked.Exchange(ref ok, 1);
+                        if (r || Interlocked.Decrement(ref left) == 0) { try { done.Set(); } catch { } }
+                    });
+                }
+                done.WaitOne(timeoutMs + 1500);
+                return ok == 1;
+            }
+        }
         static bool ProbeVia(string adapter, int timeoutMs, List<long> times)
         {
-            string ip = Ipv4(adapter); if (ip == null) return false; bool ok = false;
+            string ip = Ipv4(adapter); if (ip == null) return false;
+            if (times == null) return AnyVia(ip, ProbeHosts(), timeoutMs);
+            bool ok = false;
             foreach (var h in ProbeHosts()) { var sw = Stopwatch.StartNew(); if (TcpVia(ip, h, timeoutMs)) { ok = true; if (times != null) times.Add(sw.ElapsedMilliseconds); else break; } }
             return ok;
         }
@@ -810,8 +830,8 @@ namespace VpnGuard
         static TunDiagRes AwgDiag; static string AwgDiagLogged = "";
         static bool AwgTrafficOk(string name)
         {
-            bool ok = ProbeVia(name, 4000, null);
-            if (!ok || AwgDiag == null || (DateTime.Now - AwgDiag.At).TotalMinutes >= 10) {
+            bool ok = false;
+            {
                 try {
                     var d = TunDiag(name); AwgDiag = d; ok = ok || d.Ok;
                     if (d.Short != AwgDiagLogged) { Log("AmneziaVPN: диагностика туннеля — " + d.Text, d.Ok ? "INFO" : "WARN"); AwgDiagLogged = d.Short; }
@@ -1000,8 +1020,7 @@ namespace VpnGuard
         {
             var n = KindAdapter(k); if (string.IsNullOrEmpty(n) || !Up(n)) return false;
             string ip = Ipv4(n); if (ip == null) return false;
-            foreach (var h in ProbeHosts()) if (TcpVia(ip, h, 3000)) return true;
-            return false;
+            return AnyVia(ip, ProbeHosts(), 3000);
         }
         static void KindWatch(string k) { if (k == "meduza") MeduzaWatch(); else AmneziaWatch(); }
         static void StopKind(string k)
@@ -1305,7 +1324,7 @@ namespace VpnGuard
             return res;
         }
         class IcsState { public List<IcsConn> All; public IcsConn Pub, Priv; public bool Ok; }
-        static IcsState IcsLast; static DateTime IcsLastAt = DateTime.MinValue;
+        static IcsState IcsLast; static DateTime IcsLastAt = DateTime.MinValue; static string IcsLastUp = "";
         static IcsState IcsStatus()
         {
             string up = UplinkName(), wg = WgIf(); var all = IcsConnections();
@@ -1399,7 +1418,9 @@ namespace VpnGuard
             if (!CfgBool("sharing.enabled", true)) return;
             string up = UplinkName(), wg = WgIf();
             if (string.IsNullOrEmpty(up) || !Up(up) || !Up(wg)) return;
-            string addr = WgServerAddress(); var st = IcsStatus(); IcsLast = st; IcsLastAt = DateTime.UtcNow; string wgIp = Ipv4(wg);
+            string addr = WgServerAddress(); string wgIp = Ipv4(wg);
+            if (!ForceIcs && IcsLast != null && IcsLast.Ok && up == IcsLastUp && (addr == null || wgIp == addr) && (DateTime.UtcNow - IcsLastAt).TotalSeconds < 60) return;
+            var st = IcsStatus(); IcsLast = st; IcsLastAt = DateTime.UtcNow; IcsLastUp = up;
             bool ipOk = addr == null || wgIp == addr || (DateTime.Now - LastIpFix).TotalMinutes < 10;
             if (st.Ok && ipOk && !ForceIcs) return;
             if (!ForceIcs && (DateTime.Now - LastIcsApply).TotalSeconds < 20) return;
