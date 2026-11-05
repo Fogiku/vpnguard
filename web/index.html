@@ -453,7 +453,7 @@ function flowMount() {
 }
 function flowBlock() {
   return `<div class="sec">Схема трафика — кто с кем соединён и сколько пропускает</div><div class="card flow"><div id="flowhost"></div>
-    <div class="legend" style="flex-wrap:wrap;margin-top:8px"><span><b style="background:var(--vpn)"></b>через VPN</span><span><b style="background:var(--zp)"></b>мимо VPN через zapret</span><span><b style="background:var(--accent)"></b>клиенты WG-Server</span><span><span class="ftx">&gt;&gt;&gt; ↑ отдача</span> · <span class="frx">&lt;&lt;&lt; ↓ загрузка</span> · чем быстрее стрелки, тем больше трафика · Мбит/с</span></div></div>`;
+    <div class="legend" style="flex-wrap:wrap;margin-top:8px"><span><b style="background:var(--vpn)"></b>через VPN</span><span><b style="background:var(--zp)"></b>мимо VPN через zapret</span><span><b style="background:var(--accent)"></b>клиенты WG-Server</span><span><b style="background:var(--lan)"></b>локальная сеть (не интернет)</span><span><span class="ftx">&gt;&gt;&gt; ↑ отдача</span> · <span class="frx">&lt;&lt;&lt; ↓ загрузка</span> · чем быстрее стрелки, тем больше трафика · Мбит/с</span></div></div>`;
 }
 // живые скорости раз в 2 с — только на главной и пока вкладка видна
 async function liveTick() {
