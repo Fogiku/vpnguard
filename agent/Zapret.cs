@@ -34,10 +34,7 @@ namespace VpnGuard
         static string ZBadSig = "", ZVideoVia = "";
         static DateTime ZVideoMissAt = DateTime.MinValue;
 
-        static readonly Dictionary<string, object> ZDefaults = new Dictionary<string, object> {
-            {"zapret.dir", ""}, {"zapret.autoUpdate", true}, {"zapret.updateCheckHours", 12}, {"zapret.version", ""}, {"zapret.strategy", ""},
-            {"zapret.retestHours", 24}, {"zapret.healthCheckMin", 10}, {"zapret.gameFilter", "disabled"}, {"zapret.curlTimeoutSec", 5},
-            {"zapret.videoCheck", true}, {"zapret.routeGoogleRanges", true}, {"zapret.routeIspVideo", true}, {"zapret.maxRoutes", 1500} };
+        static Dictionary<string, object> ZDefaults { get { return Defaults; } }      // умолчания zapret.* — из config-schema.txt
         static readonly string[] ZDefTargets = { "https://www.youtube.com", "https://i.ytimg.com", "https://redirector.googlevideo.com", "https://discord.com", "https://gateway.discord.gg", "https://cdn.discordapp.com" };
         static readonly string[] ZDefDomains = { "discord.com", "discord.gg", "discordapp.com", "discordapp.net", "discord.media", "discordcdn.com", "gateway.discord.gg", "cdn.discordapp.com",
             "media.discordapp.net", "updates.discord.com", "dis.gd", "discord-attachments-uploads-prd.storage.googleapis.com" };

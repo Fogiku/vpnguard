@@ -156,17 +156,27 @@ namespace VpnGuard
         }
 
         // ---------------------------------------------------------------- настройки (умолчания — как у агента PowerShell)
-        static readonly Dictionary<string, object> Defaults = new Dictionary<string, object> {
-            {"checkIntervalSec", 30}, {"logRetentionDays", 14}, {"vpn.mode", "meduza"}, {"vpn.stopInactive", true},
-            {"meduza.processName", "medusa_vpn"}, {"meduza.adapterName", "MeduzaVPN ULTRA"}, {"meduza.pipeName", "MeduzaVPN"}, {"meduza.cliPath", ""}, {"meduza.exePath", ""},
-            {"meduza.serviceId", ""}, {"meduza.protocol", "ultra"}, {"meduza.connectTimeoutSec", 90}, {"meduza.startupGraceSec", 60},
-            {"meduza.probeFailuresBeforeReconnect", 3}, {"meduza.maxRestartsPer30Min", 5}, {"meduza.autoProtocol", true}, {"meduza.protocolReturnMin", 60},
-            {"ws4w.interfaceName", "wg_server"}, {"ws4w.serviceName", "WireGuardTunnel$wg_server"}, {"ws4w.configPath", ""}, {"ws4w.wireguardExe", @"C:\Program Files\WireGuard\wireguard.exe"},
-            {"ws4w.serverAddress", ""}, {"ws4w.autoCreateServer", true}, {"sharing.enabled", true},
-            {"amnezia.exe", ""}, {"amnezia.serviceName", "AmneziaVPN-service"}, {"amnezia.adapterPattern", "amnezia|tun2socks|TAP-Windows Adapter V9"},
-            {"zapret.enabled", false} };
+        // умолчания настроек — из единой схемы config-schema.txt (её же читают веб-сервер и PowerShell)
+        static Dictionary<string, object> Defaults = new Dictionary<string, object>();
+        static DateTime SchemaStamp = DateTime.MinValue;
+        static void LoadSchema()
+        {
+            var f = Path.Combine(Root, "config-schema.txt");
+            DateTime st = File.Exists(f) ? File.GetLastWriteTimeUtc(f) : DateTime.MinValue;
+            if (st == SchemaStamp) return;
+            SchemaStamp = st;
+            if (st == DateTime.MinValue) { Log("Нет config-schema.txt — работаю на умолчаниях из кода", "WARN"); return; }
+            try {
+                var o = Json.DeserializeObject(File.ReadAllText(f, Encoding.UTF8)) as Dictionary<string, object>;
+                var d = new Dictionary<string, object>();
+                foreach (var e in ((o["settings"] as object[]) ?? new object[0]).OfType<Dictionary<string, object>>())
+                    if (e.ContainsKey("key") && e.ContainsKey("default")) d[Convert.ToString(e["key"])] = e["default"];
+                Defaults = d;
+            } catch (Exception e) { Log("config-schema.txt с ошибкой — работаю на прежних умолчаниях: " + e.Message, "ERROR"); }
+        }
         static void LoadCfg(bool force)
         {
+            LoadSchema();
             DateTime st = File.Exists(ConfigPath) ? File.GetLastWriteTimeUtc(ConfigPath) : DateTime.MinValue;
             if (!force && st == CfgStamp) return;
             CfgStamp = st;

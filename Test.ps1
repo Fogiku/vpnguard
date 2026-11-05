@@ -44,6 +44,32 @@ if (Test-Path $web) {
 }
 if (-not $fail.Count) { Ok "файлов: $($files.Count), без синтаксических ошибок" }
 
+# ---------------------------------------------------------------- 1б. единая схема настроек
+Write-Host '1б. Единая схема настроек (config-schema.txt): все ключи из кода есть в схеме, запасные значения в коде совпадают с ней'
+$schF = Join-Path $Root 'config-schema.txt'
+if (-not (Test-Path $schF)) { Fail 'нет config-schema.txt' }
+else {
+    $sch = @{}; foreach ($e in @((Get-Content $schF -Raw -Encoding UTF8 | ConvertFrom-Json).settings)) { $sch["$($e.key)"] = $e.default }
+    $code = (@(Get-ChildItem (Join-Path $Root 'agent') -Filter '*.cs' -File | ForEach-Object { [IO.File]::ReadAllText($_.FullName) }) + [IO.File]::ReadAllText((Join-Path $Root 'Web.cs'))) -join "`n"
+    $bad = @()
+    foreach ($m in [regex]::Matches($code, 'Cfg(?:Int|Bool|Str|List)\(\s*"([\w.]*\w)"')) { if (-not $sch.ContainsKey($m.Groups[1].Value)) { $bad += "$($m.Groups[1].Value) — ключа нет в схеме" } }
+    foreach ($m in [regex]::Matches($code, 'Cfg(Int|Bool|Str)\(\s*"([\w.]+)"\s*,\s*(-?\d+|true|false|@?"(?:[^"\\]|\\.)*")\s*\)')) {
+        $k = $m.Groups[2].Value; $lit = $m.Groups[3].Value
+        if (-not $sch.ContainsKey($k)) { continue }
+        $v = switch ($m.Groups[1].Value) {
+            'Int'  { [int]$lit }
+            'Bool' { $lit -eq 'true' }
+            'Str'  { if ($lit.StartsWith('@')) { $lit.Substring(2, $lit.Length - 3) } else { $lit.Substring(1, $lit.Length - 2).Replace('\\', '\') } }
+        }
+        if ("$v" -ne "$($sch[$k])") { $bad += "$k — в коде $lit, в схеме $($sch[$k])" }
+    }
+    foreach ($m in [regex]::Matches($code, 'CfgList\(\s*"([\w.]+)"\s*,\s*new\[\]\s*\{([^}]*)\}')) {
+        $k = $m.Groups[1].Value; $vals = @([regex]::Matches($m.Groups[2].Value, '"([^"]*)"') | ForEach-Object { $_.Groups[1].Value })
+        if ($sch.ContainsKey($k) -and (@($sch[$k]) -join ',') -ne ($vals -join ',')) { $bad += "$k — в коде [$($vals -join ', ')], в схеме [$(@($sch[$k]) -join ', ')]" }
+    }
+    if ($bad.Count) { $bad | Select-Object -Unique | ForEach-Object { Fail "схема настроек: $_" } } else { Ok "настроек в схеме: $($sch.Count), код с ней согласован" }
+}
+
 # ---------------------------------------------------------------- 2. правила
 Write-Host '2. Правила'
 $aliases = @{}; foreach ($a in Get-Alias) { $aliases[$a.Name.ToLower()] = $a.Definition }

@@ -29,7 +29,7 @@ param(
     [string]$ConfigPath = ''
 )
 
-$AgentVersion = '3.33.0'
+$AgentVersion = '3.34.0'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -49,113 +49,18 @@ foreach ($d in $DataDir, $LogDir, $DlDir, $BinDir, $CmdDir) {
 
 # ---------------------------------------------------------------- config
 
-function Get-DefaultConfig { @{
-    checkIntervalSec = 30
-    logRetentionDays = 14
-    meduza = @{
-        exePath                      = ''          # пусто = из реестра
-        processName                  = 'medusa_vpn'
-        adapterName                  = 'MeduzaVPN ULTRA'
-        pipeName                     = 'MeduzaVPN'
-        cliPath                      = ''          # пусто = bin\meduzavpn.exe
-        serviceId                    = ''          # id/имя VPN из `meduzavpn list --services`; пусто = единственный
-        protocol                     = 'ultra'
-        autoProtocol                 = $true       # связь пропала и переподключение не помогло — пробовать другие протоколы
-        protocolReturnMin            = 60          # работаем на запасном протоколе — раз в N мин пробовать вернуть выбранный (0 = нет)
-        connectTimeoutSec            = 90
-        startupGraceSec              = 60          # сколько ждать автоподключения приложения после старта
-        probeHosts                   = @('1.1.1.1:443', '8.8.8.8:443', '9.9.9.9:443')
-        probeFailuresBeforeReconnect = 3
-        maxRestartsPer30Min          = 5
-        autoUpdate                   = $true
-        updateCheckHours             = 6
-        releaseUrl                   = 'https://meduzavpn-builds.fra1.digitaloceanspaces.com/latest/release.json'
-        signer                       = 'IPFB LLC'
-        installerArgs                = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /NOCANCEL /SP-'
+# умолчания настроек — из единой схемы config-schema.txt (её же читают агент и веб-сервер): «a.b.c» → вложенные таблицы
+function Get-DefaultConfig {
+    $c = @{}
+    $f = Join-Path $Root 'config-schema.txt'
+    if (-not (Test-Path $f)) { return $c }
+    foreach ($e in @((Get-Content $f -Raw -Encoding UTF8 | ConvertFrom-Json).settings)) {
+        $parts = "$($e.key)".Split('.'); $cur = $c
+        for ($i = 0; $i -lt $parts.Count - 1; $i++) { if (-not $cur.ContainsKey($parts[$i])) { $cur[$parts[$i]] = @{} }; $cur = $cur[$parts[$i]] }
+        if ($e.default -is [array]) { $cur[$parts[-1]] = @($e.default) } else { $cur[$parts[-1]] = $e.default }
     }
-    ws4w = @{
-        interfaceName = 'wg_server'
-        serviceName   = 'WireGuardTunnel$wg_server'
-        configPath    = ''                         # пусто = найти автоматически
-        wireguardExe  = 'C:\Program Files\WireGuard\wireguard.exe'
-        serverAddress = ''                         # пусто = из конфига wg_server
-        endpoint      = ''                         # адрес для клиентов (IP или имя[:порт]); пусто = из клиентов WS4W или внешний IP
-        clientDns     = ''                         # DNS в конфиге клиента; пусто = как у клиентов WS4W или адрес сервера
-        autoCreateServer = $true                   # нет ни конфига, ни службы wg_server — создать сервер самому
-        clientZapret     = $false                  # zapret и для клиентов: их трафик к адресам zapret агент пускает через zapret ПК (только агент на C#)
-        clientNoZapret   = @()                     # IP клиентов, которым zapret не нужен — весь их трафик через VPN
-        clientOff        = @()                     # IP отключённых клиентов — агент убирает их из работающего туннеля (конфиг не меняется)
-        newServerAddress = '10.253.0.1/24'
-        newServerPort    = 51820
-    }
-    sharing = @{
-        enabled = $true
-    }
-    vpn = @{
-        mode         = 'meduza'      # meduza | amnezia | dual (оба, с переключением) | zapret (без VPN: напрямую, YouTube/Discord через zapret)
-        stopInactive = $true         # при смене режима закрыть неиспользуемый VPN (чтобы не было двух туннелей)
-        primary      = 'meduza'      # режим dual: основной туннель (meduza | amnezia)
-        dualHot      = $true         # режим dual: резервный туннель поднят всегда (иначе поднимается только при сбое)
-        failoverChecks = 2           # режим dual: сколько проверок подряд без трафика до переключения
-        failbackMin  = 5             # режим dual: основной снова работает N мин — вернуть трафик на него (0 = не возвращать)
-    }
-    amnezia = @{                   # приложение AmneziaVPN (сервер и протокол выбираются в нём самом)
-        exe            = ''          # пусто = из записи установщика или C:\Program Files\AmneziaVPN\AmneziaVPN.exe
-        serviceName    = 'AmneziaVPN-service'
-        adapterPattern = 'amnezia|tun2socks|TAP-Windows Adapter V9'   # имя или описание адаптера туннеля (зависит от протокола)
-    }
-    software = @{
-        checkHours = 12
-    }
-    update = @{
-        repo       = 'Fogiku/vpnguard'   # владелец/репозиторий на GitHub, откуда обновлять само приложение
-        branch     = 'main'
-        auto       = $true       # ставить обновления самому
-        checkHours = 3
-        token      = ''          # только для закрытого репозитория
-    }
-    agent = @{
-        psPartMin = 30           # как часто агент на C# запускает часть PowerShell (обновления, компоненты, веб-сервер), мин
-    }
-    ui = @{
-        tray = $true             # значок у часов вместо окна (ярлык VpnGuard открывает его; окно — в меню значка)
-    }
-    web = @{
-        enabled = $true          # веб-интерфейс: http://localhost:8765/ (с других устройств сети и wg_server — по паролю token)
-        port    = 8765
-        token   = ''             # пароль для входа с других устройств; создаётся сам
-    }
-    remote = @{
-        enabled      = $false        # удалённая диагностика: включается из окна на N часов
-        until        = ''            # до какого времени (ISO); потом выключается сама
-        token        = ''            # новый при каждом включении
-        port         = 8765
-        allowFrom    = 'any'         # any | local (только локальная сеть и клиенты wg_server)
-        allowActions = $false        # разрешить удалённо команды, которые прерывают интернет (тесты, переподключение)
-    }
-    zapret = @{
-        enabled           = $false      # включается кнопкой в окне
-        dir               = ''          # пусто = <папка VpnGuard>\zapret
-        autoUpdate        = $true
-        updateCheckHours  = 12
-        version           = ''          # пусто = последняя; иначе конкретная версия (например 1.10.2) — ставится и не обновляется
-        strategy          = ''          # пусто = подбирать автоматически; иначе имя .bat без расширения
-        retestHours       = 24          # переподбирать раз в N часов
-        healthCheckMin    = 10          # проверять, что сайты открываются, раз в N минут
-        gameFilter        = 'disabled'  # disabled | all | tcp | udp
-        curlTimeoutSec    = 5
-        videoCheck        = $true       # проверять ещё и видеосервер YouTube (googlevideo) и загрузку страницы целиком
-        testTargets       = @('https://www.youtube.com', 'https://i.ytimg.com', 'https://redirector.googlevideo.com',
-                              'https://discord.com', 'https://gateway.discord.gg', 'https://cdn.discordapp.com')
-        routeGoogleRanges = $true       # официальные диапазоны Google (YouTube) — мимо VPN
-        routeIspVideo     = $true       # и видеосерверы YouTube у провайдера (кэш Google в сети провайдера) — иначе видео уходит в VPN и не грузится
-        routeDomainLists  = @('list-google.txt')
-        routeDomains      = @('discord.com', 'discord.gg', 'discordapp.com', 'discordapp.net', 'discord.media', 'discordcdn.com',
-                              'gateway.discord.gg', 'cdn.discordapp.com', 'media.discordapp.net', 'updates.discord.com', 'dis.gd',
-                              'discord-attachments-uploads-prd.storage.googleapis.com')
-        maxRoutes         = 1500
-    }
-} }
+    return $c
+}
 
 function Merge-Config($base, $over) {
     if ($null -eq $over) { return $base }

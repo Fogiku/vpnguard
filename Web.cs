@@ -70,49 +70,27 @@ namespace VpnGuard
 
         // все настройки для вкладки «Настройки» веб-интерфейса: ключ, раздел, название, тип, подсказка, значение по умолчанию.
         // тип: int:мин:макс | bool | enum:a|b|c | text:регулярка | hosts (хост:порт через запятую)
-        static readonly string[][] Settings = {
-            new[]{"checkIntervalSec","Общее","Интервал проверки, сек","int:10:600","как часто агент проверяет всё","30"},
-            new[]{"logRetentionDays","Общее","Хранить журналы, дней","int:1:365","","14"},
-            new[]{"agent.psPartMin","Общее","Часть PowerShell: обновления и компоненты, мин","int:5:240","как часто запускать часть PowerShell (по командам — сразу)","30"},
-            new[]{"amnezia.adapterPattern","Режим","AmneziaVPN: адаптер туннеля (шаблон)","text:^[\\w \\-\\.\\|\\(\\)]{1,120}$","часть имени или описания адаптера; разные протоколы — разные адаптеры","amnezia|tun2socks|TAP-Windows Adapter V9"},
-            new[]{"vpn.mode","Режим","Режим работы","enum:meduza|amnezia|dual|zapret","meduza · amnezia (AmneziaVPN) · dual (два туннеля) · zapret (без VPN)","meduza"},
-            new[]{"vpn.primary","Режим","Два туннеля: основной","enum:meduza|amnezia","через какой идёт трафик, пока он работает","meduza"},
-            new[]{"vpn.dualHot","Режим","Два туннеля: резерв всегда поднят","bool","выключено — резерв поднимается только при сбое","true"},
-            new[]{"vpn.fastCheckSec","Режим","Два туннеля: быстрая проверка активного, сек","int:2:60","как часто проверять туннель, через который идёт трафик","5"},
-            new[]{"vpn.fastFailChecks","Режим","Два туннеля: неудачных быстрых проверок до переключения","int:1:10","столько проверок подряд не прошли — трафик на резерв (если он работает)","2"},
-            new[]{"amnezia.lanGuard","Режим","AmneziaVPN: защита локальной сети","bool","если при поднятом AmneziaVPN пропал роутер или клиенты WG-Server, а без него вернулись — отключить его (Kill Switch)","true"},
-            new[]{"amnezia.guardBlockMin","Режим","AmneziaVPN: после срабатывания защиты не запускать, мин","int:10:1440","повторный выбор режима снимает запрет сразу","180"},
-            new[]{"traffic.lanMeter","Общее","Считать локальную сеть отдельно от интернета","bool","WinDivert только смотрит пакеты к домашним адресам; выключите, если мешает при больших копированиях по сети","true"},
-            new[]{"vpn.failoverChecks","Режим","Два туннеля: проверок до переключения","int:1:10","подряд без трафика (отключение — сразу)","2"},
-            new[]{"vpn.failbackMin","Режим","Два туннеля: вернуться на основной через, мин","int:0:1440","0 — не возвращать","5"},
-            new[]{"vpn.stopInactive","Режим","Закрывать неиспользуемый VPN","bool","чтобы не работали два туннеля сразу","true"},
-            new[]{"meduza.serviceId","MeduzaVPN","VPN (id или часть имени)","text:^[\\w \\-\\.\\(\\)]{0,100}$","пусто — единственный на аккаунте",""},
-            new[]{"meduza.protocol","MeduzaVPN","Протокол","text:^[a-z0-9\\-]{1,40}$","ultra","ultra"},
-            new[]{"meduza.autoProtocol","MeduzaVPN","Пробовать другие протоколы","bool","если связь пропала и переподключение не помогло","true"},
-            new[]{"meduza.protocolReturnMin","MeduzaVPN","Возвращать выбранный протокол, мин","int:0:1440","0 — не возвращать","60"},
-            new[]{"meduza.adapterName","MeduzaVPN","Имя адаптера туннеля","text:^[\\w \\-\\.]{1,60}$","","MeduzaVPN ULTRA"},
-            new[]{"meduza.autoUpdate","MeduzaVPN","Автообновление MeduzaVPN","bool","скачивание, проверка подписи, тихая установка","true"},
-            new[]{"meduza.updateCheckHours","MeduzaVPN","Проверять обновления каждые, ч","int:1:168","","6"},
-            new[]{"meduza.probeHosts","MeduzaVPN","Проверка трафика (хост:порт, …)","hosts","через запятую","1.1.1.1:443, 8.8.8.8:443, 9.9.9.9:443"},
-            new[]{"meduza.probeFailuresBeforeReconnect","MeduzaVPN","Неудачных проверок до переподключения","int:1:50","","3"},
-            new[]{"meduza.startupGraceSec","MeduzaVPN","Ждать автоподключения после старта, сек","int:0:600","","60"},
-            new[]{"meduza.maxRestartsPer30Min","MeduzaVPN","Максимум перезапусков за 30 мин","int:1:100","защита от бесконечных перезапусков","5"},
-            new[]{"ws4w.endpoint","WG-Server","Адрес для клиентов (IP или имя[:порт])","text:^[\\w\\.\\-:\\[\\]]{0,100}$","пусто — как у клиентов WS4W или внешний IP",""},
-            new[]{"ws4w.clientDns","WG-Server","DNS для новых клиентов","text:^[\\d\\., a-fA-F:]{0,100}$","пусто — как у клиентов WS4W или адрес сервера",""},
-            new[]{"ws4w.clientZapret","WG-Server","zapret и для клиентов","bool","трафик клиентов к адресам zapret (YouTube, Discord …) — через zapret этого ПК, остальное — через VPN; на устройствах ничего менять не нужно (только агент на C#)","false"},
-            new[]{"ws4w.autoCreateServer","WG-Server","Создавать сервер, если настроек нет","bool","нет ни конфига, ни службы wg_server","true"},
-            new[]{"sharing.enabled","Раздача","Управлять раздачей ICS","bool","туннель → WG-Server","true"},
-            new[]{"zapret.autoUpdate","zapret","Автообновление zapret","bool","если версия не выбрана","true"},
-            new[]{"zapret.updateCheckHours","zapret","Проверять обновления каждые, ч","int:1:168","","12"},
-            new[]{"zapret.retestHours","zapret","Переподбирать стратегию каждые, ч","int:1:720","и сразу — если сайты перестали открываться","24"},
-            new[]{"zapret.healthCheckMin","zapret","Проверять сайты каждые, мин","int:2:240","","10"},
-            new[]{"zapret.videoCheck","zapret","Проверять видео YouTube","bool","видеосервер и скорость загрузки","true"},
-            new[]{"zapret.routeIspVideo","zapret","Видеосерверы провайдера — мимо VPN","bool","иначе в режиме с VPN видео может не грузиться","true"},
-            new[]{"zapret.gameFilter","zapret","Игровой фильтр","enum:disabled|all|tcp|udp","disabled — выключен (как в service.bat)","disabled"},
-            new[]{"software.checkHours","Обновления","Проверять версии компонентов, ч","int:1:168","","12"},
-            new[]{"update.auto","Обновления","Ставить обновления VpnGuard само","bool","проверка sha256 и кода, копия старых файлов","true"},
-            new[]{"update.checkHours","Обновления","Проверять обновления VpnGuard каждые, ч","int:1:168","","3"},
-        };
+        // страница «Настройки»: записи config-schema.txt с title (ключ, раздел, подпись, тип, подсказка, умолчание) — перечитываются при смене файла
+        static string[][] SettingsCache = new string[0][]; static DateTime SettingsStamp = DateTime.MinValue;
+        static string[][] Settings
+        {
+            get {
+                var f = Path.Combine(Root, "config-schema.txt");
+                DateTime st = File.Exists(f) ? File.GetLastWriteTimeUtc(f) : DateTime.MinValue;
+                if (st == SettingsStamp) return SettingsCache;
+                SettingsStamp = st;
+                try {
+                    var o = Json.DeserializeObject(File.ReadAllText(f, Encoding.UTF8)) as Dictionary<string, object>;
+                    SettingsCache = ((o["settings"] as object[]) ?? new object[0]).OfType<Dictionary<string, object>>().Where(e => e.ContainsKey("title")).Select(e => {
+                        object dv = e.ContainsKey("default") ? e["default"] : "";
+                        string ds = dv is bool ? ((bool)dv ? "true" : "false") : dv is object[] ? string.Join(", ", ((object[])dv).Select(x => Convert.ToString(x))) : Convert.ToString(dv, System.Globalization.CultureInfo.InvariantCulture);
+                        Func<string, string> g = k => e.ContainsKey(k) ? Convert.ToString(e[k]) : "";
+                        return new[] { g("key"), g("group"), g("title"), g("type"), g("desc"), ds };
+                    }).ToArray();
+                } catch (Exception e) { Log("config-schema.txt: " + e.Message, "ERROR"); }
+                return SettingsCache;
+            }
+        }
         static object SettingValue(string[] d)
         {
             object v = CfgGet(d[0], null);

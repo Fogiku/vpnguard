@@ -94,7 +94,7 @@ namespace VpnGuard
         {
             AddModule("tunnels", "Туннели", CheckMs, () => VpnWatch(), TunnelCmd,
                 "reconnect", "reconnect-meduza", "reconnect-awg", "restart-meduza", "meduza-test", "meduza-catalog", "meduza-proto-reset", "dual-switch");
-            AddModule("wg", "WG-Server", () => 15000, () => { WgWatch(); WgClientsWatch(); }, c => { if (c == "restart-wg") { SvcRestart(CfgStr("ws4w.serviceName", "")); Emit("wg.restarted"); } }, "restart-wg");
+            AddModule("wg", "WG-Server", () => 15000, () => { WgWatch(); WgClientsWatch(); }, c => { if (c == "restart-wg") { SvcRestart(CfgStr("ws4w.serviceName", "WireGuardTunnel$wg_server")); Emit("wg.restarted"); } }, "restart-wg");
             AddModule("ics", "Раздача", () => 10000, SharingWatch, c => { if (c == "reapply-ics") ForceIcs = true; }, "reapply-ics");
             AddModule("zapret", "zapret", CheckMs, () => { ZapretWatch(); ClientZapretWatch(); LanWatch(); }, c => ZCommand(c),
                 "zapret-on", "zapret-off", "zapret-check", "zapret-releases", "zapret-update", "zapret-reload", "zapret-test")

@@ -1,0 +1,598 @@
+﻿{
+ "_": "Единая схема настроек VpnGuard: ключ, умолчание; с title — показывается на странице «Настройки» (type: int:мин:макс | bool | enum:a|b | text:regex). Читают агент (agent\\Core.cs), веб-сервер (Web.cs) и PowerShell (VpnGuard.ps1). Test.ps1 сверяет с ней запасные значения в коде.",
+ "settings": [
+  {
+   "key": "checkIntervalSec",
+   "default": 30,
+   "type": "int:10:600",
+   "group": "Общее",
+   "title": "Интервал проверки, сек",
+   "desc": "как часто агент проверяет всё"
+  },
+  {
+   "key": "logRetentionDays",
+   "default": 14,
+   "type": "int:1:365",
+   "group": "Общее",
+   "title": "Хранить журналы, дней",
+   "desc": ""
+  },
+  {
+   "key": "agent.psPartMin",
+   "default": 30,
+   "type": "int:5:240",
+   "group": "Общее",
+   "title": "Часть PowerShell: обновления и компоненты, мин",
+   "desc": "как часто запускать часть PowerShell (по командам — сразу)"
+  },
+  {
+   "key": "amnezia.adapterPattern",
+   "default": "amnezia|tun2socks|TAP-Windows Adapter V9",
+   "type": "text:^[\\\\w \\\\-\\\\.\\\\|\\\\(\\\\)]{1,120}$",
+   "group": "Режим",
+   "title": "AmneziaVPN: адаптер туннеля (шаблон)",
+   "desc": "часть имени или описания адаптера; разные протоколы — разные адаптеры"
+  },
+  {
+   "key": "vpn.mode",
+   "default": "meduza",
+   "type": "enum:meduza|amnezia|dual|zapret",
+   "group": "Режим",
+   "title": "Режим работы",
+   "desc": "meduza · amnezia (AmneziaVPN) · dual (два туннеля) · zapret (без VPN)"
+  },
+  {
+   "key": "vpn.primary",
+   "default": "meduza",
+   "type": "enum:meduza|amnezia",
+   "group": "Режим",
+   "title": "Два туннеля: основной",
+   "desc": "через какой идёт трафик, пока он работает"
+  },
+  {
+   "key": "vpn.dualHot",
+   "default": true,
+   "type": "bool",
+   "group": "Режим",
+   "title": "Два туннеля: резерв всегда поднят",
+   "desc": "выключено — резерв поднимается только при сбое"
+  },
+  {
+   "key": "vpn.fastCheckSec",
+   "default": 5,
+   "type": "int:2:60",
+   "group": "Режим",
+   "title": "Два туннеля: быстрая проверка активного, сек",
+   "desc": "как часто проверять туннель, через который идёт трафик"
+  },
+  {
+   "key": "vpn.fastFailChecks",
+   "default": 2,
+   "type": "int:1:10",
+   "group": "Режим",
+   "title": "Два туннеля: неудачных быстрых проверок до переключения",
+   "desc": "столько проверок подряд не прошли — трафик на резерв (если он работает)"
+  },
+  {
+   "key": "amnezia.lanGuard",
+   "default": true,
+   "type": "bool",
+   "group": "Режим",
+   "title": "AmneziaVPN: защита локальной сети",
+   "desc": "если при поднятом AmneziaVPN пропал роутер или клиенты WG-Server, а без него вернулись — отключить его (Kill Switch)"
+  },
+  {
+   "key": "amnezia.guardBlockMin",
+   "default": 180,
+   "type": "int:10:1440",
+   "group": "Режим",
+   "title": "AmneziaVPN: после срабатывания защиты не запускать, мин",
+   "desc": "повторный выбор режима снимает запрет сразу"
+  },
+  {
+   "key": "traffic.lanMeter",
+   "default": true,
+   "type": "bool",
+   "group": "Общее",
+   "title": "Считать локальную сеть отдельно от интернета",
+   "desc": "WinDivert только смотрит пакеты к домашним адресам; выключите, если мешает при больших копированиях по сети"
+  },
+  {
+   "key": "vpn.failoverChecks",
+   "default": 2,
+   "type": "int:1:10",
+   "group": "Режим",
+   "title": "Два туннеля: проверок до переключения",
+   "desc": "подряд без трафика (отключение — сразу)"
+  },
+  {
+   "key": "vpn.failbackMin",
+   "default": 5,
+   "type": "int:0:1440",
+   "group": "Режим",
+   "title": "Два туннеля: вернуться на основной через, мин",
+   "desc": "0 — не возвращать"
+  },
+  {
+   "key": "vpn.stopInactive",
+   "default": true,
+   "type": "bool",
+   "group": "Режим",
+   "title": "Закрывать неиспользуемый VPN",
+   "desc": "чтобы не работали два туннеля сразу"
+  },
+  {
+   "key": "meduza.serviceId",
+   "default": "",
+   "type": "text:^[\\\\w \\\\-\\\\.\\\\(\\\\)]{0,100}$",
+   "group": "MeduzaVPN",
+   "title": "VPN (id или часть имени)",
+   "desc": "пусто — единственный на аккаунте"
+  },
+  {
+   "key": "meduza.protocol",
+   "default": "ultra",
+   "type": "text:^[a-z0-9\\\\-]{1,40}$",
+   "group": "MeduzaVPN",
+   "title": "Протокол",
+   "desc": "ultra"
+  },
+  {
+   "key": "meduza.autoProtocol",
+   "default": true,
+   "type": "bool",
+   "group": "MeduzaVPN",
+   "title": "Пробовать другие протоколы",
+   "desc": "если связь пропала и переподключение не помогло"
+  },
+  {
+   "key": "meduza.protocolReturnMin",
+   "default": 60,
+   "type": "int:0:1440",
+   "group": "MeduzaVPN",
+   "title": "Возвращать выбранный протокол, мин",
+   "desc": "0 — не возвращать"
+  },
+  {
+   "key": "meduza.adapterName",
+   "default": "MeduzaVPN ULTRA",
+   "type": "text:^[\\\\w \\\\-\\\\.]{1,60}$",
+   "group": "MeduzaVPN",
+   "title": "Имя адаптера туннеля",
+   "desc": ""
+  },
+  {
+   "key": "meduza.autoUpdate",
+   "default": true,
+   "type": "bool",
+   "group": "MeduzaVPN",
+   "title": "Автообновление MeduzaVPN",
+   "desc": "скачивание, проверка подписи, тихая установка"
+  },
+  {
+   "key": "meduza.updateCheckHours",
+   "default": 6,
+   "type": "int:1:168",
+   "group": "MeduzaVPN",
+   "title": "Проверять обновления каждые, ч",
+   "desc": ""
+  },
+  {
+   "key": "meduza.probeHosts",
+   "default": [
+    "1.1.1.1:443",
+    "8.8.8.8:443",
+    "9.9.9.9:443"
+   ],
+   "type": "hosts",
+   "group": "MeduzaVPN",
+   "title": "Проверка трафика (хост:порт, …)",
+   "desc": "через запятую"
+  },
+  {
+   "key": "meduza.probeFailuresBeforeReconnect",
+   "default": 3,
+   "type": "int:1:50",
+   "group": "MeduzaVPN",
+   "title": "Неудачных проверок до переподключения",
+   "desc": ""
+  },
+  {
+   "key": "meduza.startupGraceSec",
+   "default": 60,
+   "type": "int:0:600",
+   "group": "MeduzaVPN",
+   "title": "Ждать автоподключения после старта, сек",
+   "desc": ""
+  },
+  {
+   "key": "meduza.maxRestartsPer30Min",
+   "default": 5,
+   "type": "int:1:100",
+   "group": "MeduzaVPN",
+   "title": "Максимум перезапусков за 30 мин",
+   "desc": "защита от бесконечных перезапусков"
+  },
+  {
+   "key": "ws4w.endpoint",
+   "default": "",
+   "type": "text:^[\\\\w\\\\.\\\\-:\\\\[\\\\]]{0,100}$",
+   "group": "WG-Server",
+   "title": "Адрес для клиентов (IP или имя[:порт])",
+   "desc": "пусто — как у клиентов WS4W или внешний IP"
+  },
+  {
+   "key": "ws4w.clientDns",
+   "default": "",
+   "type": "text:^[\\\\d\\\\., a-fA-F:]{0,100}$",
+   "group": "WG-Server",
+   "title": "DNS для новых клиентов",
+   "desc": "пусто — как у клиентов WS4W или адрес сервера"
+  },
+  {
+   "key": "ws4w.clientZapret",
+   "default": false,
+   "type": "bool",
+   "group": "WG-Server",
+   "title": "zapret и для клиентов",
+   "desc": "трафик клиентов к адресам zapret (YouTube, Discord …) — через zapret этого ПК, остальное — через VPN; на устройствах ничего менять не нужно (только агент на C#)"
+  },
+  {
+   "key": "ws4w.autoCreateServer",
+   "default": true,
+   "type": "bool",
+   "group": "WG-Server",
+   "title": "Создавать сервер, если настроек нет",
+   "desc": "нет ни конфига, ни службы wg_server"
+  },
+  {
+   "key": "sharing.enabled",
+   "default": true,
+   "type": "bool",
+   "group": "Раздача",
+   "title": "Управлять раздачей ICS",
+   "desc": "туннель → WG-Server"
+  },
+  {
+   "key": "zapret.autoUpdate",
+   "default": true,
+   "type": "bool",
+   "group": "zapret",
+   "title": "Автообновление zapret",
+   "desc": "если версия не выбрана"
+  },
+  {
+   "key": "zapret.updateCheckHours",
+   "default": 12,
+   "type": "int:1:168",
+   "group": "zapret",
+   "title": "Проверять обновления каждые, ч",
+   "desc": ""
+  },
+  {
+   "key": "zapret.retestHours",
+   "default": 24,
+   "type": "int:1:720",
+   "group": "zapret",
+   "title": "Переподбирать стратегию каждые, ч",
+   "desc": "и сразу — если сайты перестали открываться"
+  },
+  {
+   "key": "zapret.healthCheckMin",
+   "default": 10,
+   "type": "int:2:240",
+   "group": "zapret",
+   "title": "Проверять сайты каждые, мин",
+   "desc": ""
+  },
+  {
+   "key": "zapret.videoCheck",
+   "default": true,
+   "type": "bool",
+   "group": "zapret",
+   "title": "Проверять видео YouTube",
+   "desc": "видеосервер и скорость загрузки"
+  },
+  {
+   "key": "zapret.routeIspVideo",
+   "default": true,
+   "type": "bool",
+   "group": "zapret",
+   "title": "Видеосерверы провайдера — мимо VPN",
+   "desc": "иначе в режиме с VPN видео может не грузиться"
+  },
+  {
+   "key": "zapret.gameFilter",
+   "default": "disabled",
+   "type": "enum:disabled|all|tcp|udp",
+   "group": "zapret",
+   "title": "Игровой фильтр",
+   "desc": "disabled — выключен (как в service.bat)"
+  },
+  {
+   "key": "software.checkHours",
+   "default": 12,
+   "type": "int:1:168",
+   "group": "Обновления",
+   "title": "Проверять версии компонентов, ч",
+   "desc": ""
+  },
+  {
+   "key": "update.auto",
+   "default": true,
+   "type": "bool",
+   "group": "Обновления",
+   "title": "Ставить обновления VpnGuard само",
+   "desc": "проверка sha256 и кода, копия старых файлов"
+  },
+  {
+   "key": "update.checkHours",
+   "default": 3,
+   "type": "int:1:168",
+   "group": "Обновления",
+   "title": "Проверять обновления VpnGuard каждые, ч",
+   "desc": ""
+  },
+  {
+   "key": "agent.stuckRestartMin",
+   "default": 10
+  },
+  {
+   "key": "amnezia.exe",
+   "default": ""
+  },
+  {
+   "key": "amnezia.serverDownCheckMin",
+   "default": 5
+  },
+  {
+   "key": "amnezia.serviceName",
+   "default": "AmneziaVPN-service"
+  },
+  {
+   "key": "meduza.cliPath",
+   "default": ""
+  },
+  {
+   "key": "meduza.connectTimeoutSec",
+   "default": 90
+  },
+  {
+   "key": "meduza.exePath",
+   "default": ""
+  },
+  {
+   "key": "meduza.fallbackMaxTimeouts",
+   "default": 3
+  },
+  {
+   "key": "meduza.installerArgs",
+   "default": "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /NOCANCEL /SP-"
+  },
+  {
+   "key": "meduza.pipeName",
+   "default": "MeduzaVPN"
+  },
+  {
+   "key": "meduza.processName",
+   "default": "medusa_vpn"
+  },
+  {
+   "key": "meduza.releaseUrl",
+   "default": "https://meduzavpn-builds.fra1.digitaloceanspaces.com/latest/release.json"
+  },
+  {
+   "key": "meduza.signer",
+   "default": "IPFB LLC"
+  },
+  {
+   "key": "net.probeHosts",
+   "default": [
+    "77.88.8.8:53",
+    "8.8.8.8:53",
+    "1.1.1.1:443",
+    "87.250.250.242:443"
+   ]
+  },
+  {
+   "key": "remote.allowActions",
+   "default": false
+  },
+  {
+   "key": "remote.allowFrom",
+   "default": "any"
+  },
+  {
+   "key": "remote.enabled",
+   "default": false
+  },
+  {
+   "key": "remote.port",
+   "default": 8765
+  },
+  {
+   "key": "remote.token",
+   "default": ""
+  },
+  {
+   "key": "remote.until",
+   "default": ""
+  },
+  {
+   "key": "update.branch",
+   "default": "main"
+  },
+  {
+   "key": "update.repo",
+   "default": "Fogiku/vpnguard"
+  },
+  {
+   "key": "update.token",
+   "default": ""
+  },
+  {
+   "key": "vpn.diagHosts",
+   "default": [
+    "1.1.1.1:443",
+    "8.8.8.8:443",
+    "77.88.8.8:443",
+    "9.9.9.9:443"
+   ]
+  },
+  {
+   "key": "web.enabled",
+   "default": true
+  },
+  {
+   "key": "web.port",
+   "default": 8765
+  },
+  {
+   "key": "web.requirePassword",
+   "default": true
+  },
+  {
+   "key": "web.token",
+   "default": ""
+  },
+  {
+   "key": "ws4w.clientBypassMin",
+   "default": 5
+  },
+  {
+   "key": "ws4w.clientDebug",
+   "default": true
+  },
+  {
+   "key": "ws4w.clientFallbackMs",
+   "default": 3000
+  },
+  {
+   "key": "ws4w.clientMss",
+   "default": 1200
+  },
+  {
+   "key": "ws4w.clientNoZapret",
+   "default": []
+  },
+  {
+   "key": "ws4w.clientOff",
+   "default": []
+  },
+  {
+   "key": "ws4w.clientQuic",
+   "default": "drop"
+  },
+  {
+   "key": "ws4w.clientQuicReject",
+   "default": true
+  },
+  {
+   "key": "ws4w.clientVideoVpn",
+   "default": true
+  },
+  {
+   "key": "ws4w.clientVideoVpnMin",
+   "default": 360
+  },
+  {
+   "key": "ws4w.clientVpnHosts",
+   "default": [
+    "doubleclick.net",
+    "googlesyndication.com",
+    "googleadservices.com",
+    "google-analytics.com"
+   ]
+  },
+  {
+   "key": "ws4w.configPath",
+   "default": ""
+  },
+  {
+   "key": "ws4w.interfaceName",
+   "default": "wg_server"
+  },
+  {
+   "key": "ws4w.newServerAddress",
+   "default": "10.253.0.1/24"
+  },
+  {
+   "key": "ws4w.newServerPort",
+   "default": 51820
+  },
+  {
+   "key": "ws4w.serverAddress",
+   "default": ""
+  },
+  {
+   "key": "ws4w.serviceName",
+   "default": "WireGuardTunnel$wg_server"
+  },
+  {
+   "key": "ws4w.wireguardExe",
+   "default": "C:\\Program Files\\WireGuard\\wireguard.exe"
+  },
+  {
+   "key": "zapret.curlTimeoutSec",
+   "default": 5
+  },
+  {
+   "key": "zapret.dir",
+   "default": ""
+  },
+  {
+   "key": "zapret.enabled",
+   "default": false
+  },
+  {
+   "key": "zapret.maxRoutes",
+   "default": 1500
+  },
+  {
+   "key": "zapret.routeDomainLists",
+   "default": [
+    "list-google.txt"
+   ]
+  },
+  {
+   "key": "zapret.routeDomains",
+   "default": [
+    "discord.com",
+    "discord.gg",
+    "discordapp.com",
+    "discordapp.net",
+    "discord.media",
+    "discordcdn.com",
+    "gateway.discord.gg",
+    "cdn.discordapp.com",
+    "media.discordapp.net",
+    "updates.discord.com",
+    "dis.gd",
+    "discord-attachments-uploads-prd.storage.googleapis.com"
+   ]
+  },
+  {
+   "key": "zapret.routeGoogleRanges",
+   "default": true
+  },
+  {
+   "key": "zapret.strategy",
+   "default": ""
+  },
+  {
+   "key": "zapret.testTargets",
+   "default": [
+    "https://www.youtube.com",
+    "https://i.ytimg.com",
+    "https://redirector.googlevideo.com",
+    "https://discord.com",
+    "https://gateway.discord.gg",
+    "https://cdn.discordapp.com"
+   ]
+  },
+  {
+   "key": "zapret.version",
+   "default": ""
+  }
+ ]
+}
