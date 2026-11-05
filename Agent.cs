@@ -749,11 +749,14 @@ namespace VpnGuard
         static string AgTripWhy = ""; static int AgFails, AgTrips, AgPeersBase = -1; static bool AgGwBase;
         static bool AvpnBlocked() { return DateTime.Now < AgBlockedUntil; }
         static string AgGateway() { var z = ZPhys(); return z != null && !string.IsNullOrEmpty(z.Gateway) ? z.Gateway : InetGw; }
-        static bool AgGwOk(string gw)
+        static bool AgGwOk(string gw, int tries = 8)
         {
             if (string.IsNullOrEmpty(gw)) return true;
-            for (int i = 0; i < 3; i++) { try { using (var p = new System.Net.NetworkInformation.Ping()) if (p.Send(gw, 1000).Status == System.Net.NetworkInformation.IPStatus.Success) return true; } catch { } }
-            return false;
+            for (int i = 0; i < tries; i++) {
+                try { using (var p = new System.Net.NetworkInformation.Ping()) if (p.Send(gw, 1000).Status == System.Net.NetworkInformation.IPStatus.Success) return true; } catch { }
+                Thread.Sleep(300);
+            }
+            return false;                                              // ~10 с без ответа
         }
         // клиенты WG-Server с рукопожатием за последние 3 мин (на связи)
         static int AgPeers()
@@ -774,8 +777,10 @@ namespace VpnGuard
             string gw = AgGateway(); var nic = AvpnNic(); bool up = nic != null && nic.OperationalStatus == OperationalStatus.Up;
             if (!up) {                                                   // AmneziaVPN не поднят — запомнить, как должно быть
                 AgFails = 0; if ((DateTime.Now - AgBaseAt).TotalSeconds < 50) return;
-                AgGwBase = AgGwOk(gw); AgPeersBase = AgPeers(); AgBaseAt = DateTime.Now; return;
+                AgGwBase = AgGwOk(gw, 3); AgPeersBase = AgPeers(); AgBaseAt = DateTime.Now; return;
             }
+            // только что (пере)подключился или трафик переключили — маршруты и раздача перестраиваются, роутер может молчать несколько секунд
+            if ((DateTime.Now - AvpnStartedAt).TotalSeconds < 60 || (DateTime.Now - DualSwitchAt).TotalSeconds < 60 || (DateTime.Now - AwgLastRestart).TotalSeconds < 60) { AgFails = 0; return; }
             bool gwOk = AgGwOk(gw); int peers = AgPeers();
             string bad = !gwOk && (AgGwBase || AgBaseAt == DateTime.MinValue) ? "роутер " + gw + " не отвечает"
                 : AgPeersBase > 0 && peers == 0 ? "клиенты WG-Server пропали (было на связи " + AgPeersBase + ")" : null;
@@ -788,10 +793,10 @@ namespace VpnGuard
             bool byGw = bad.StartsWith("роутер");
             Log("Защита AmneziaVPN: отключаю AmneziaVPN и проверяю, вернётся ли связь", "WARN"); SetActivity("проверяю, не AmneziaVPN ли отрезал локальную сеть");
             AvpnStop();
-            bool back = Wait(() => byGw ? AgGwOk(gw) : AgPeers() > 0, byGw ? 15 : 60);
+            bool back = Wait(() => byGw ? AgGwOk(gw, 2) : AgPeers() > 0, byGw ? 15 : 60);
             if (!back) {                                                 // служба могла оставить правила брандмауэра — остановить её совсем
                 try { var sv = Svc(AvpnSvcName()); if (sv != null && sv.Status == ServiceControllerStatus.Running) { sv.Stop(); sv.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(20)); } } catch { }
-                back = Wait(() => byGw ? AgGwOk(gw) : AgPeers() > 0, byGw ? 15 : 60);
+                back = Wait(() => byGw ? AgGwOk(gw, 2) : AgPeers() > 0, byGw ? 15 : 60);
             }
             if (!back) {
                 Log("Защита AmneziaVPN: без AmneziaVPN связь тоже не вернулась (" + bad + ") — дело не в нём, запускаю его обратно", "WARN");
@@ -881,8 +886,70 @@ namespace VpnGuard
         static bool HasRoute(int idx, string pfx) { return RouteTable().Any(r => r.IfIndex == idx && Prefix(r) == pfx); }
         // у активного — половинки 0.0.0.0/1 + 128.0.0.0/1 (сильнее любого 0.0.0.0/0) и метрика выше физического выхода
         // (чтобы клиенты WireGuard не уходили в него); у резервного — метрика 5000
+        // сервер AmneziaVPN — всегда напрямую через роутер. Иначе в режиме «два туннеля» его зашифрованный трафик идёт внутри MeduzaVPN
+        // (маршруты 0.0.0.0/1 активного забирают всё), и резерв умирает вместе с основным. Адрес — из конфига туннеля (Endpoint = …)
+        static string AvpnEp = "", AvpnEpConf = "", AvpnEpPinned = ""; static DateTime AvpnEpAt = DateTime.MinValue;
+        static readonly List<string[]> EpRoutes = new List<string[]>();     // prefix, ifIndex, gw
+        static string AvpnEndpoint()
+        {
+            if ((DateTime.Now - AvpnEpAt).TotalSeconds < 60 && AvpnEp.Length > 0) return AvpnEp;
+            AvpnEpAt = DateTime.Now;
+            var confs = new List<string>();
+            try {
+                using (var svcs = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services"))
+                    foreach (var n in svcs.GetSubKeyNames().Where(x => x.IndexOf("Amnezia", StringComparison.OrdinalIgnoreCase) >= 0))
+                        using (var k = svcs.OpenSubKey(n)) {
+                            var ip = k == null ? null : Convert.ToString(k.GetValue("ImagePath"));
+                            if (string.IsNullOrEmpty(ip)) continue;
+                            foreach (Match m in Regex.Matches(ip, @"""([^""]+\.conf)""|(\S+\.conf)")) confs.Add(m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value);
+                        }
+            } catch { }
+            foreach (var root in new[] { Path.Combine(Environment.SystemDirectory, @"config\systemprofile\AppData"), Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), @"C:\Program Files\AmneziaVPN" }) {
+                try {
+                    if (!Directory.Exists(root)) continue;
+                    foreach (var d in Directory.GetDirectories(root, "*", SearchOption.TopDirectoryOnly).Concat(Directory.GetDirectories(root, "*", SearchOption.TopDirectoryOnly).SelectMany(x => { try { return Directory.GetDirectories(x); } catch { return new string[0]; } })))
+                        if (d.IndexOf("amnezia", StringComparison.OrdinalIgnoreCase) >= 0)
+                            try { confs.AddRange(Directory.GetFiles(d, "*.conf", SearchOption.AllDirectories)); } catch { }
+                } catch { }
+            }
+            foreach (var f in confs.Distinct().Where(File.Exists).OrderByDescending(f => File.GetLastWriteTime(f))) {
+                try {
+                    var m = Regex.Match(File.ReadAllText(f), @"(?im)^\s*Endpoint\s*=\s*\[?([^\]\s:]+)\]?:(\d+)");
+                    if (!m.Success) continue;
+                    string host = m.Groups[1].Value; IPAddress a;
+                    if (!IPAddress.TryParse(host, out a)) a = Dns.GetHostAddresses(host).FirstOrDefault(x => x.AddressFamily == AddressFamily.InterNetwork);
+                    if (a == null || a.AddressFamily != AddressFamily.InterNetwork) continue;
+                    if (AvpnEp != a.ToString()) Log("AmneziaVPN: сервер туннеля " + a + (host != a.ToString() ? " (" + host + ")" : "") + " — из " + f, "INFO");
+                    AvpnEp = a.ToString(); AvpnEpConf = f; return AvpnEp;
+                } catch { }
+            }
+            return AvpnEp;
+        }
+        static void PinEndpoints()
+        {
+            if (!CfgBool("vpn.pinReserveServer", true)) { UnpinEndpoints(); return; }
+            var ep = AvpnEndpoint(); var phys = ZPhys();
+            if (string.IsNullOrEmpty(ep) || phys == null || string.IsNullOrEmpty(phys.Gateway)) return;
+            string pfx = ep + "/32";
+            bool have = RouteTable().Any(r => Prefix(r) == pfx && r.IfIndex == phys.IfIndex && UIp(r.NextHop) == phys.Gateway);
+            if (have && AvpnEpPinned == pfx) return;
+            if (AvpnEpPinned.Length > 0 && AvpnEpPinned != pfx) UnpinEndpoints();
+            if (have || RouteAdd(pfx, phys.IfIndex, phys.Gateway, 0)) {
+                lock (EpRoutes) if (!EpRoutes.Any(x => x[0] == pfx)) EpRoutes.Add(new[] { pfx, phys.IfIndex.ToString(), phys.Gateway });
+                if (AvpnEpPinned != pfx) Log("Два туннеля: сервер AmneziaVPN " + ep + " — напрямую через " + phys.Alias + " (не через MeduzaVPN), чтобы резерв не падал вместе с основным", "INFO");
+                AvpnEpPinned = pfx;
+            } else Log("Два туннеля: не удалось направить сервер AmneziaVPN " + ep + " напрямую", "WARN");
+        }
+        static void UnpinEndpoints()
+        {
+            List<string[]> rs; lock (EpRoutes) { rs = EpRoutes.ToList(); EpRoutes.Clear(); }
+            foreach (var r in rs) RouteDel(r[0], int.Parse(r[1]), r[2]);
+            AvpnEpPinned = "";
+        }
+
         static void DualSyncRoutes()
         {
+            try { PinEndpoints(); } catch (Exception e) { Log("Два туннеля: сервер AmneziaVPN: " + e.Message, "WARN"); }
             string act = DualAct(); int physM = 25, best = int.MaxValue;
             foreach (var r in Cim("SELECT InterfaceIndex, InterfaceAlias, RouteMetric, NextHop FROM MSFT_NetRoute WHERE DestinationPrefix='0.0.0.0/0' AND AddressFamily=2")) {
                 string al = Convert.ToString(r["InterfaceAlias"]), nh = Convert.ToString(r["NextHop"]);
@@ -909,6 +976,7 @@ namespace VpnGuard
         // выход из режима: убрать наши маршруты и вернуть автоматические метрики
         static void DualResetRoutes()
         {
+            try { UnpinEndpoints(); } catch { }
             List<KeyValuePair<int, string>> rs; lock (DualRoutes) { rs = DualRoutes.ToList(); DualRoutes.Clear(); }
             foreach (var r in rs) Exe("netsh.exe", "interface ipv4 delete route " + r.Value + " " + r.Key + " 0.0.0.0 store=active", 15);
             foreach (var k in new[] { "meduza", "amnezia" }) {
@@ -1288,7 +1356,7 @@ namespace VpnGuard
             string path = Path.Combine(DataDir, "live.json"), tmp = path + ".tmp"; int tick = 0; object peers = null;
             while (true) {
                 try {
-                    Thread.Sleep(2000); tick++;
+                    Thread.Sleep(1000); tick++;
                     var names = LiveNames; if (names == null) continue;
                     var nics = NetworkInterface.GetAllNetworkInterfaces();
                     var ad = new Dictionary<string, object>();
@@ -1382,7 +1450,9 @@ namespace VpnGuard
             if (mode == "dual") {
                 string oth = OtherKind(kind); bool othUp = Up(KindAdapter(oth)); bool? othTr = KindTraffic(oth);
                 sb = new Dictionary<string, object> { { "kind", oth }, { "name", ModeNames[oth] }, { "up", othUp }, { "ok", othUp && othTr == true },
-                    { "state", !othUp ? "не подключён" : othTr == true ? "готов" : othTr == false ? "нет трафика" : "проверяется" } };
+                    { "state", !othUp ? "не подключён" : othTr == true ? "готов" : othTr == false ? "нет трафика" : "проверяется" },
+                    { "blocked", oth == "amnezia" && AvpnBlocked() }, { "server", oth == "amnezia" ? AvpnEp : "" } };
+                if (oth == "amnezia" && AvpnBlocked()) sb["state"] = "отключён защитой до " + AgBlockedUntil.ToString("HH:mm");
                 if (uL == 0) uS = othUp && othTr == true ? "Подключён · резерв готов" : "Подключён · резерв не готов";
             }
             var dualKv = mode != "dual" ? new List<object[]>() : new List<object[]> {

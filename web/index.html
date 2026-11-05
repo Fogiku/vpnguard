@@ -78,6 +78,10 @@ canvas { width: 100%; height: 190px; display: block; }
 .fl-node { fill: var(--row); stroke: var(--border); stroke-width: 1; }
 .flow a:hover .fl-node { stroke: var(--accent); }
 .fl-base { fill: none; stroke: var(--border); stroke-width: 1; opacity: .5; }
+.fl-grp { fill: var(--accent); fill-opacity: .05; stroke: var(--accent); stroke-opacity: .45; stroke-dasharray: 5 4; }
+.flow .fgl { font-size: 10px; fill: var(--accent); letter-spacing: .08em; }
+.fl-sp { fill: none; stroke-width: 1.2; stroke-linejoin: round; } .fl-sp.rx { stroke: var(--rx); } .fl-sp.tx { stroke: var(--tx); opacity: .8; }
+.fl-spb { stroke: var(--border); stroke-width: 1; opacity: .6; }
 .flow .fl-chv { font: bold 10px Consolas, "Courier New", monospace; letter-spacing: 5.5px; dominant-baseline: central; }
 .legend b { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 #toast { position: fixed; right: 16px; bottom: 16px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; max-width: 420px; display: none; box-shadow: 0 4px 18px rgba(0,0,0,.3); }
@@ -328,7 +332,11 @@ function flowModel() {
   // какой туннель несёт трафик; в режиме «два туннеля» второй — отдельным узлом «Резерв»
   const KN = { meduza: 'MeduzaVPN', amnezia: 'AmneziaVPN' }, kind = (S.vpn && S.vpn.kind) || (mode === 'amnezia' ? 'amnezia' : 'meduza'), other = kind === 'meduza' ? 'amnezia' : 'meduza';
   if (vpnOn) N.push({ id: 'vpn', col: 3, href: '#' + kind, dot: lvl(comp('ultra')), c: 'var(--vpn)', t1: 'VPN · ' + KN[kind], r: u, t3: (mode === 'dual' ? 'активный · ' : '') + (nm.u || 'туннель') });
-  if (mode === 'dual') { const o = comp(other); N.push({ id: 'vpn2', col: 3, href: '#' + other, dot: lvl(o), dim: true, c: 'var(--vpn)', t1: KN[other], r: null, t3: 'резерв · ' + (o ? String(o.state).split(' · ')[0].toLowerCase() + ', ждёт сбоя основного' : 'нет данных') }); }
+  if (mode === 'dual') {
+    const sb = (comp('ultra') || {}).standby || {}, rd = sb.ok === true;
+    N.push({ id: 'vpn2', col: 3, href: '#' + other, dot: sb.blocked ? 2 : rd ? 0 : sb.up ? 1 : 2, dim: true, c: 'var(--vpn)', t1: KN[other] + ' · резерв', r: null,
+      t3: sb.state ? (rd ? 'готов: трафик проходит' : sb.state === 'нет трафика' ? 'НЕ готов: трафик не проходит' : sb.state) : 'нет данных' });
+  }
   if (lanOn) N.push({ id: 'lan', col: 3, dot: 0, c: 'var(--lan)', t1: 'Локальная сеть', r: l, t3: (lanI.net || 'домашняя сеть') + ' · не интернет' });
   N.push({ id: 'zp', col: 3, href: '#zapret', dot: lvl(comp('zapret')), c: 'var(--zp)', t1: vpnOn ? 'Мимо VPN · zapret' : 'Напрямую', r: byp, t3: vpnOn ? 'YouTube, Discord …' : '' });
   const ni = comp('inet'), nOk = LIVE && LIVE.inet !== undefined ? LIVE.inet : ni ? (ni.level === 0 ? 0 : ni.level === 2 ? 1 : -1) : -1;
@@ -348,11 +356,12 @@ const laneSpeed = r => (r = +r || 0) < 400 ? 0 : 12 + 20 * Math.log10(r / 400);
 
 function flowBuild(m) {
   const { N, E } = m, byId = {}; N.forEach(n => byId[n.id] = n);
-  const W = 200, H = 64, G = 14, X = [0, 265, 510, 755, 1000], VW = X[4] + W;
-  const col0 = N.filter(n => n.col === 0);
-  const VH = Math.max(col0.length * (H + G) - G, byId.lan || byId.vpn2 ? 4 * H + 60 : 2 * H + 40) + 4, mid = VH / 2;
-  col0.forEach((n, i) => Object.assign(n, { x: X[0], y: 2 + i * (H + G) }));
+  const W = 200, H = 84, G = 14, X = [0, 265, 510, 755, 1000], VW = X[4] + W, TOP = 24, APPG = 18;
+  const col0 = N.filter(n => n.col === 0), cli = col0.filter(n => n.id !== 'apps');
+  const VH = Math.max(TOP + col0.length * (H + G) - G + APPG, byId.lan || byId.vpn2 ? 4 * H + 60 : 2 * H + 40) + 4, mid = VH / 2;
+  col0.forEach((n, i) => Object.assign(n, { x: X[0], y: TOP + i * (H + G) + (n.id === 'apps' ? APPG : 0) }));
   for (const n of N) if (n.col > 0) Object.assign(n, { x: X[n.col], y: mid - H / 2 });
+  if (cli.length && byId.wg) byId.wg.y = (cli[0].y + cli[cli.length - 1].y) / 2;
   if (byId.vpn) { byId.vpn.y = mid - H - 14; byId.zp.y = mid + 14; }
   if (byId.vpn2) byId.vpn2.y = byId.vpn.y - H - 14;
   if (byId.lan) { if (!byId.vpn) byId.zp.y = mid - H / 2; byId.lan.y = byId.zp.y + H + 14; }
@@ -385,6 +394,10 @@ function flowBuild(m) {
     }
   });
   let nodes = '';
+  if (cli.length && byId.wg) {                     // WG-Server и его клиенты — один модуль
+    const t = cli[0].y - 20, b = Math.max(cli[cli.length - 1].y, byId.wg.y) + H + 8, r = byId.wg.x + W + 8;
+    nodes += `<rect class="fl-grp" x="-8" y="${t}" width="${r + 8}" height="${b - t}" rx="6"/><text class="fgl" x="2" y="${t + 13}">WG-SERVER · КЛИЕНТЫ</text>`;
+  }
   for (const n of N) {
     const c = 10, sh = `M${n.x + c},${n.y} H${n.x + n.w} V${n.y + n.h - c} L${n.x + n.w - c},${n.y + n.h} H${n.x} V${n.y + c} Z`;
     const lc = n.dot >= 0 ? `var(--${['ok', 'warn', 'bad'][n.dot]})` : 'var(--none)';
@@ -392,12 +405,14 @@ function flowBuild(m) {
       <path d="M${n.x},${n.y} h13 L${n.x},${n.y + 13} Z" fill="${n.c || 'var(--accent)'}"/>
       <rect x="${n.x + n.w - 30}" y="${n.y + 10}" width="18" height="3" fill="${lc}"/>
       <text x="${n.x + 14}" y="${n.y + 21}" class="f1">${esc(clip(n.t1, n.w - 30, 8.6))}</text>
-      <text x="${n.x + 14}" y="${n.y + 39}" class="f2" id="fl-${n.id}-r"></text>
-      <text x="${n.x + 14}" y="${n.y + 55}" class="f3" id="fl-${n.id}-3"></text></g>`;
+      <text x="${n.x + 14}" y="${n.y + 38}" class="f2" id="fl-${n.id}-r"></text>
+      <line class="fl-spb" x1="${n.x + 14}" x2="${n.x + n.w - 14}" y1="${n.y + 63.5}" y2="${n.y + 63.5}"/>
+      <path class="fl-sp rx" id="fl-${n.id}-sr"/><path class="fl-sp tx" id="fl-${n.id}-st"/>
+      <text x="${n.x + 14}" y="${n.y + 77}" class="f3" id="fl-${n.id}-3"></text></g>`;
     nodes += n.href ? `<a href="${n.href}">${g}</a>` : g;
   }
   const el = document.createElement('div');
-  el.innerHTML = `<svg viewBox="-2 -2 ${VW + 4} ${VH + 4}" role="img" aria-label="Схема трафика: клиенты → WG-Server → маршрутизация → VPN или zapret → интернет"><defs>${defs}</defs>${links}${nodes}</svg>`;
+  el.innerHTML = `<svg viewBox="-10 -2 ${VW + 12} ${VH + 4}" role="img" aria-label="Схема трафика: клиенты → WG-Server → маршрутизация → VPN или zapret → интернет"><defs>${defs}</defs>${links}${nodes}</svg>`;
   return el.firstChild;
 }
 // обновить цели: цифры и скорость стрелок плавно догоняют их в цикле отрисовки (flowFrame), схема не пересоздаётся
@@ -460,11 +475,27 @@ function flowBlock() {
   return `<div class="sec">Схема трафика — кто с кем соединён и сколько пропускает</div><div class="card flow"><div id="flowhost"></div>
     <div class="legend" style="flex-wrap:wrap;margin-top:8px"><span><b style="background:var(--vpn)"></b>через VPN</span><span><b style="background:var(--zp)"></b>мимо VPN через zapret</span><span><b style="background:var(--accent)"></b>клиенты WG-Server</span><span><b style="background:var(--lan)"></b>локальная сеть (не интернет)</span><span><span class="ftx">&gt;&gt;&gt; ↑ отдача</span> · <span class="frx">&lt;&lt;&lt; ↓ загрузка</span> · чем быстрее стрелки, тем больше трафика · Мбит/с</span></div></div>`;
 }
-// живые скорости раз в 2 с — только на главной и пока вкладка видна
+// живые скорости раз в секунду — только на главной и пока вкладка видна
+const SPK = {}, SPN = 90;
 async function liveTick() {
   if (page !== 'home' || document.hidden || !S) return;
   try { LIVE = await api('/api/live'); if (!LIVE || !LIVE.rate) LIVE = null; } catch (e) { LIVE = null; }
-  if (FL) flowMount();                             // состав узлов изменился (клиент пропал/появился) — пересобрать
+  if (!FL) return;
+  flowMount();                                     // состав узлов изменился (клиент пропал/появился) — пересобрать
+  for (const n of flowModel().N) { const h = SPK[n.id] || (SPK[n.id] = []); h.push(n.r ? [+n.r[0] || 0, +n.r[1] || 0] : [0, 0]); if (h.length > SPN) h.shift(); }
+  flowSpark();
+}
+// мини-график под скоростью: ↓ загрузка и ↑ отдача за последние 90 с, масштаб — по максимуму окна (не меньше 100 Кбит/с)
+function flowSpark() {
+  const svg = FL && FL.svg; if (!svg) return;
+  for (const id in SPK) {
+    const pr = svg.querySelector(`#fl-${id}-sr`), pt = svg.querySelector(`#fl-${id}-st`); if (!pr || !pt) continue;
+    const n = svg.querySelector(`#fln-${id} .fl-node`); if (!n) continue;
+    const bb = n.getBBox(), h = SPK[id], x0 = bb.x + 14, w = bb.width - 28, y0 = bb.y + 63, hh = 17;
+    let mx = 12500; for (const v of h) mx = Math.max(mx, v[0], v[1]);
+    const d = k => h.length < 2 ? '' : 'M' + h.map((v, i) => (x0 + w - (h.length - 1 - i) * w / (SPN - 1)).toFixed(1) + ',' + (y0 - hh * v[k] / mx).toFixed(1)).join(' L');
+    pr.setAttribute('d', d(0)); pt.setAttribute('d', d(1));
+  }
 }
 // обрезать подпись под ширину (k — ширина символа)
 function clip(s, w, k = 6.6) { s = String(s || ''); const n = Math.floor((w - 20) / k); return s.length > n ? s.slice(0, Math.max(1, n - 1)) + '…' : s; }
@@ -739,7 +770,7 @@ window.addEventListener('hashchange', go);
 window.addEventListener('resize', () => { for (const cv of document.querySelectorAll('canvas[data-chart]')) drawChart(cv, cv.dataset.chart); });
 (async () => {
   try { const w = await (await fetch('/api/whoami')).json(); if (!w.role) { showLogin(); return; } } catch (e) { }
-  await load(); go(); timer = setInterval(load, 5000); setInterval(liveTick, 2000);
+  await load(); go(); timer = setInterval(load, 3000); setInterval(liveTick, 1000);
 })();
 </script>
 </body>
