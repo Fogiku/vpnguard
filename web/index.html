@@ -328,7 +328,7 @@ function flowModel() {
   // какой туннель несёт трафик; в режиме «два туннеля» второй — отдельным узлом «Резерв»
   const KN = { meduza: 'MeduzaVPN', amnezia: 'AmneziaVPN' }, kind = (S.vpn && S.vpn.kind) || (mode === 'amnezia' ? 'amnezia' : 'meduza'), other = kind === 'meduza' ? 'amnezia' : 'meduza';
   if (vpnOn) N.push({ id: 'vpn', col: 3, href: '#' + kind, dot: lvl(comp('ultra')), c: 'var(--vpn)', t1: 'VPN · ' + KN[kind], r: u, t3: (mode === 'dual' ? 'активный · ' : '') + (nm.u || 'туннель') });
-  if (mode === 'dual') { const o = comp(other); N.push({ id: 'vpn2', col: 3, href: '#' + other, dot: lvl(o), dim: true, c: 'var(--vpn)', t1: 'Резерв · ' + KN[other], r: null, t3: o ? String(o.state).split(' · ')[0] + ' · ждёт сбоя основного' : 'нет данных' }); }
+  if (mode === 'dual') { const o = comp(other); N.push({ id: 'vpn2', col: 3, href: '#' + other, dot: lvl(o), dim: true, c: 'var(--vpn)', t1: KN[other], r: null, t3: 'резерв · ' + (o ? String(o.state).split(' · ')[0].toLowerCase() + ', ждёт сбоя основного' : 'нет данных') }); }
   if (lanOn) N.push({ id: 'lan', col: 3, dot: 0, c: 'var(--lan)', t1: 'Локальная сеть', r: l, t3: (lanI.net || 'домашняя сеть') + ' · не интернет' });
   N.push({ id: 'zp', col: 3, href: '#zapret', dot: lvl(comp('zapret')), c: 'var(--zp)', t1: vpnOn ? 'Мимо VPN · zapret' : 'Напрямую', r: byp, t3: vpnOn ? 'YouTube, Discord …' : '' });
   const ni = comp('inet'), nOk = LIVE && LIVE.inet !== undefined ? LIVE.inet : ni ? (ni.level === 0 ? 0 : ni.level === 2 ? 1 : -1) : -1;

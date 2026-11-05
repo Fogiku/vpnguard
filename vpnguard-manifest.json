@@ -1,8 +1,8 @@
 {
-    "version":  "3.18.1",
-    "build":  "20261105-1029",
+    "version":  "3.18.2",
+    "build":  "20261105-1031",
     "notes":  "",
-    "date":  "2026-11-05T10:29:51.8202966+03:00",
+    "date":  "2026-11-05T10:31:39.9351293+03:00",
     "files":  [
                   {
                       "path":  "Agent.cs",
@@ -86,7 +86,7 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "f3e3dc524f70286fe10412b10a361f48f461e550007b42da407b60dcedde9c01",
+                      "sha256":  "f91adcf68cc912c75d4cf4c699beaf20ec90bd85ad83e72febd6c72b320ce87f",
                       "size":  82021
                   },
                   {
@@ -106,8 +106,8 @@
                   },
                   {
                       "path":  "web/index.html",
-                      "sha256":  "0844fee1bd9c9ad0bb91cce80379bbdb2b3494999830f901235a353c583550e3",
-                      "size":  84583
+                      "sha256":  "6c3f8606a85c3052348e17638f7d1c7ebfacc659dcc6b04047f3c20f3f6e2bd8",
+                      "size":  84597
                   },
                   {
                       "path":  "Wg.ps1",
