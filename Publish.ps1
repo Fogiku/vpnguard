@@ -16,7 +16,7 @@ Set-Location $Root
 $git = (Get-Command git -ErrorAction Stop).Source
 
 # файлы приложения
-$files = @(@(Get-ChildItem $Root -File | Where-Object { $_.Extension -in '.ps1', '.cmd', '.cs', '.md' }) + @(Get-ChildItem (Join-Path $Root 'web') -File -ErrorAction SilentlyContinue) | Sort-Object FullName)
+$files = @(@(Get-ChildItem $Root -File | Where-Object { $_.Extension -in '.ps1', '.cmd', '.cs', '.md' }) + @(Get-ChildItem (Join-Path $Root 'web') -File -ErrorAction SilentlyContinue) + @(Get-ChildItem (Join-Path $Root 'agent') -Filter '*.cs' -File -ErrorAction SilentlyContinue) | Sort-Object FullName)
 foreach ($f in $files | Where-Object Extension -eq '.ps1') {
     $err = $null; [void][Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$err)
     if ($err.Count) { throw "$($f.Name): $($err[0].Message) (строка $($err[0].Extent.StartLineNumber)) — выпуск отменён" }

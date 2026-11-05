@@ -2,7 +2,7 @@
 <#
   VpnGuard — сторож для MeduzaVPN / AmneziaVPN, WireGuard-сервера wg_server, раздачи и zapret.
 
-  Основной цикл ведёт агент на C# (Agent.cs, Zapret.cs, ClientZapret.cs → bin\VpnGuardAgent.exe).
+  Основной цикл ведёт агент на C# (модули agent\*.cs → bin\VpnGuardAgent.exe).
   Этот файл — часть PowerShell: запуск агента, обновления VpnGuard и MeduzaVPN, компоненты,
   веб-сервер, подбор стратегии zapret, диагностика, клиенты WireGuard, задачи планировщика.
 
@@ -29,7 +29,7 @@ param(
     [string]$ConfigPath = ''
 )
 
-$AgentVersion = '3.23.2'
+$AgentVersion = '3.24.0'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -1330,13 +1330,14 @@ function Test-KindOk([string]$Kind) {
 
 # ---------------------------------------------------------------- агент на C#
 # Основной цикл (MeduzaVPN, AmneziaVPN, два туннеля, wg_server, раздача, zapret, трафик, состояние) ведёт bin\VpnGuardAgent.exe
-# из Agent.cs + Zapret.cs + ClientZapret.cs. Он раз в 30 мин (или сразу по команде) запускает этот файл с -PsPart: обновления,
+# из модулей agent\*.cs. Он раз в 30 мин (или сразу по команде) запускает этот файл с -PsPart: обновления,
 # компоненты, веб-сервер, значок. Подбор стратегии zapret — отдельным процессом -ZapretTest.
 
 $CsAgentExe  = Join-Path $BinDir 'VpnGuardAgent.exe'
 $PsStatusPath = Join-Path $DataDir 'status-ps.json'
 $PsPartStatePath = Join-Path $DataDir 'pspart-state.xml'
-$CsAgentSources = @('Agent.cs', 'Zapret.cs', 'ClientZapret.cs')
+# исходники агента — все модули agent\*.cs (новый модуль подхватывается сам)
+$CsAgentSources = @(Get-ChildItem (Join-Path $Root 'agent') -Filter '*.cs' -File -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { "agent\$($_.Name)" })
 $CsAgentRefs = @('System.Web.Extensions.dll', 'System.ServiceProcess.dll', 'System.Management.dll', 'System.Core.dll', 'Microsoft.CSharp.dll', 'System.IO.Compression.dll', 'System.IO.Compression.FileSystem.dll')
 
 # собрать (если исходники изменились) и запустить; новая версия не собралась — работает прежняя сборка
