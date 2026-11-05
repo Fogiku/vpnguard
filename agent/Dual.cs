@@ -46,7 +46,9 @@ namespace VpnGuard
             if (k == "meduza") { if (Up(MzAdapterName())) { Log("MeduzaVPN: отключаю (резерв поднимается только при сбое)", "INFO"); MzDisconnect(); } }
             else AvpnDisable(false);
         }
-        static void DualSwitch(string k, string reason)
+        static readonly object DualLock = new object();
+        static void DualSwitch(string k, string reason) { lock (DualLock) DualSwitchCore(k, reason); }
+        static void DualSwitchCore(string k, string reason)
         {
             string from = DualAct(); if (from == k) return;
             DualActive = k; DualSwitchAt = DateTime.Now; DualSwitches++; DualReason = reason; DualFails = 0; DualOkSince = DateTime.MinValue;
@@ -127,7 +129,8 @@ namespace VpnGuard
         }
 
         static string DualSyncSig = ""; static DateTime DualSyncAt = DateTime.MinValue;
-        static void DualSyncRoutes()
+        static void DualSyncRoutes() { lock (DualLock) DualSyncRoutesCore(); }
+        static void DualSyncRoutesCore()
         {
             string sig = DualAct() + "|" + string.Join("|", new[] { "meduza", "amnezia" }.Select(k => { var n = KindAdapter(k); return n + ":" + Up(n) + ":" + IfIndexOf(n); }));
             if (sig == DualSyncSig && (DateTime.Now - DualSyncAt).TotalMinutes < 2) return;

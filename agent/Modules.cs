@@ -47,6 +47,7 @@ namespace VpnGuard
                 "zapret-on", "zapret-off", "zapret-check", "zapret-releases", "zapret-update", "zapret-reload", "zapret-test");
             AddModule("ps", "Часть PowerShell", () => 10000, PsPartWatch);
             AddModule("status", "Сводка", () => 10000, Snapshot);
+            AddModule("failover", "Быстрое переключение", () => Math.Max(2, CfgInt("vpn.fastCheckSec", 5)) * 1000, FailoverTick);
             foreach (var m in Mods.ToList()) { var mm = m; new Thread(() => ModuleLoop(mm)) { IsBackground = true, Name = "mod-" + m.Name }.Start(); }
         }
         static void ModuleLoop(Module m)

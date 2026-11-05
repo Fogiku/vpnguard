@@ -1,8 +1,8 @@
 {
-    "version":  "3.25.0",
-    "build":  "20261105-1428",
+    "version":  "3.26.0",
+    "build":  "20261105-1432",
     "notes":  "",
-    "date":  "2026-11-05T14:28:40.3105041+03:00",
+    "date":  "2026-11-05T14:32:19.4083375+03:00",
     "files":  [
                   {
                       "path":  "Agent.cs",
@@ -36,8 +36,13 @@
                   },
                   {
                       "path":  "agent/Dual.cs",
-                      "sha256":  "f54dcc5a8518d21cbfffb92ee3a2c61cfb2ec46009b7c76009378edce4c1736e",
-                      "size":  17305
+                      "sha256":  "7e731fcc2e57d01b607c5ff2e2af8d6b8c859db6ced60ff088630f3dac3319b2",
+                      "size":  17554
+                  },
+                  {
+                      "path":  "agent/Failover.cs",
+                      "sha256":  "4d69cc6fd48f0c45f0552ba46fe5fb1560ae862879e0cb612a48aa60afb708e0",
+                      "size":  2302
                   },
                   {
                       "path":  "agent/Ics.cs",
@@ -61,8 +66,8 @@
                   },
                   {
                       "path":  "agent/Modules.cs",
-                      "sha256":  "5ee76dc46b7efc97d0146919215f1fc99c9162fc57ebcc7e0b00654e11a7ac43",
-                      "size":  8464
+                      "sha256":  "3688d2ced255c137e5d0768d9f06a5e048dd5646cc95dff64e6374fea1550403",
+                      "size":  8614
                   },
                   {
                       "path":  "agent/PsPart.cs",
@@ -171,7 +176,7 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "203bb2f66caf7eafad973607a4b41c53d81e5e00acb4f29370706ac7c6176d06",
+                      "sha256":  "3d8ce40ef9b7f4a81e008a48533be66c7ae3e2115f1fc604b6b0e831b630977c",
                       "size":  82234
                   },
                   {
@@ -186,8 +191,8 @@
                   },
                   {
                       "path":  "Web.cs",
-                      "sha256":  "70637329ff2c855aee8d6fe96aa994b4f41e66431fb579f6f9d6095b1be82161",
-                      "size":  58047
+                      "sha256":  "cebda7fc0be44922c2b60f43d30aacc2c408ea5ead55bd5fdbd2bea4d3a03188",
+                      "size":  58609
                   },
                   {
                       "path":  "web/index.html",
