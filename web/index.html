@@ -325,7 +325,10 @@ function flowModel() {
   N.push({ id: 'wg', col: 1, href: '#wg', dot: lvl(wgc), t1: 'WG-Server', r: [w[1], w[0]], t3: `на связи ${peers.filter(x => x.active).length} из ${peers.length}` });
   N.push({ id: 'pc', col: 2, href: '#ics', dot: lvl(comp('ics')), t1: 'Маршрутизация', r: null, t3: 'раздача ICS' + (cz.running ? ` · zapret ↓ ${mbs(czr[0])}` : vpnOn ? ' из туннеля' : ' напрямую'),
     t4: cz.running && cz.bypass ? `${cz.bypass} адр. временно через VPN` : '' });
-  if (vpnOn) N.push({ id: 'vpn', col: 3, href: '#ultra', dot: lvl(comp('ultra')), c: 'var(--vpn)', t1: 'VPN', r: u, t3: nm.u || 'туннель' });
+  // какой туннель несёт трафик; в режиме «два туннеля» второй — отдельным узлом «Резерв»
+  const KN = { meduza: 'MeduzaVPN', amnezia: 'AmneziaVPN' }, kind = (S.vpn && S.vpn.kind) || (mode === 'amnezia' ? 'amnezia' : 'meduza'), other = kind === 'meduza' ? 'amnezia' : 'meduza';
+  if (vpnOn) N.push({ id: 'vpn', col: 3, href: '#' + kind, dot: lvl(comp('ultra')), c: 'var(--vpn)', t1: 'VPN · ' + KN[kind], r: u, t3: (mode === 'dual' ? 'активный · ' : '') + (nm.u || 'туннель') });
+  if (mode === 'dual') { const o = comp(other); N.push({ id: 'vpn2', col: 3, href: '#' + other, dot: lvl(o), dim: true, c: 'var(--vpn)', t1: 'Резерв · ' + KN[other], r: null, t3: o ? String(o.state).split(' · ')[0] + ' · ждёт сбоя основного' : 'нет данных' }); }
   if (lanOn) N.push({ id: 'lan', col: 3, dot: 0, c: 'var(--lan)', t1: 'Локальная сеть', r: l, t3: (lanI.net || 'домашняя сеть') + ' · не интернет' });
   N.push({ id: 'zp', col: 3, href: '#zapret', dot: lvl(comp('zapret')), c: 'var(--zp)', t1: vpnOn ? 'Мимо VPN · zapret' : 'Напрямую', r: byp, t3: vpnOn ? 'YouTube, Discord …' : '' });
   const ni = comp('inet'), nOk = LIVE && LIVE.inet !== undefined ? LIVE.inet : ni ? (ni.level === 0 ? 0 : ni.level === 2 ? 1 : -1) : -1;
@@ -334,9 +337,10 @@ function flowModel() {
   E.push({ a: 'wg', b: 'pc', r: [w[1], w[0]], c: 'var(--accent)' });
   E.push({ a: 'apps', b: 'pc', r: apps, c: 'var(--dim)' });
   if (vpnOn) { E.push({ a: 'pc', b: 'vpn', r: u, c: 'var(--vpn)' }); E.push({ a: 'vpn', b: 'net', r: u, c: 'var(--vpn)' }); }
+  if (mode === 'dual') { E.push({ a: 'pc', b: 'vpn2', r: [0, 0], c: 'var(--vpn)', off: true }); E.push({ a: 'vpn2', b: 'net', r: [0, 0], c: 'var(--vpn)', off: true }); }
   E.push({ a: 'pc', b: 'zp', r: byp, c: 'var(--zp)' });
   if (lanOn) E.push({ a: 'pc', b: 'lan', r: l, c: 'var(--lan)', near: true }); E.push({ a: 'zp', b: 'net', r: byp, c: 'var(--zp)' });
-  return { N, E, key: N.map(n => n.id + (n.dim ? '-' : '+')).join(',') + '|' + vpnOn };
+  return { N, E, key: N.map(n => n.id + (n.dim ? '-' : '+')).join(',') + '|' + vpnOn + '|' + kind };
 }
 const mbs = v => { v = (+v || 0) * 8; return v >= 1e7 ? (v / 1e6).toFixed(0) : v >= 1e5 ? (v / 1e6).toFixed(1) : v >= 1e3 ? (v / 1e6).toFixed(2) : '0'; };
 // скорость стрелок, пикс/с: 0 — стоят; дальше растёт с логарифмом трафика
@@ -346,10 +350,11 @@ function flowBuild(m) {
   const { N, E } = m, byId = {}; N.forEach(n => byId[n.id] = n);
   const W = 200, H = 64, G = 14, X = [0, 265, 510, 755, 1000], VW = X[4] + W;
   const col0 = N.filter(n => n.col === 0);
-  const VH = Math.max(col0.length * (H + G) - G, byId.lan ? 4 * H + 60 : 2 * H + 40) + 4, mid = VH / 2;
+  const VH = Math.max(col0.length * (H + G) - G, byId.lan || byId.vpn2 ? 4 * H + 60 : 2 * H + 40) + 4, mid = VH / 2;
   col0.forEach((n, i) => Object.assign(n, { x: X[0], y: 2 + i * (H + G) }));
   for (const n of N) if (n.col > 0) Object.assign(n, { x: X[n.col], y: mid - H / 2 });
   if (byId.vpn) { byId.vpn.y = mid - H - 14; byId.zp.y = mid + 14; }
+  if (byId.vpn2) byId.vpn2.y = byId.vpn.y - H - 14;
   if (byId.lan) { if (!byId.vpn) byId.zp.y = mid - H / 2; byId.lan.y = byId.zp.y + H + 14; }
   N.forEach(n => { n.w = W; n.h = H; });
   // точки подключения: связи одной стороны узла разносятся по ней (по высоте источника/приёмника — без перекрёстков)
