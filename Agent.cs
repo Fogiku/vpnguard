@@ -712,6 +712,10 @@ namespace VpnGuard
         static DateTime AwgWarnAt = DateTime.MinValue;
         static void AmneziaWatch()
         {
+            if (AvpnBlocked()) {
+                var bn = AvpnNic(); if (AvpnProc() != null || (bn != null && bn.OperationalStatus == OperationalStatus.Up)) { Log("Защита AmneziaVPN: AmneziaVPN отключён до " + AgBlockedUntil.ToString("HH:mm") + " — закрываю", "WARN"); AvpnStop(); }
+                AwgTraffic = null; return;
+            }
             if (!File.Exists(AwgExe())) { if ((DateTime.Now - AwgWarnAt).TotalMinutes >= 10) { Log("AmneziaVPN не установлен (" + AwgExe() + ") — установите на вкладке «Компоненты» и добавьте сервер в приложении", "ERROR"); AwgWarnAt = DateTime.Now; } return; }
             if (AvpnProc() == null) {
                 Log("AmneziaVPN: приложение не запущено", "WARN"); SetActivity("запускаю AmneziaVPN");
@@ -734,6 +738,79 @@ namespace VpnGuard
             if (AwgDownTicks >= 3) { AwgDownTicks = 0; AwgRestart("туннель не подключается"); }
         }
 
+        // ---------------------------------------------------------------- защита: AmneziaVPN не должен отрезать локальную сеть и клиентов WG-Server
+        // Маршруты AmneziaVPN локалку не трогают (сеть роутера точнее 0.0.0.0/1), но Kill Switch приложения может запретить в брандмауэре
+        // всё, кроме туннеля, — тогда пропадут роутер, клиенты WG (они приходят с адреса роутера) и удалённый доступ к ПК.
+        // Пока AmneziaVPN не поднят — запоминаем, как было (роутер отвечает, сколько клиентов на связи); поднят и стало хуже 2 проверки
+        // подряд — гасим AmneziaVPN и смотрим, вернулось ли. Вернулось — виноват он: отключаем на amnezia.guardBlockMin минут
+        // (в режиме AmneziaVPN — переключаем на MeduzaVPN). Не вернулось — дело не в нём, запускаем обратно.
+        static DateTime AgBlockedUntil = DateTime.MinValue, AgTripAt = DateTime.MinValue, AgBaseAt = DateTime.MinValue;
+        static string AgTripWhy = ""; static int AgFails, AgTrips, AgPeersBase = -1; static bool AgGwBase;
+        static bool AvpnBlocked() { return DateTime.Now < AgBlockedUntil; }
+        static string AgGateway() { var z = ZPhys(); return z != null && !string.IsNullOrEmpty(z.Gateway) ? z.Gateway : InetGw; }
+        static bool AgGwOk(string gw)
+        {
+            if (string.IsNullOrEmpty(gw)) return true;
+            for (int i = 0; i < 3; i++) { try { using (var p = new System.Net.NetworkInformation.Ping()) if (p.Send(gw, 1000).Status == System.Net.NetworkInformation.IPStatus.Success) return true; } catch { } }
+            return false;
+        }
+        // клиенты WG-Server с рукопожатием за последние 3 мин (на связи)
+        static int AgPeers()
+        {
+            try {
+                var wg = Path.Combine(Path.GetDirectoryName(CfgStr("ws4w.wireguardExe", @"C:\Program Files\WireGuard\wireguard.exe")), "wg.exe");
+                var r = File.Exists(wg) ? Exe(wg, "show " + WgIf() + " dump", 5) : null; if (r == null || r.Code != 0) return -1;
+                long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds(); int n = 0;
+                foreach (var l in r.Out.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Skip(1)) {
+                    var p = l.Split('\t'); long hs; if (p.Length > 4 && long.TryParse(p[4], out hs) && hs > 0 && now - hs < 180) n++;
+                }
+                return n;
+            } catch { return -1; }
+        }
+        static void AvpnGuard()
+        {
+            if (!CfgBool("amnezia.lanGuard", true)) { AgFails = 0; return; }
+            string gw = AgGateway(); var nic = AvpnNic(); bool up = nic != null && nic.OperationalStatus == OperationalStatus.Up;
+            if (!up) {                                                   // AmneziaVPN не поднят — запомнить, как должно быть
+                AgFails = 0; if ((DateTime.Now - AgBaseAt).TotalSeconds < 50) return;
+                AgGwBase = AgGwOk(gw); AgPeersBase = AgPeers(); AgBaseAt = DateTime.Now; return;
+            }
+            bool gwOk = AgGwOk(gw); int peers = AgPeers();
+            string bad = !gwOk && (AgGwBase || AgBaseAt == DateTime.MinValue) ? "роутер " + gw + " не отвечает"
+                : AgPeersBase > 0 && peers == 0 ? "клиенты WG-Server пропали (было на связи " + AgPeersBase + ")" : null;
+            if (bad == null) { AgFails = 0; return; }
+            AgFails++;
+            Log("Защита AmneziaVPN: при поднятом туннеле " + bad + " (" + AgFails + "/2)", "WARN");
+            if (AgFails < 2) return;
+            AgFails = 0;
+            // проверка: без AmneziaVPN вернётся?
+            bool byGw = bad.StartsWith("роутер");
+            Log("Защита AmneziaVPN: отключаю AmneziaVPN и проверяю, вернётся ли связь", "WARN"); SetActivity("проверяю, не AmneziaVPN ли отрезал локальную сеть");
+            AvpnStop();
+            bool back = Wait(() => byGw ? AgGwOk(gw) : AgPeers() > 0, byGw ? 15 : 60);
+            if (!back) {                                                 // служба могла оставить правила брандмауэра — остановить её совсем
+                try { var sv = Svc(AvpnSvcName()); if (sv != null && sv.Status == ServiceControllerStatus.Running) { sv.Stop(); sv.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(20)); } } catch { }
+                back = Wait(() => byGw ? AgGwOk(gw) : AgPeers() > 0, byGw ? 15 : 60);
+            }
+            if (!back) {
+                Log("Защита AmneziaVPN: без AmneziaVPN связь тоже не вернулась (" + bad + ") — дело не в нём, запускаю его обратно", "WARN");
+                try { var sv = Svc(AvpnSvcName()); if (sv != null && sv.Status != ServiceControllerStatus.Running) sv.Start(); } catch { }
+                return;
+            }
+            int min = Math.Max(10, CfgInt("amnezia.guardBlockMin", 180));
+            AgTrips++; AgTripAt = DateTime.Now; AgTripWhy = bad; AgBlockedUntil = DateTime.Now.AddMinutes(min);
+            Log("Защита AmneziaVPN: AmneziaVPN отрезал локальную сеть (" + bad + "; без него всё вернулось). Он отключён на " + min + " мин. " +
+                "В приложении AmneziaVPN выключите Kill Switch (или разрешите в нём локальную сеть), затем снова выберите режим", "ERROR");
+            if (Mode() == "amnezia") { CfgSet("vpn.mode", "meduza"); Log("Защита AmneziaVPN: режим переключён на MeduzaVPN, чтобы клиенты не остались без VPN", "WARN"); }
+            ForceIcs = true;
+        }
+        static bool Wait(Func<bool> ok, int sec)
+        {
+            var dl = DateTime.Now.AddSeconds(sec);
+            do { Thread.Sleep(3000); if (ok()) return true; } while (DateTime.Now < dl);
+            return false;
+        }
+
         // ---------------------------------------------------------------- режим работы
         static string UplinkName() { var m = Mode(); if (m == "zapret") return PhysAlias(); return KindAdapter(TunnelKind()); }
         static readonly Dictionary<string, string> ModeNames = new Dictionary<string, string> { { "meduza", "MeduzaVPN" }, { "amnezia", "AmneziaVPN" }, { "dual", "два туннеля (MeduzaVPN + AmneziaVPN)" }, { "zapret", "без VPN (только zapret)" } };
@@ -747,11 +824,12 @@ namespace VpnGuard
                 if (mode != "meduza" && mode != "dual" && CfgBool("vpn.stopInactive", true) && MzProc() != null) { Log("MeduzaVPN: отключаю и закрываю (выбран другой режим)", "INFO"); MzStop(); }
                 if (mode != "amnezia" && mode != "dual") AvpnDisable(CfgBool("vpn.stopInactive", true));
                 if (mode == "meduza" || mode == "dual") MeduzaStartedAt = DateTime.Now;
-                if (mode == "amnezia" || mode == "dual") AvpnStartedAt = DateTime.Now;
+                if (mode == "amnezia" || mode == "dual") { AvpnStartedAt = DateTime.Now; if (AvpnBlocked()) Log("Защита AmneziaVPN: режим выбран заново — снова пробую AmneziaVPN", "INFO"); AgBlockedUntil = DateTime.MinValue; AgFails = 0; }
                 if (mode == "dual") { DualActive = DualPrimary(); DualFails = 0; DualOkSince = DateTime.MinValue; }
                 ProbeFailures = 0; DownTicks = 0; LastTraffic = null; AwgProbeFailures = 0; AwgDownTicks = 0; AwgTraffic = null; ForceIcs = true;
                 LastMode = mode;
             }
+            if (mode == "amnezia" || mode == "dual") { try { AvpnGuard(); } catch (Exception e) { Log("Защита AmneziaVPN: " + e.Message, "WARN"); } }
             if (InetDown() && mode != "zapret") { ProbeFailures = 0; DownTicks = 0; AwgProbeFailures = 0; AwgDownTicks = 0; DualFails = 0; return; }   // нет интернета у провайдера — туннель ни при чём
             if (mode == "meduza") { MeduzaWatch(); AvpnDisable(false); }
             else if (mode == "amnezia") { if (Up(MzAdapterName())) { Log("MeduzaVPN: подключён, но выбран режим AmneziaVPN — отключаю", "WARN"); MzDisconnect(); } AmneziaWatch(); }
@@ -1352,12 +1430,16 @@ namespace VpnGuard
             if (!used) { aL = -1; aS = aUp ? "Не используется (туннель поднят)" : avProc != null ? "Не используется (запущен)" : "Не используется"; }
             else if (!inst) { aL = 2; aS = "Не установлен"; } else if (avProc == null) { aL = 2; aS = "Не запущен"; } else if (!aUp) { aL = 1; aS = "Туннель не подключён"; }
             else if (AwgTraffic == false) { aL = 1; aS = "Нет трафика"; } else { aL = 0; aS = "Подключён"; }
+            if (used && AvpnBlocked()) { aL = 2; aS = "Отключён защитой до " + AgBlockedUntil.ToString("HH:mm") + " — отрезал локальную сеть"; }
+            string agTxt = !CfgBool("amnezia.lanGuard", true) ? "Защита локальной сети: выключена" : AvpnBlocked() ? "Защита: отключён до " + AgBlockedUntil.ToString("HH:mm") + " — " + AgTripWhy + ". Выключите в AmneziaVPN Kill Switch"
+                : AgTrips > 0 ? "Защита: срабатывала " + When(AgTripAt) + " (" + AgTripWhy + ")" : "Защита локальной сети: включена, срабатываний не было";
             string aVer = ""; try { if (inst) aVer = FileVersionInfo.GetVersionInfo(avExe).ProductVersion; } catch { }
             string aTr = AwgTraffic == true ? "OK" : AwgTraffic == false ? "НЕТ" : "—";
             long avMem = 0; try { if (avProc != null) avMem = avProc.WorkingSet64 / 1048576; } catch { }
             var awg = Comp(aL, aS, new[] { inst ? "AmneziaVPN " + aVer + " · " + (avProc != null ? "PID " + avProc.Id : "не запущен") : "AmneziaVPN не установлен",
                 "Туннель: " + (aUp ? avNic.Name + " · IP " + aIp : avNic != null ? avNic.Name + " — " + avNic.OperationalStatus : "не подключён"),
-                "Трафик: " + aTr + ", проверка " + When(AwgTrafficAt), "Перезапуски: " + AwgRestarts.Count(d => d > DateTime.Now.AddMinutes(-30)) + " за 30 мин, посл. " + When(AwgLastRestart) }, new List<object[]> {
+                "Трафик: " + aTr + ", проверка " + When(AwgTrafficAt), "Перезапуски: " + AwgRestarts.Count(d => d > DateTime.Now.AddMinutes(-30)) + " за 30 мин, посл. " + When(AwgLastRestart), agTxt }, new List<object[]> {
+                Kv("Защита локальной сети", agTxt + (AgBaseAt != DateTime.MinValue ? " · без AmneziaVPN: роутер " + (AgGwBase ? "отвечал" : "не отвечал") + ", клиентов WG на связи " + Math.Max(0, AgPeersBase) : "")),
                 Kv("Приложение AmneziaVPN", inst ? "установлено · версия " + aVer : "не установлено (" + avExe + ")"),
                 Kv("Процесс", avProc != null ? "PID " + avProc.Id + " · " + avMem + " МБ" : "не запущен"),
                 Kv("Служба", avSvc != null ? avSvc.ServiceName + " · " + avSvc.Status + " / " + StartMode(avSvc.ServiceName) : "не найдена"),
