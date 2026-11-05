@@ -1,13 +1,13 @@
 {
-    "version":  "3.16.9",
-    "build":  "20261105-0940",
+    "version":  "3.17.0",
+    "build":  "20261105-1000",
     "notes":  "",
-    "date":  "2026-11-05T09:40:31.0394823+03:00",
+    "date":  "2026-11-05T10:00:40.9196091+03:00",
     "files":  [
                   {
                       "path":  "Agent.cs",
-                      "sha256":  "3532d46c9bcc40477a05d3b1d63cabf9901a97342338cd2b90c0fcdfe7502c65",
-                      "size":  126046
+                      "sha256":  "06751a903b4be71b8a16e34c0b81524eff29c9d76c630eca48fe9196be38cb06",
+                      "size":  126271
                   },
                   {
                       "path":  "Amnezia.ps1",
@@ -16,8 +16,8 @@
                   },
                   {
                       "path":  "ClientZapret.cs",
-                      "sha256":  "6c35b79e97271c0f598bf5d15cfe868fd0c608843b6bd50ff93136aa6eceda1c",
-                      "size":  88198
+                      "sha256":  "7ba2f5d339155f28e18626780327e4c8cb7de8a35f1f7e966cf65f678aad4a3a",
+                      "size":  93657
                   },
                   {
                       "path":  "Install.cmd",
@@ -86,7 +86,7 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "64b59e0047191f3beca54bd8a86c3f3707e29fecc33b2bba25ce4b23beda88e5",
+                      "sha256":  "d7e467f4ba9ca01eb31a5e24899be3384ad6204394571e5d1ee85e8c1702d3cd",
                       "size":  82021
                   },
                   {
@@ -106,8 +106,8 @@
                   },
                   {
                       "path":  "web/index.html",
-                      "sha256":  "3929df53068e4007e2ef071c9c165e21a732768bf5a994b7392da4b8f3342f5a",
-                      "size":  82506
+                      "sha256":  "1a2a395b858106af6242dabdfe816da283279e76daa1030520f5f7213706e544",
+                      "size":  83517
                   },
                   {
                       "path":  "Wg.ps1",

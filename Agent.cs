@@ -92,7 +92,7 @@ namespace VpnGuard
                 var t0 = DateTime.Now;
                 LoadCfg(false);
                 if (SourceSig() != CodeSig) { Log("Агент C#: код обновлён — перезапуск на новой версии", "INFO"); HandOver(); return; }
-                foreach (var step in new Action[] { Commands, WgWatch, WgClientsWatch, VpnWatch, SharingWatch, ZapretWatch, ClientZapretWatch, PsPartWatch }) {
+                foreach (var step in new Action[] { Commands, WgWatch, WgClientsWatch, VpnWatch, SharingWatch, ZapretWatch, ClientZapretWatch, LanWatch, PsPartWatch }) {
                     try { step(); } catch (Exception e) { Log("Агент C#: " + step.Method.Name + ": " + e.Message, "ERROR"); }
                     if ((DateTime.Now - LastSnapshot).TotalSeconds >= 10) Snapshot();
                 }
@@ -1176,6 +1176,7 @@ namespace VpnGuard
                 today[k] = new[] { today[k][0] + d[0], today[k][1] + d[1] };
                 TrafRate[k] = sec > 0 ? new[] { (long)(d[0] / sec), (long)(d[1] / sec) } : new long[2];
             }
+            TrafRate["l"] = LanRate("traf:l");
             TrafAt = now;
             while (TrafDays.Count > 31) TrafDays.Remove(TrafDays.Keys.First());
             if ((now - TrafSaved).TotalSeconds >= 60) {
@@ -1205,6 +1206,7 @@ namespace VpnGuard
                         long rx = 0, tx = 0; try { var st = n.GetIPStatistics(); rx = st.BytesReceived; tx = st.BytesSent; } catch { }
                         ad[kv.Key] = RateOf("live:" + kv.Key + ":" + n.Id, rx, tx);
                     }
+                    ad["l"] = LanRate("live:l");
                     if (tick % 2 == 1 || peers == null) {
                         var wg = Path.Combine(Path.GetDirectoryName(CfgStr("ws4w.wireguardExe", @"C:\Program Files\WireGuard\wireguard.exe")), "wg.exe");
                         var pr = new Dictionary<string, object>();
@@ -1389,7 +1391,7 @@ namespace VpnGuard
                 { "activitySince", busy ? ActivitySince.ToString("o") : "" }, { "agentStarted", StartedAt.ToString("o") }, { "agentPid", Process.GetCurrentProcess().Id },
                 { "agentVersion", Version + " C#" }, { "engine", "csharp" }, { "intervalSec", CfgInt("checkIntervalSec", 30) }, { "lastUpdateCheck", ps.ContainsKey("meduzaLastCheck") ? ps["meduzaLastCheck"] : "" },
                 { "inet", inet }, { "meduza", meduza }, { "ultra", ultra }, { "wg", wg }, { "ics", icsC }, { "zapret", zapret },
-                { "traffic", new Dictionary<string, object> { { "names", adNames }, { "rate", TrafRate }, { "days", TrafDays.Reverse().Take(14).Reverse().Select(kv => (object)new Dictionary<string, object> { { "d", kv.Key }, { "u", kv.Value["u"] }, { "w", kv.Value["w"] }, { "p", kv.Value["p"] } }).ToArray() } } },
+                { "traffic", new Dictionary<string, object> { { "names", adNames }, { "rate", TrafRate }, { "lan", new Dictionary<string, object> { { "on", LanH != WdInvalid }, { "net", LanNet }, { "error", LanError } } }, { "days", TrafDays.Reverse().Take(14).Reverse().Select(kv => (object)new Dictionary<string, object> { { "d", kv.Key }, { "u", kv.Value["u"] }, { "w", kv.Value["w"] }, { "p", kv.Value["p"] } }).ToArray() } } },
                 { "counters", new Dictionary<string, object> { { "restarts", RestartCount }, { "reconnects", ReconnectCount }, { "icsFixes", IcsFixCount } } },
                 { "vpn", new Dictionary<string, object> { { "mode", mode }, { "name", ModeNames[mode] }, { "uplink", upN }, { "kind", kind }, { "primary", DualPrimary() } } },
                 { "amnezia", awg }, { "software", ps.ContainsKey("software") ? ps["software"] : new object[0] }, { "remote", ps.ContainsKey("remote") ? ps["remote"] : null }, { "app", ps.ContainsKey("app") ? ps["app"] : null },
