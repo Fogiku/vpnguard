@@ -69,16 +69,15 @@ namespace VpnGuard
             string from = any ? "any" : "LocalSubnet" + (wgNet.Length > 0 ? "," + wgNet : ""), sig = port + "|" + from;
             if (sig == WebFwSig && (DateTime.Now - WebFwAt).TotalMinutes < 30) return;
             WebFwAt = DateTime.Now;
-            var have = FwRuleText();
-            bool ok = false;
-            if (have != null) {
-                // правило уже есть (агент перезапустился или проверка раз в 30 мин): порт и «откуда угодно / только своя сеть» — как нужно?
-                var lp = Regex.Match(have, @"(?im)^\s*(LocalPort|Локальный порт)\s*:\s*(\S+)"); var ra = Regex.Match(have, @"(?im)^\s*(RemoteIP|Удаленный IP-адрес|Удалённый IP-адрес)\s*:\s*(.+)$");
-                bool isAny = ra.Success && Regex.IsMatch(ra.Groups[2].Value.Trim(), "^(Any|Любой)$", RegexOptions.IgnoreCase);
-                ok = lp.Success && lp.Groups[2].Value == port.ToString() && isAny == any && Regex.Matches(have, @"(?im)^\s*(Rule Name|Имя правила)\s*:").Count == 1;
-            }
+            // правило уже есть? порт и «откуда угодно / только своя сеть» — через COM брандмауэра (не зависит от языка Windows, в отличие от вывода netsh)
+            int n = 0; string ports = "", remote = "";
+            try {
+                dynamic fw = Activator.CreateInstance(Type.GetTypeFromProgID("HNetCfg.FwPolicy2"));
+                foreach (dynamic r in fw.Rules) { if ((string)r.Name != RemoteRule) continue; n++; ports = Convert.ToString(r.LocalPorts); remote = Convert.ToString(r.RemoteAddresses); }
+            } catch { n = -1; }
+            bool have = n != 0, ok = n == 1 && ports == port.ToString() && (remote == "*") == any;
             if (!ok) {
-                if (have != null) Exe("netsh.exe", "advfirewall firewall delete rule name=\"" + RemoteRule + "\"", 15);
+                if (have) Exe("netsh.exe", "advfirewall firewall delete rule name=\"" + RemoteRule + "\"", 15);
                 var r = Exe("netsh.exe", "advfirewall firewall add rule name=\"" + RemoteRule + "\" dir=in action=allow protocol=TCP localport=" + port + " remoteip=" + from + " profile=any", 15);
                 if (r.Code == 0) Log("Удалённая диагностика: правило брандмауэра — TCP " + port + ", откуда: " + from, "INFO");
                 else Log("Удалённая диагностика: правило брандмауэра не создано: " + (r.Out + " " + r.Err).Trim(), "WARN");
