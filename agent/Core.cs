@@ -56,7 +56,8 @@ namespace VpnGuard
         public static int Main(string[] argv)
         {
             bool snapOnly = argv.Contains("--snapshot");          // проверка (Test.ps1): только записать состояние и выйти, ничего не меняя
-            var args = argv.Where(a => a != "--snapshot").ToArray();
+            bool selfTest = argv.Contains("--selftest");          // самопроверка логики (Test.ps1): сценарии без изменений в системе
+            var args = argv.Where(a => !a.StartsWith("--")).ToArray();
             Root =args.Length > 0 ? args[0].TrimEnd('\\') : Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ".."));
             ConfigPath = args.Length > 1 ? args[1] : Path.Combine(Root, "config.json");
             DataDir = Path.Combine(Root, "data"); LogDir = Path.Combine(DataDir, "logs"); CmdDir = Path.Combine(DataDir, "cmd"); CmdPsDir = Path.Combine(DataDir, "cmd-ps");
@@ -65,6 +66,7 @@ namespace VpnGuard
             try { var m = Regex.Match(File.ReadAllText(Path.Combine(Root, "VpnGuard.ps1")), @"\$AgentVersion\s*=\s*'([^']+)'"); if (m.Success) Version = m.Groups[1].Value; } catch { }
             CodeSig = SourceSig();
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+            if (selfTest) return SelfTest();
             if (snapOnly) { LoadCfg(true); LastMode = Mode(); try { SnapshotCore(); return 0; } catch (Exception e) { Console.Error.WriteLine(e); return 1; } }
             // как и VpnGuard.ps1: без прав администратора не управлять ничем и сразу выйти
             if (!new System.Security.Principal.WindowsPrincipal(System.Security.Principal.WindowsIdentity.GetCurrent()).IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator)) { Log("Агент C#: нужны права администратора", "ERROR"); return 1; }

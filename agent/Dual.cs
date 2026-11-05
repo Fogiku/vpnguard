@@ -36,6 +36,7 @@ namespace VpnGuard
         // быстрая проверка туннеля: адаптер поднят и через него открываются узлы проверки
         static bool KindOk(string k)
         {
+            if (KindOkHook != null) return KindOkHook(k);          // самопроверка (SelfTest.cs)
             var n = KindAdapter(k); if (string.IsNullOrEmpty(n) || !Up(n)) return false;
             string ip = Ipv4(n); if (ip == null) return false;
             return Probe(ip, ProbeHosts(), 3000).Ok;
@@ -69,7 +70,7 @@ namespace VpnGuard
         // (чтобы клиенты WireGuard не уходили в него); у резервного — метрика 5000
 
         static string DualSyncSig = ""; static DateTime DualSyncAt = DateTime.MinValue;
-        static void DualSyncRoutes() { lock (DualLock) DualSyncRoutesCore(); }
+        static void DualSyncRoutes() { if (TestMode) return; lock (DualLock) DualSyncRoutesCore(); }
         static void DualSyncRoutesCore()
         {
             string sig = DualAct() + "|" + string.Join("|", new[] { "meduza", "amnezia" }.Select(k => { var n = KindAdapter(k); return n + ":" + Up(n) + ":" + IfIndexOf(n); }));

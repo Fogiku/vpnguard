@@ -274,6 +274,17 @@ else {
     }
     if ($bad) { $bad | Select-Object -Unique | ForEach-Object { Fail "агент C#: $_" } } else { Ok "собран ($([int]((Get-Item $agx).Length / 1KB)) КБ); снимок состояния в четырёх режимах совпадает по форме с агентом PowerShell" }
 }
+Write-Host '5г. Логика агента (самопроверка --selftest: схема настроек, команды, события, быстрое переключение, проверка узлов, история)'
+if (Test-Path $agx) {
+    $sr = Join-Path $tmp 'selftest'; New-Item -ItemType Directory $sr -Force | Out-Null
+    $so = Join-Path $tmp 'selftest.txt'
+    $sp = Start-Process $agx -ArgumentList "`"$sr`" --selftest" -Wait -PassThru -RedirectStandardOutput $so -WindowStyle Hidden
+    $lines = @(Get-Content $so -Encoding UTF8 -ErrorAction SilentlyContinue)
+    $nf = @($lines | Where-Object { $_ -like 'FAIL*' })
+    if ($sp.ExitCode -ne 0 -or $nf.Count -or -not ($lines -contains 'ВСЁ OK')) { foreach ($l in $nf) { Fail "самопроверка: $($l.Substring(5))" }; if (-not $nf.Count) { Fail "самопроверка: код $($sp.ExitCode) $(($lines | Select-Object -Last 2) -join ' ')" } }
+    else { Ok "сценариев: $(@($lines | Where-Object { $_ -like 'OK *' }).Count), все прошли" }
+}
+
 Write-Host '7. Имена клиентов WG-Server (формат WS4W «# 1» над [Peer] и VpnGuard «# Name =» внутри; агент C# и список одинаково)'
 $pr = Join-Path $tmp 'peers'; New-Item -ItemType Directory (Join-Path $pr 'srv\server_wg'), (Join-Path $pr 'srv\clients_wg\c1'), (Join-Path $pr 'data\logs') -Force | Out-Null
 $pconf = Join-Path $pr 'srv\server_wg\wg_server.conf'
