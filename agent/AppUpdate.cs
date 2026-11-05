@@ -119,7 +119,7 @@ namespace VpnGuard
                     var err = AppTryBuild(stage, "agent", names, "winexe", new[] { "System.Web.Extensions.dll", "System.ServiceProcess.dll", "System.Management.dll", "System.Core.dll", "Microsoft.CSharp.dll", "System.IO.Compression.dll", "System.IO.Compression.FileSystem.dll" });
                     if (err != null) throw new Exception("новый агент не собирается: " + err);
                 }
-                if (paths.Any(p => WebSources.Contains(p, StringComparer.OrdinalIgnoreCase))) {
+                if (paths.Any(p => WebSources.Contains(p.Replace('/', '\\'), StringComparer.OrdinalIgnoreCase))) {
                     var err = AppTryBuild(stage, "web", WebSources, "exe", WebRefs);
                     if (err != null) throw new Exception("новый веб-сервер не собирается: " + err);
                 }

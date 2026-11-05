@@ -184,7 +184,7 @@ P.wg = () => {
     const zInfo = !cz.enabled ? '' : off ? '' : !zap ? '<div class="sub">zapret выкл — всё через VPN</div>'
       : `<div class="sub">через zapret: ${s.conns || 0} соед. · ↓ ${fmtB((s.downKb || 0) * 1024)}${s.fail ? ' · не подключилось ' + s.fail : ''}${s.lastAgo >= 0 ? ' · ' + ago(s.lastAgo) : (p.active ? ' · пока не было' : '')}</div>`;
     return `<tr${off ? ' style="opacity:.6"' : ''}><td><span class="dot l${!off && p.active ? 0 : -1}"></span> ${nm}${c.source === 'WS4W' ? ' <span class="sub">WS4W</span>' : ''}${off ? ' <b>отключён</b>' : ''}${zInfo}</td><td>${ip}</td><td class="hide-m">${esc(p.endpoint || '—')}</td><td>${off ? '—' : p.hsAgo !== undefined ? ago(p.hsAgo) : '—'}</td><td class="hide-m">↓ ${fmtB(p.tx)} ↑ ${fmtB(p.rx)}</td>
-    <td class="row" style="flex-wrap:nowrap">${cz.enabled && !off ? btn(zap ? 'zapret: вкл' : 'zapret: выкл', `cliSet('${ip}',{zapret:${!zap}},'${nm}')`, zap) : ''}${btn(off ? 'Включить' : 'Отключить', `cliSet('${ip}',{off:${!off}},'${nm}')`, off)}${c.hasConf ? btn('QR и настройки', `showConf('${ip}')`) : ''}${btn('Удалить', `delClient('${ip}','${nm}')`)}</td></tr>`; }).join('');
+    <td class="row" style="flex-wrap:nowrap">${cz.enabled && !off ? btn(zap ? 'zapret: вкл' : 'zapret: выкл', `cliSet('${ip}',{zapret:${!zap}},'${nm}')`, zap) : ''}${btn(off ? 'Включить' : 'Отключить', `cliSet('${ip}',{off:${!off}},'${nm}')`, off)}${c.hasConf ? btn('QR и настройки', `showConf('${ip}')`) : ''}${btn('Переименовать', `wgRename('${ip}','${nm}')`)}${btn('Удалить', `delClient('${ip}','${nm}')`)}</td></tr>`; }).join('');
   const czCard = `<div class="sec">zapret для клиентов</div><div class="card">${cz.enabled
       ? `<p><span class="dot l${cz.running ? 0 : 2}"></span> <b>${cz.running ? 'Работает' : 'Не работает'}</b>${cz.error ? ' · ' + esc(cz.error) : ''}</p>
          <p>Трафик клиентов к адресам zapret (YouTube, Discord, видеосерверы провайдера, свои списки) идёт через zapret этого ПК, остальное — через VPN. На устройствах ничего менять не нужно. Для отдельного клиента zapret можно выключить в таблице ниже.</p>
@@ -192,7 +192,16 @@ P.wg = () => {
          ${btn('Выключить', "setCfg('ws4w.clientZapret',false,'zapret для клиентов')")}`
       : `<p class="muted">Клиентам YouTube и Discord сейчас ${zon ? 'не открываются, пока zapret включён (zapret обрабатывает только трафик самого ПК)' : 'идут через VPN'}. Можно пустить их через zapret этого ПК: трафик к адресам zapret (YouTube, Discord …) — через zapret, остальное — через VPN. На устройствах ничего менять не нужно.</p>
          ${btn('Включить', "setCfg('ws4w.clientZapret',true,'zapret для клиентов')", true)}`}</div>`;
-  return compHead('wg', btn('＋ Новый клиент', 'addClient()', true) + btn('Перезапустить туннель', "cmd('restart-wg','перезапуск WG-Server')")) + czCard +
+  const sv = wgList && wgList.server;
+  const srvCard = !sv ? '' : `<div class="sec">Сервер</div><div class="card">
+    <table class="kv"><tr><td>Управляет</td><td>${sv.owned ? '<b class="c0">VpnGuard</b> — WS4W не нужен' : '<b class="c1">WS4W</b> — конфиг в его папке'}</td></tr>
+      <tr><td>Адрес сервера</td><td>${esc(sv.address)} · порт UDP ${esc(sv.port)}</td></tr>
+      <tr><td>Адрес для клиентов</td><td>${esc(sv.endpoint || '—')}${sv.endpointSet ? '' : ' <span class="sub">(автоматически)</span>'}</td></tr>
+      <tr><td>DNS для клиентов</td><td>${esc(sv.dns)}${sv.dnsSet ? '' : ' <span class="sub">(автоматически)</span>'}</td></tr>
+      <tr><td>Конфиг</td><td class="sub">${esc(sv.conf)}</td></tr></table>
+    <div class="row" style="margin-top:10px">${btn('Изменить настройки сервера', 'wgServerEdit()')}${sv.owned ? '' : btn('Перенести сервер в VpnGuard (отказаться от WS4W)', 'wgAdopt()', true)}</div>
+    ${sv.owned ? '' : `<p class="sub" style="margin-top:8px">Конфиг сервера и клиентов (${sv.ws4wClients || 0} из WS4W) переносятся в папку VpnGuard, служба туннеля переустанавливается — клиенты отключатся на несколько секунд и подключатся сами. Ключи не меняются, перенастраивать устройства не нужно. Файлы WS4W остаются как есть.</p>`}</div>`;
+  return compHead('wg', btn('＋ Новый клиент', 'addClient()', true) + btn('Перезапустить туннель', "cmd('restart-wg','перезапуск WG-Server')")) + srvCard + czCard +
     `<div class="sec">Клиенты (зелёный — на связи за 3 минуты)</div><div class="card">${list.length ? `<table><tr><th>Клиент</th><th>IP</th><th class="hide-m">Откуда</th><th>Рукопожатие</th><th class="hide-m">Всего</th><th></th></tr>${rows}</table>` : '<p class="muted">Клиентов нет.</p>'}</div>` +
     timeline('wg') + '<div class="sec">Подробности</div><div class="card">' + kvTable(comp('wg')) + '</div>' + chartBlock('w', 'Скорость WG-Server — последние 2 часа');
 };
@@ -204,6 +213,23 @@ async function addClient() {
 async function cliSet(ip, o, name) {
   if (o.off === true && !confirm(`Отключить клиента «${name}» (${ip})? Он перестанет подключаться, пока его не включат обратно. Настройки клиента сохранятся.`)) return false;
   try { await api('/api/wg/client-set', Object.assign({ ip }, o)); toast(`«${name}»: ` + (o.off !== undefined ? (o.off ? 'отключён' : 'включён') : (o.zapret ? 'zapret включён' : 'zapret выключен — весь трафик через VPN')) + ' — агент применит за 10–30 с'); setTimeout(load, 3000); setTimeout(load, 12000); return true; } catch (e) { toast(e.message, true); return false; }
+}
+async function wgRename(ip, name) {
+  const n = prompt(`Новое имя клиента «${name}» (${ip}):`, name); if (!n || n === name) return;
+  try { await api('/api/wg/rename', { ip, name: n }); toast(`«${name}» → «${n}»`); wgList = null; await P.wg.after(); load(); } catch (e) { toast(e.message, true); }
+}
+async function wgServerEdit() {
+  const sv = (wgList && wgList.server) || {};
+  const ep = prompt('Адрес для клиентов — внешний IP или имя (можно с :портом). Пусто — определять автоматически:', sv.endpointSet || ''); if (ep === null) return;
+  const dns = prompt('DNS для клиентов — IP через запятую. Пусто — автоматически (адрес сервера):', sv.dnsSet || ''); if (dns === null) return;
+  let port = sv.port;
+  if (sv.owned) { const p = prompt('Порт сервера (UDP). Смена порта перезапустит туннель, и конфиги на устройствах нужно будет загрузить заново:', sv.port); if (p === null) return; port = +p || sv.port; }
+  try { const r = await api('/api/wg/server', { endpoint: ep.trim(), dns: dns.trim(), port }); toast(r.done && r.done.length ? r.done.join('; ') : 'без изменений'); wgList = null; P.wg.after(); } catch (e) { toast(e.message, true); }
+}
+async function wgAdopt() {
+  if (!confirm('Перенести сервер WG-Server под управление VpnGuard?\n\nКонфиг сервера и клиентов скопируется в папку VpnGuard, служба туннеля переустановится — клиенты отключатся на несколько секунд и подключатся сами (ключи те же).\nЕсли новый туннель не поднимется, вернётся прежний конфиг WS4W.')) return;
+  toast('Переношу сервер… (до минуты)');
+  try { const r = await api('/api/wg/adopt', {}); toast(`Сервер под управлением VpnGuard. Клиентов из WS4W перенесено: ${r.imported}`); wgList = null; P.wg.after(); load(); } catch (e) { toast('Не удалось: ' + e.message, true); }
 }
 async function delClient(ip, name) {
   if (!confirm(`Удалить клиента «${name}» (${ip})? Он сразу перестанет подключаться.`)) return;

@@ -18,7 +18,7 @@ namespace VpnGuard
         const string RemoteRule = "VpnGuard remote diagnostics";
         static string WebExe { get { return Path.Combine(BinDir, "VpnGuardWeb.exe"); } }
         static string TrayExe { get { return Path.Combine(BinDir, "VpnGuardTray.exe"); } }
-        static readonly string[] WebSources = { "Web.cs", "Qr.cs", "WebDiag.cs" }, TraySources = { "Tray.cs" };
+        static readonly string[] WebSources = { "Web.cs", "Qr.cs", "WebDiag.cs", "WebWg.cs", @"agent\WgLib.cs" }, TraySources = { "Tray.cs" };
         static readonly string[] WebRefs = { "System.Web.Extensions.dll", "System.Drawing.dll", "System.Management.dll", "System.ServiceProcess.dll", "System.Core.dll", "Microsoft.CSharp.dll" };
         static readonly string[] TrayRefs = { "System.Windows.Forms.dll", "System.Drawing.dll", "System.Web.Extensions.dll" };
 

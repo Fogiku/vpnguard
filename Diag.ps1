@@ -141,7 +141,7 @@ function Invoke-Diag([switch]$TryFix) {
                 ForEach-Object { Write-Host ("  {0} ({1} Б)" -f $_.FullName.Substring($base.Length), $_.Length) }
             Write-Host 'Конфиг сервера (ключи скрыты):'
             Get-Content $conf -Encoding UTF8 | ForEach-Object { '  ' + ($_ -replace '^(\s*(PrivateKey|PresharedKey|PublicKey)\s*=\s*)(\S{6})\S+', '$1$3…') } | Select-Object -First 60 | ForEach-Object { Write-Host $_ }
-            if (Get-Command Get-WgClients -ErrorAction SilentlyContinue) {
+            if ($false) {          # клиенты — во вкладке WG-Server веб-интерфейса
                 try { (Get-WgClients).Clients | Format-Table Name, Ip, Source, File -AutoSize | Out-String -Width 250 | Write-Host } catch { Write-Host "Клиенты: $($_.Exception.Message)" }
             }
         }

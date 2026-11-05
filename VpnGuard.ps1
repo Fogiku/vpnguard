@@ -28,7 +28,7 @@ param(
     [string]$ConfigPath = ''
 )
 
-$AgentVersion = '3.42.2'
+$AgentVersion = '3.43.0'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -252,20 +252,16 @@ function Test-Signature([string]$Path) {
 
 # ---------------------------------------------------------------- WS4W / wg_server
 
-# Find-WgConf, клиенты WireGuard, создание сервера — в модуле Wg.ps1
-$WgModule = Join-Path $Root 'Wg.ps1'
-if (Test-Path $WgModule) { . $WgModule }
-else {
-    function Find-WgConf {
-        $svcKey = 'HKLM:\SYSTEM\CurrentControlSet\Services\' + $W.serviceName
-        if (Test-Path -LiteralPath $svcKey) {
-            $mt = [regex]::Match("$((Get-ItemProperty -LiteralPath $svcKey).ImagePath)", '/tunnelservice\s+"?([^"]+?\.conf(\.dpapi)?)"?\s*$')
-            if ($mt.Success -and (Test-Path $mt.Groups[1].Value)) { return $mt.Groups[1].Value }
-        }
-        if ($State.wgConfPath -and (Test-Path $State.wgConfPath)) { return $State.wgConfPath }
-        return $W.configPath
+# конфиг сервера (для диагностики и -Status): из настроек → из службы туннеля → прежнее место. Клиентами и сервером управляют веб-сервер (WebWg.cs) и агент (WgLib.cs)
+function Find-WgConf {
+    if ($W.configPath -and (Test-Path $W.configPath)) { return $W.configPath }
+    $svcKey = 'HKLM:\SYSTEM\CurrentControlSet\Services\' + $W.serviceName
+    if (Test-Path -LiteralPath $svcKey) {
+        $mt = [regex]::Match("$((Get-ItemProperty -LiteralPath $svcKey).ImagePath)", '/tunnelservice\s+"?([^"]+?\.conf(\.dpapi)?)"?\s*$')
+        if ($mt.Success -and (Test-Path $mt.Groups[1].Value)) { return $mt.Groups[1].Value }
     }
-    function Initialize-WgServer { throw 'нет модуля Wg.ps1 рядом с VpnGuard.ps1' }
+    if ($State.wgConfPath -and (Test-Path $State.wgConfPath)) { return $State.wgConfPath }
+    return $null
 }
 
 function Get-WgServerAddress {
@@ -400,12 +396,6 @@ function Invoke-Commands {
             'app-check-ps'   { Invoke-AppUpdateCheck }
             'app-update-ps'  { Invoke-AppUpdateCheck -Install }
             'check-now'      { }
-            'wg-create'      {
-                if (-not (Get-Service -Name $W.serviceName -ErrorAction SilentlyContinue) -and -not (Find-WgConf)) {
-                    try { $c = Initialize-WgServer; $State.wgConfPath = $c; Save-State; Write-Log "wg_server: создан новый сервер ($c, адрес $($W.newServerAddress), порт UDP $($W.newServerPort)). Пробросьте этот порт на роутере и добавьте клиентов." 'WARN' }
-                    catch { Write-Log "wg_server: не удалось создать сервер: $($_.Exception.Message)" 'ERROR' }
-                }
-            }
             default { Write-Log "Неизвестная команда: $a" 'WARN' }     # компоненты, обновление MeduzaVPN — модуль агента «Компоненты»
         }
     }
@@ -536,7 +526,7 @@ function Write-PsStatus {
 }
 
 function Remove-ObsoleteFiles {
-    foreach ($n in 'Agent.cs', 'Zapret.cs', 'ClientZapret.cs', 'VpnGuardMonitor.ps1', 'VpnGuardMonitor.cmd', 'Software.ps1', 'Zapret.ps1') {
+    foreach ($n in 'Agent.cs', 'Zapret.cs', 'ClientZapret.cs', 'VpnGuardMonitor.ps1', 'VpnGuardMonitor.cmd', 'Software.ps1', 'Zapret.ps1', 'Wg.ps1') {
         $f = Join-Path $Root $n
         if (-not (Test-Path $f)) { continue }
         if ($n -like '*.cs' -and -not ("$(Get-Content $f -TotalCount 1 -ErrorAction SilentlyContinue)" -match 'Перенесено в agent')) { continue }   # только заглушки

@@ -1,6 +1,6 @@
 ﻿// VpnGuard — веб-сервер (веб-интерфейс + удалённая диагностика) на C#.
 // Собирается агентом на месте встроенным компилятором .NET Framework (csc.exe, C# 5):
-//   csc /target:exe /out:bin\VpnGuardWeb.exe /r:System.Web.Extensions.dll /r:System.Drawing.dll /r:System.Management.dll /r:System.ServiceProcess.dll /r:System.Core.dll /r:Microsoft.CSharp.dll Web.cs Qr.cs WebDiag.cs
+//   csc /target:exe /out:bin\VpnGuardWeb.exe /r:System.Web.Extensions.dll /r:System.Drawing.dll /r:System.Management.dll /r:System.ServiceProcess.dll /r:System.Core.dll /r:Microsoft.CSharp.dll Web.cs Qr.cs WebDiag.cs WebWg.cs agent\WgLib.cs
 // Запуск: VpnGuardWeb.exe <папка VpnGuard> [config.json] [папка data]. Работает, пока включён веб-интерфейс (web.enabled) или удалённая диагностика;
 // сам выходит, когда их выключили, сменили порт или обновили исходник (агент пересоберёт и запустит снова).
 // Лёгкие запросы (состояние, журнал, команды агенту, настройки, вход) — здесь; тяжёлые и редкие (проверки сети, отчёт,
@@ -227,7 +227,7 @@ namespace VpnGuard
         static string CodeStamp()
         {
             var sb = new StringBuilder();
-            foreach (var f in new[] { "Web.cs", "Qr.cs", "WebDiag.cs" }) { var p = Path.Combine(Root, f); if (File.Exists(p)) sb.Append(File.GetLastWriteTimeUtc(p).Ticks).Append('|'); }
+            foreach (var f in new[] { "Web.cs", "Qr.cs", "WebDiag.cs", "WebWg.cs", @"agent\WgLib.cs" }) { var p = Path.Combine(Root, f); if (File.Exists(p)) sb.Append(File.GetLastWriteTimeUtc(p).Ticks).Append('|'); }
             return sb.ToString();
         }
 
@@ -587,25 +587,38 @@ namespace VpnGuard
                     JsonOut(ctx, new Dictionary<string, object> { { "ok", true }, { "dir", dir }, { "installed", Directory.Exists(dir) }, { "lists", lists } }); return;
                 }
                 case "/api/diag-run": if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; } Text(ctx, 200, HideSecrets(PsTask("diag", "", 240))); return;
-                case "/api/wg/clients": if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; } JsonOut(ctx, PsJson("wg-clients", "")); return;
-                case "/api/wg/conf": if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; } { var r = PsJson("wg-conf", q["ip"] ?? ""); JsonOut(ctx, r, r.ContainsKey("ok") && r["ok"] is bool && (bool)r["ok"] ? 200 : 404); } return;
+                case "/api/wg/clients": if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; } JsonOut(ctx, WgClientsJson()); return;
+                case "/api/wg/conf": if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; } { var r = WgConfJson(q["ip"] ?? ""); JsonOut(ctx, r, (bool)r["ok"] ? 200 : 404); return; }
                 case "/api/wg/qr": {
                     if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; }
-                    var r = PsJson("wg-conf", q["ip"] ?? "");
-                    if (!(r.ContainsKey("ok") && r["ok"] is bool && (bool)r["ok"])) { Text(ctx, 404, "нет конфига"); return; }
+                    var r = WgConfJson(q["ip"] ?? "");
+                    if (!(bool)r["ok"]) { Text(ctx, 404, "нет конфига"); return; }
                     Bytes(ctx, 200, QrPng(Convert.ToString(r["text"])), "image/png"); return;
                 }
                 case "/api/wg/add": {
                     if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; }
-                    string n = BStr(Body(req), "name").Trim();
-                    if (!Regex.IsMatch(n, @"^[\w\- \.а-яА-ЯёЁ]{1,40}$")) { JsonOut(ctx, Err("имя: буквы, цифры, пробел, - _ . (до 40)"), 400); return; }
-                    var r = PsJson("wg-add", n); if (r.ContainsKey("ok") && r["ok"] is bool && (bool)r["ok"]) Log("Веб-интерфейс: создан клиент WireGuard «" + r["name"] + "» " + r["ip"] + " (" + ip + ")", "INFO");
-                    JsonOut(ctx, r); return;
+                    var r = WgAdd(BStr(Body(req), "name")); if ((bool)r["ok"]) Log("Веб-интерфейс: создан клиент WireGuard «" + r["name"] + "» " + r["ip"] + " (" + ip + ")", "INFO");
+                    JsonOut(ctx, r, (bool)r["ok"] ? 200 : 400); return;
                 }
                 case "/api/wg/remove": {
                     if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; }
-                    var r = PsJson("wg-remove", BStr(Body(req), "ip")); if (r.ContainsKey("ok") && r["ok"] is bool && (bool)r["ok"]) Log("Веб-интерфейс: удалён клиент WireGuard «" + r["name"] + "» (" + ip + ")", "INFO");
-                    JsonOut(ctx, r); return;
+                    var r = WgRemove(BStr(Body(req), "ip")); if ((bool)r["ok"]) Log("Веб-интерфейс: удалён клиент WireGuard «" + r["name"] + "» (" + ip + ")", "INFO");
+                    JsonOut(ctx, r, (bool)r["ok"] ? 200 : 400); return;
+                }
+                case "/api/wg/rename": {
+                    if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; }
+                    var b = Body(req); var r = WgRename(BStr(b, "ip"), BStr(b, "name"));
+                    if ((bool)r["ok"]) { Log("Веб-интерфейс: клиент WireGuard «" + r["old"] + "» переименован в «" + r["name"] + "» (" + ip + ")", "INFO"); SendCmd("check-now", "переименован клиент"); }
+                    JsonOut(ctx, r, (bool)r["ok"] ? 200 : 400); return;
+                }
+                case "/api/wg/server": {
+                    if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; }
+                    var r = WgServerSet(Body(req)); if ((bool)r["ok"] && ((object[])r["done"]).Length > 0) Log("Веб-интерфейс: сервер WG-Server — " + string.Join(", ", (object[])r["done"]) + " (" + ip + ")", "INFO");
+                    JsonOut(ctx, r, (bool)r["ok"] ? 200 : 400); return;
+                }
+                case "/api/wg/adopt": {
+                    if (!web) { Text(ctx, 403, "только для веб-интерфейса"); return; }
+                    var r = WgAdopt(); JsonOut(ctx, r, (bool)r["ok"] ? 200 : 400); return;
                 }
                 case "/api/wg/client-set": {
                     // настройки клиента: zapret вкл/выкл, клиент вкл/выкл — списки IP в ws4w.clientNoZapret / ws4w.clientOff (применяет агент)

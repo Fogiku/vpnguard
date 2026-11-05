@@ -62,7 +62,7 @@ namespace VpnGuard
                     var r = Exe(wgExe, "/installtunnelservice \"" + conf + "\"", 60); Log("wg_server: installtunnelservice код " + r.Code + " " + r.Err, "INFO"); Thread.Sleep(5000);
                 } else if (CfgBool("ws4w.autoCreateServer", true)) {
                     if (++WgMissingTicks < 3) Log("wg_server: нет ни службы, ни конфига (" + WgMissingTicks + "/3) — если так останется, создам сервер сам", "WARN");
-                    else { WgMissingTicks = 0; QueuePs("wg-create"); }
+                    else { WgMissingTicks = 0; try { WgCreateServer(); } catch (Exception e) { Log("wg_server: не удалось создать сервер: " + e.Message, "ERROR"); } }
                 } else Log("wg_server: служба '" + sn + "' не найдена и конфиг не найден — настройте туннель в WS4W", "ERROR");
                 return;
             }
@@ -164,5 +164,23 @@ namespace VpnGuard
             });
         }
         static void WgDumpReset() { Uncache("wgdump"); }
+
+        // новый сервер: ключи, data\wg\wg_server.conf (доступ — только администраторам и SYSTEM), служба туннеля, правило брандмауэра
+        static void WgCreateServer()
+        {
+            string gui = CfgStr("ws4w.wireguardExe", @"C:\Program Files\WireGuard\wireguard.exe"), cli = Path.Combine(Path.GetDirectoryName(gui), "wg.exe");
+            if (!File.Exists(gui)) throw new Exception("WireGuard не установлен (" + gui + ") — установите его на вкладке «Компоненты»");
+            var dir = Path.Combine(DataDir, "wg"); Directory.CreateDirectory(dir); var conf = Path.Combine(dir, WgIf() + ".conf");
+            if (!File.Exists(conf)) {
+                var keys = WgLib.KeyPair(cli); int port = CfgInt("ws4w.newServerPort", 51820);
+                WgLib.WriteLines(conf, new[] { "[Interface]", "# VpnGuard: server created automatically", "PrivateKey = " + keys[0], "ListenPort = " + port, "Address = " + CfgStr("ws4w.newServerAddress", "10.253.0.1/24") });
+                Exe("icacls.exe", "\"" + conf + "\" /inheritance:r /grant:r *S-1-5-32-544:F *S-1-5-18:F", 15);
+                Exe("netsh.exe", "advfirewall firewall add rule name=\"VpnGuard wg_server\" dir=in action=allow protocol=UDP localport=" + port + " profile=any", 15);
+            }
+            var r = Exe(gui, "/installtunnelservice \"" + conf + "\"", 60);
+            if (r.Code != 0) throw new Exception("installtunnelservice: код " + r.Code + " " + r.Err.Trim());
+            CfgSet("ws4w.configPath", conf);
+            Log("wg_server: создан новый сервер (" + conf + ", адрес " + CfgStr("ws4w.newServerAddress", "10.253.0.1/24") + ", порт " + CfgInt("ws4w.newServerPort", 51820) + ")", "WARN");
+        }
     }
 }
