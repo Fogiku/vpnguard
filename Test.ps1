@@ -93,7 +93,7 @@ foreach ($n in $asts.Keys) {
     # модули агента видят глобальные VpnGuard.ps1; Wg.ps1 и Amnezia.ps1 подключаются ещё и в окно; остальные скрипты — отдельные
     $globals = switch ($n) {
         { $_ -in 'Wg.ps1', 'Amnezia.ps1' } { $hostGlobals; break }
-        { $_ -in 'Zapret.ps1', 'Remote.ps1', 'Update.ps1', 'Meduza.ps1', 'Diag.ps1', 'Setup.ps1' } { $globalsOf['VpnGuard.ps1']; break }
+        { $_ -in 'Remote.ps1', 'Update.ps1', 'Meduza.ps1', 'Diag.ps1', 'Setup.ps1' } { $globalsOf['VpnGuard.ps1']; break }
         default { $globalsOf[$n] }
     }
     # запятая сильнее «+»: ('a', $x) + 'y'
@@ -162,7 +162,7 @@ foreach (`$st in `$ast.EndBlock.Statements) {
 }
 Import-Config
 function Write-Log([string]`$Message, [string]`$Level = 'INFO') { }
-foreach (`$modName in 'Zapret', 'Wg', 'Amnezia', 'Remote', 'Update') { . (Join-Path `$Root "`$modName.ps1") }
+foreach (`$modName in 'Wg', 'Amnezia', 'Remote', 'Update') { . (Join-Path `$Root "`$modName.ps1") }
 `$script:IsAgentLoop = `$true
 
 "@

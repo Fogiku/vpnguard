@@ -20,7 +20,6 @@ param(
     [switch]$Diag,
     [switch]$TryFix,
     [switch]$Restarted,
-    [switch]$ZapretTest,
     [switch]$PsPart,
     [string]$WebTask = '',
     [string]$WebArg = '',
@@ -29,7 +28,7 @@ param(
     [string]$ConfigPath = ''
 )
 
-$AgentVersion = '3.40.1'
+$AgentVersion = '3.41.0'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -413,16 +412,6 @@ function Invoke-Commands {
     if ($files.Count -gt 0) { try { Write-PsStatus } catch { } }
 }
 
-# ---------------------------------------------------------------- модуль zapret
-
-$ZapretModule = Join-Path $Root 'Zapret.ps1'
-if (Test-Path $ZapretModule) { . $ZapretModule }
-else {
-    function Invoke-ZapretWatch { }
-    function Get-ZapretSnapshot { [ordered]@{ level = -1; state = 'Модуль Zapret.ps1 не найден'; details = @(); enabled = $false; strategies = @(); testing = $false; results = @() } }
-    function Write-ZapretDiag { Write-Host '!! Zapret.ps1 не найден рядом с VpnGuard.ps1' }
-    function Invoke-ZapretReload { }
-}
 
 # ---------------------------------------------------------------- модули AmneziaVPN и «Компоненты»
 
@@ -511,7 +500,7 @@ function Test-KindOk([string]$Kind) {
 # ---------------------------------------------------------------- агент на C#
 # Основной цикл (MeduzaVPN, AmneziaVPN, два туннеля, wg_server, раздача, zapret, трафик, состояние) ведёт bin\VpnGuardAgent.exe
 # из модулей agent\*.cs. Он раз в 30 мин (или сразу по команде) запускает этот файл с -PsPart: обновления,
-# компоненты, веб-сервер, значок. Подбор стратегии zapret — отдельным процессом -ZapretTest.
+# самообновление VpnGuard и редкие команды (app-update, wg-create). zapret, компоненты, веб-сервер, значок — модули агента.
 
 $CsAgentExe  = Join-Path $BinDir 'VpnGuardAgent.exe'
 $PsStatusPath = Join-Path $DataDir 'status-ps.json'
@@ -547,7 +536,7 @@ function Write-PsStatus {
 }
 
 function Remove-ObsoleteFiles {
-    foreach ($n in 'Agent.cs', 'Zapret.cs', 'ClientZapret.cs', 'VpnGuardMonitor.ps1', 'VpnGuardMonitor.cmd', 'Software.ps1') {
+    foreach ($n in 'Agent.cs', 'Zapret.cs', 'ClientZapret.cs', 'VpnGuardMonitor.ps1', 'VpnGuardMonitor.cmd', 'Software.ps1', 'Zapret.ps1') {
         $f = Join-Path $Root $n
         if (-not (Test-Path $f)) { continue }
         if ($n -like '*.cs' -and -not ("$(Get-Content $f -TotalCount 1 -ErrorAction SilentlyContinue)" -match 'Перенесено в agent')) { continue }   # только заглушки
@@ -593,7 +582,6 @@ if (-not (Test-Admin)) {
 
 if ($SetupTask) { Invoke-SetupTask $SetupTask; return }
 if ($Diag)      { try { [Console]::OutputEncoding = New-Object Text.UTF8Encoding $false } catch { }; Invoke-Diag -TryFix:$TryFix; return }
-if ($ZapretTest) { Invoke-ZapretTestRun; return }
 if ($WebTask) { Invoke-WebTask $WebTask $WebArg; return }
 if ($CheckUpdate) { Set-Content (Join-Path $DataDir ('cmd\{0}.cmd' -f [DateTime]::UtcNow.Ticks)) 'check-update' -Encoding ASCII; Write-Host 'Команда агенту: проверить обновление MeduzaVPN'; return }
 if ($InstallCli)  { Update-MeduzaCli (Get-Release); return }

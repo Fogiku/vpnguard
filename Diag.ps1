@@ -192,7 +192,19 @@ function Invoke-Diag([switch]$TryFix) {
     }
 
     Section 'zapret-discord-youtube'
-    Try-Run { Write-ZapretDiag }
+    Try-Run {
+        # zapret ведёт агент (agent\Zapret.cs, Z*.cs) — его состояние из status.json
+        $zs = $null; try { $zs = ([IO.File]::ReadAllText($StatusPath) | ConvertFrom-Json).zapret } catch { }
+        if (-not $zs) { Write-Host '!! нет данных zapret в status.json (агент не работает?)' }
+        else {
+            Write-Host "Состояние: $($zs.state)"
+            foreach ($d in @($zs.details)) { if ($d) { Write-Host "  $d" } }
+            foreach ($kv in @($zs.kv)) { Write-Host ('  {0,-34} {1}' -f $kv[0], $kv[1]) }
+            foreach ($r in @($zs.results)) { $bad = @($r.checks | Where-Object { $_ -and -not $_.ok } | ForEach-Object { "$($_.n): $($_.why)" }); Write-Host ("  {0,-32} {1}/{2} {3}" -f $r.name, $r.ok, $r.total, $(if ($bad.Count) { '· не прошли: ' + ($bad -join '; ') } else { '' })) }
+        }
+        $wc = Get-CimInstance Win32_Process -Filter "Name='winws.exe'" -ErrorAction SilentlyContinue
+        if ($wc) { foreach ($x in $wc) { Write-Host "winws PID $($x.ProcessId): $($x.CommandLine.Substring(0, [Math]::Min(160, $x.CommandLine.Length)))…" } } else { Write-Host 'winws: не запущен' }
+    }
 
     Section 'Агент и задачи'
     Try-Run {

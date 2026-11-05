@@ -100,6 +100,7 @@ namespace VpnGuard
             AddModule("zapret", "zapret", CheckMs, () => { ZapretWatch(); ClientZapretWatch(); LanWatch(); }, c => ZCommand(c),
                 "zapret-on", "zapret-off", "zapret-check", "zapret-releases", "zapret-update", "zapret-reload", "zapret-test")
                 .State = () => new Dictionary<string, object> { { "zapret", ZSnapshotSafe() }, { "cz", CzSnapshot() } };
+            FindModule("zapret").WarnAfterSec = 900;                                    // подбор стратегии идёт несколько минут
             AddModule("ps", "Часть PowerShell", () => 10000, PsPartWatch);
             AddModule("web", "Веб-сервер и значок", () => 30000, WebHostTick);
             AddModule("status", "Сводка", () => 10000, Snapshot);

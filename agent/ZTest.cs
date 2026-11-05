@@ -153,7 +153,7 @@ namespace VpnGuard
             return r.Select(c => (object)new Dictionary<string, object> { { "n", c.Label }, { "ok", c.Ok }, { "why", c.Why }, { "ms", c.Ms }, { "h", c.Host }, { "kb", c.Kb }, { "mbit", c.Mbit } }).ToList();
         }
 
-        // ---------------------------------------------------------------- подбор стратегии (отдельный процесс PowerShell)
+        // ---------------------------------------------------------------- подбор стратегии (в потоке модуля zapret)
         static Dictionary<string, object> ZTestRunner()
         {
             Dictionary<string, object> t;
@@ -168,10 +168,73 @@ namespace VpnGuard
             if (InetDown()) { Log("zapret: подбор стратегии отложен — нет интернета (" + reason + ")", "INFO"); return; }
             if (!ZInstalled()) { Log("zapret: не установлен — подбирать нечего", "WARN"); return; }
             Log("zapret: запускаю подбор стратегии (" + reason + ")", "INFO");
-            var a = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + Path.Combine(Root, "VpnGuard.ps1") + "\" -ZapretTest" + (ConfigPath != Path.Combine(Root, "config.json") ? " -ConfigPath \"" + ConfigPath + "\"" : "");
-            var p = Process.Start(new ProcessStartInfo("powershell.exe", a) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Root });
-            File.WriteAllText(ZTestPath, Json.Serialize(new Dictionary<string, object> { { "running", true }, { "pid", p.Id }, { "started", DateTime.Now.ToString("o") }, { "index", 0 }, { "total", 0 }, { "current", "" }, { "results", new object[0] } }), Bom);
-            Z["winwsPid"] = 0;
+            ZRunTest();                                        // в потоке модуля zapret: winws и состояние zapret трогает только он
+            ZReceiveTest();
+        }
+        // подбор стратегии (раньше — отдельный процесс PowerShell -ZapretTest): без zapret и с каждой стратегией проверить сайты напрямую.
+        // Ход и результат — в data\zapret-test.json (его же читает окно), после каждого шага модуль публикует своё состояние
+        static void ZRunTest()
+        {
+            var prog = new Dictionary<string, object> { { "running", true }, { "pid", Process.GetCurrentProcess().Id }, { "started", DateTime.Now.ToString("o") }, { "index", 0 }, { "total", 0 },
+                { "current", "" }, { "results", new object[0] }, { "best", "" }, { "error", "" } };
+            var res = new List<Dictionary<string, object>>();
+            Action write = () => {
+                prog["results"] = res.Cast<object>().ToArray();
+                try { File.WriteAllText(ZTestPath, Json.Serialize(prog), Bom); } catch { }
+                var m = FindModule("zapret"); if (m != null) PublishState(m);
+            };
+            int tmo = ZI("curlTimeoutSec");
+            try {
+                var path = ZPhys(); if (path == null) throw new Exception("не найден физический адаптер с выходом в интернет");
+                var names = ZStrategies(); if (names.Count == 0) throw new Exception("нет файлов general*.bat");
+                var urls = ZTargets();
+                prog["total"] = names.Count + 1;
+                ZStopService(); ZStopWinws();
+                if (urls.Contains("ytvideo")) {                // адрес видеосервера — заново (через VPN, если напрямую закрыт)
+                    Z["videoHost"] = ""; var vh = FindVideoHost(path.Ip, 8, false);
+                    if (vh.Length > 0) { Z["videoHost"] = vh; ZSetD("videoHostAt", DateTime.Now); Z["videoHostVia"] = ZVideoVia; } else ZVideoMissAt = DateTime.Now;
+                }
+                prog["videoHost"] = ZS("videoHost"); prog["videoHostVia"] = ZS("videoHostVia");
+                Func<string, List<ZCheck>, string, Dictionary<string, object>> row = (name, r, err) => new Dictionary<string, object> {
+                    { "name", name }, { "ok", r.Count(c => c.Ok) }, { "total", urls.Count }, { "failed", r.Where(c => !c.Ok).Select(c => (object)c.Label).ToArray() },
+                    { "error", err }, { "checks", ZChecks(r).ToArray() }, { "ms", name == "(без zapret)" ? 0 : r.Where(c => c.Ok).Sum(c => c.Ms) } };
+                // без zapret: блокирует ли провайдер вообще
+                prog["index"] = 1; prog["current"] = "(без zapret)"; write();
+                res.Add(row("(без zapret)", ZTest(path.Ip, urls, tmo), ""));
+                int i = 1;
+                foreach (var n in names) {
+                    i++; prog["index"] = i; prog["current"] = n; write(); SetActivity("zapret: пробую стратегию " + n + " (" + (i - 1) + " из " + names.Count + ")");
+                    var r = new List<ZCheck>(); string err = "";
+                    try {
+                        ZStartWinws(n); Thread.Sleep(800);
+                        r = ZTest(path.Ip, urls, tmo);
+                        // адрес видеосервера ещё неизвестен, а YouTube с этой стратегией открылся — узнать его напрямую и проверить видео
+                        if (ZS("videoHost").Length == 0 && urls.Contains("ytvideo") && r.Any(c => (c.Ok || c.Kb > 0) && c.Label.StartsWith("YouTube") && c.Url != "ytvideo" && c.Url != "ytspeed")) {
+                            var vh = FindVideoHost(path.Ip, 6, true);
+                            if (vh.Length > 0) {
+                                Z["videoHost"] = vh; ZSetD("videoHostAt", DateTime.Now); Z["videoHostVia"] = "direct"; prog["videoHost"] = vh; prog["videoHostVia"] = "direct";
+                                r = r.Where(c => c.Url != "ytvideo").Concat(ZTest(path.Ip, new List<string> { "ytvideo" }, tmo)).ToList();
+                                foreach (var prev in res) foreach (var c in ((object[])prev["checks"]).OfType<Dictionary<string, object>>())
+                                    if (Convert.ToString(c["n"]).Contains("видео") && !(bool)c["ok"]) c["why"] = "не проверено — адрес видеосервера узнан позже";
+                            }
+                        }
+                    } catch (Exception e) { err = e.Message; }
+                    ZStopWinws();
+                    res.Add(row(n, r, err));
+                }
+                // лучшая: больше всего открытых сайтов; при равенстве — где работает видео, затем быстрее загрузка, затем меньше времени
+                Func<Dictionary<string, object>, IEnumerable<Dictionary<string, object>>> chk = x => ((object[])x["checks"]).OfType<Dictionary<string, object>>();
+                var best = res.Where(x => (string)x["name"] != "(без zapret)")
+                    .OrderByDescending(x => (int)x["ok"])
+                    .ThenByDescending(x => chk(x).Count(c => Convert.ToString(c["n"]).Contains("видео") && (bool)c["ok"]))
+                    .ThenByDescending(x => chk(x).Where(c => Convert.ToString(c["n"]).Contains("скорость") || Convert.ToString(c["n"]).Contains("загрузка страницы")).Sum(c => Convert.ToDouble(c["mbit"]) > 0 ? Convert.ToDouble(c["mbit"]) * 1000 : Convert.ToDouble(c["kb"])))
+                    .ThenBy(x => Convert.ToInt32(x["ms"])).FirstOrDefault();
+                prog["best"] = best != null && (int)best["ok"] > 0 ? best["name"] : "";
+            } catch (Exception e) { prog["error"] = e.Message; }
+            finally {
+                ZStopWinws();
+                prog["running"] = false; prog["finished"] = DateTime.Now.ToString("o"); write();
+            }
         }
         static bool ZReceiveTest()
         {
