@@ -286,6 +286,7 @@ namespace VpnGuard
         delegate bool CzPktFn(byte[] b, int o, int n, ref WdAddr a);
         static void CzBatchLoop(IntPtr h, Func<IntPtr> current, CzPktFn fn)
         {
+            PerfThread("ретранслятор: " + (Thread.CurrentThread.Name ?? "?"));
             var buf = new byte[WdBatch * 1600 + 65536]; var addrs = new WdAddr[WdBatch];
             var outBuf = new byte[buf.Length]; var outAddrs = new WdAddr[WdBatch];
             while (true) {
@@ -1059,6 +1060,7 @@ namespace VpnGuard
         }
         static void LanLoop(IntPtr h)
         {
+            PerfThread("учёт локальной сети");
             var buf = new byte[1 << 19]; var addrs = new WdAddr[64];
             while (LanH == h) {
                 uint n, al = (uint)(addrs.Length * WdAddrSize);

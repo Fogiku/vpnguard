@@ -79,8 +79,43 @@ namespace VpnGuard
             return 0;
         }
 
+        // ---------------------------------------------------------------- самозамер: сколько процессора тратит каждая часть агента
+        // потоки — по системному id (регистрируются при старте), шаги основного цикла — по времени процессора своего потока
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")] static extern IntPtr GetCurrentThread();
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")] static extern bool GetThreadTimes(IntPtr h, out long c, out long e, out long k, out long u);
+        static readonly System.Collections.Concurrent.ConcurrentDictionary<int, string> PerfThreads = new System.Collections.Concurrent.ConcurrentDictionary<int, string>();
+        static readonly System.Collections.Concurrent.ConcurrentDictionary<string, long[]> PerfSteps = new System.Collections.Concurrent.ConcurrentDictionary<string, long[]>();
+        static void PerfThread(string name) {
+#pragma warning disable 618
+            PerfThreads[AppDomain.GetCurrentThreadId()] = name;
+#pragma warning restore 618
+        }
+        static long ThreadCpu() { long c, e, k, u; return GetThreadTimes(GetCurrentThread(), out c, out e, out k, out u) ? k + u : 0; }
+        static void PerfRun(string name, Action a)
+        {
+            long c0 = ThreadCpu(); var sw = Stopwatch.StartNew();
+            try { a(); } finally { var p = PerfSteps.GetOrAdd(name, _ => new long[3]); Interlocked.Add(ref p[0], ThreadCpu() - c0); Interlocked.Add(ref p[1], sw.ElapsedMilliseconds); Interlocked.Increment(ref p[2]); }
+        }
+        // для окна/веба: процессорные секунды по потокам и шагам с запуска агента
+        static Dictionary<string, object> PerfInfo()
+        {
+            var th = new Dictionary<string, double>(); double total = 0;
+            try {
+                var pr = Process.GetCurrentProcess(); total = pr.TotalProcessorTime.TotalSeconds;
+                foreach (ProcessThread t in pr.Threads) {
+                    string n; if (!PerfThreads.TryGetValue(t.Id, out n)) n = "прочие (пул задач, UDP, сборка мусора)";
+                    double v = 0; try { v = t.TotalProcessorTime.TotalSeconds; } catch { }
+                    double old; th.TryGetValue(n, out old); th[n] = old + v;
+                }
+            } catch { }
+            return new Dictionary<string, object> { { "total", Math.Round(total, 1) }, { "uptime", Math.Round((DateTime.Now - Process.GetCurrentProcess().StartTime).TotalSeconds) },
+                { "threads", th.ToDictionary(x => x.Key, x => (object)Math.Round(x.Value, 1)) },
+                { "steps", PerfSteps.ToDictionary(x => x.Key, x => (object)new object[] { Math.Round(x.Value[0] / 1e7, 1), x.Value[1], x.Value[2] }) } };
+        }
+
         static void Run()
         {
+            PerfThread("основной цикл");
             LoadCfg(true);
             LoadTrafficDays();
             Log("VpnGuard " + Version + " запущен — агент на C# (PID " + Process.GetCurrentProcess().Id + ")", "INFO");
@@ -90,13 +125,13 @@ namespace VpnGuard
             new Thread(InetLoop) { IsBackground = true, Name = "inet" }.Start();
             while (true) {
                 var t0 = DateTime.Now;
-                LoadCfg(false);
+                PerfRun("LoadCfg", () => LoadCfg(false));
                 if (SourceSig() != CodeSig) { Log("Агент C#: код обновлён — перезапуск на новой версии", "INFO"); HandOver(); return; }
                 foreach (var step in new Action[] { Commands, WgWatch, WgClientsWatch, VpnWatch, SharingWatch, ZapretWatch, ClientZapretWatch, LanWatch, PsPartWatch }) {
-                    try { step(); } catch (Exception e) { Log("Агент C#: " + step.Method.Name + ": " + e.Message, "ERROR"); }
-                    if ((DateTime.Now - LastSnapshot).TotalSeconds >= 10) Snapshot();
+                    try { PerfRun(step.Method.Name, step); } catch (Exception e) { Log("Агент C#: " + step.Method.Name + ": " + e.Message, "ERROR"); }
+                    if ((DateTime.Now - LastSnapshot).TotalSeconds >= 10) PerfRun("Snapshot", Snapshot);
                 }
-                Activity = ""; Snapshot();
+                Activity = ""; PerfRun("Snapshot", Snapshot);
                 if (DateTime.Now.Hour == 3 && DateTime.Now.Minute < 2) RemoveOldLogs();
                 int iv = Math.Max(10, CfgInt("checkIntervalSec", 30)) * 1000;
                 while ((DateTime.Now - t0).TotalMilliseconds < iv) {
@@ -299,6 +334,7 @@ namespace VpnGuard
         static string Dur(TimeSpan t) { return t.TotalMinutes >= 60 ? (int)t.TotalHours + " ч " + t.Minutes + " мин" : t.TotalSeconds >= 60 ? (int)t.TotalMinutes + " мин " + t.Seconds + " с" : (int)t.TotalSeconds + " с"; }
         static void InetLoop()
         {
+            PerfThread("проверка интернета");
             while (true) {
                 try { InetCheck(); } catch { }
                 Thread.Sleep(InetState == 1 ? 3000 : 5000);
@@ -1469,6 +1505,7 @@ namespace VpnGuard
         }
         static void LiveLoop()
         {
+            PerfThread("живые скорости");
             string path = Path.Combine(DataDir, "live.json"), hpath = Path.Combine(DataDir, "live-hist.json"), want = Path.Combine(DataDir, "live-wanted");
             int tick = 0; Dictionary<string, object> peers = null; DateTime peersAt = DateTime.MinValue, nicsAt = DateTime.MinValue, histAt = DateTime.MinValue, liveAt = DateTime.MinValue;
             var nicByName = new Dictionary<string, NetworkInterface>();
@@ -1700,7 +1737,7 @@ namespace VpnGuard
                 { "activitySince", busy ? ActivitySince.ToString("o") : "" }, { "agentStarted", StartedAt.ToString("o") }, { "agentPid", Process.GetCurrentProcess().Id },
                 { "agentVersion", Version + " C#" }, { "engine", "csharp" }, { "intervalSec", CfgInt("checkIntervalSec", 30) }, { "lastUpdateCheck", ps.ContainsKey("meduzaLastCheck") ? ps["meduzaLastCheck"] : "" },
                 { "inet", inet }, { "meduza", meduza }, { "ultra", ultra }, { "wg", wg }, { "ics", icsC }, { "zapret", zapret },
-                { "traffic", new Dictionary<string, object> { { "names", adNames }, { "rate", TrafRate }, { "lan", new Dictionary<string, object> { { "on", LanH != WdInvalid }, { "net", LanNet }, { "error", LanError } } }, { "days", TrafDays.Reverse().Take(14).Reverse().Select(kv => (object)new Dictionary<string, object> { { "d", kv.Key }, { "u", kv.Value["u"] }, { "w", kv.Value["w"] }, { "p", kv.Value["p"] } }).ToArray() } } },
+                { "perf", PerfInfo() }, { "traffic", new Dictionary<string, object> { { "names", adNames }, { "rate", TrafRate }, { "lan", new Dictionary<string, object> { { "on", LanH != WdInvalid }, { "net", LanNet }, { "error", LanError } } }, { "days", TrafDays.Reverse().Take(14).Reverse().Select(kv => (object)new Dictionary<string, object> { { "d", kv.Key }, { "u", kv.Value["u"] }, { "w", kv.Value["w"] }, { "p", kv.Value["p"] } }).ToArray() } } },
                 { "counters", new Dictionary<string, object> { { "restarts", RestartCount }, { "reconnects", ReconnectCount }, { "icsFixes", IcsFixCount } } },
                 { "vpn", new Dictionary<string, object> { { "mode", mode }, { "name", ModeNames[mode] }, { "uplink", upN }, { "kind", kind }, { "primary", DualPrimary() } } },
                 { "amnezia", awg }, { "software", ps.ContainsKey("software") ? ps["software"] : new object[0] }, { "remote", ps.ContainsKey("remote") ? ps["remote"] : null }, { "app", ps.ContainsKey("app") ? ps["app"] : null },
