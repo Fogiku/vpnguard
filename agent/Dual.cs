@@ -173,13 +173,28 @@ namespace VpnGuard
         // VPN-приложение при подключении «прибивает» адрес своего сервера к текущему маршруту по умолчанию. Подключился AmneziaVPN, когда
         // трафик шёл через MeduzaVPN, — его сервер оказывается внутри MeduzaVPN: упал MeduzaVPN — падают оба, и MeduzaVPN видит «другой VPN».
         // Такие адреса (/32 на адаптере туннеля, без прямого маршрута; не широковещательные и не частные) — пустить напрямую через физический адаптер
-        static readonly Dictionary<string, string> EpPins = new Dictionary<string, string>();
+        // Проверка: напрямую сервер может быть недоступен (провайдер блокирует) — тогда туннель работал только «внутри» другого. Не заработал
+        // за 2 мин — вернуть прежний путь (туннель снова работает, хоть и зависит от другого), сказать об этом и 6 ч не пробовать
+        class EpPin { public string Via, Gw; public int If; public DateTime At; }
+        static readonly Dictionary<string, EpPin> EpPins = new Dictionary<string, EpPin>();
+        static readonly Dictionary<string, DateTime> EpNoDirect = new Dictionary<string, DateTime>();
+        static readonly Dictionary<string, string> EpNested = new Dictionary<string, string>();   // туннель → «работает только через …»
         static void PinEndpoints()
         {
             if (TestMode) return;
+            foreach (var kv in EpPins.ToList()) {
+                string owner = OtherKind(kv.Value.Via); double age = (DateTime.Now - kv.Value.At).TotalSeconds;
+                if (KindTraffic(owner) == true && age > 30) { EpPins.Remove(kv.Key); EpNested.Remove(owner); Log("Два туннеля: " + ModeNames[owner] + " работает напрямую — от " + ModeNames[kv.Value.Via] + " больше не зависит", "INFO"); continue; }
+                if (age < 120) continue;
+                RouteDel(kv.Key, kv.Value.If, kv.Value.Gw); EpPins.Remove(kv.Key); EpNoDirect[kv.Key] = DateTime.Now;
+                EpNested[owner] = "работает только через " + ModeNames[kv.Value.Via] + " (сервер " + kv.Key.Replace("/32", "") + " напрямую недоступен)";
+                Log("Два туннеля: сервер " + ModeNames[owner] + " (" + kv.Key.Replace("/32", "") + ") напрямую недоступен — вероятно, его блокирует провайдер. Возвращаю прежний путь через " + ModeNames[kv.Value.Via] +
+                    ": " + ModeNames[owner] + " снова заработает, но резервом при сбое " + ModeNames[kv.Value.Via] + " он быть не может — они падают вместе. Нужен другой сервер или протокол для " + ModeNames[owner] + ". Повторю проверку через 6 ч", "WARN");
+            }
             var phys = ZPhys(); if (phys == null || string.IsNullOrEmpty(phys.Gateway)) return;
             var table = RouteTable();
             var direct = new HashSet<string>(table.Where(r => r.IfIndex == phys.IfIndex).Select(Prefix));
+            var zset = new HashSet<string>(ZRoutes().Select(x => JS(x, "p")).Concat(RescueActive));        // маршруты zapret не трогать
             foreach (var k in new[] { "meduza", "amnezia" }) {
                 var n = KindAdapter(k); if (string.IsNullOrEmpty(n) || !Up(n)) continue;
                 int idx = IfIndexOf(n); if (idx <= 0) continue; string own = Ipv4(n);
@@ -187,11 +202,14 @@ namespace VpnGuard
                 var bcast = new HashSet<string>();
                 foreach (var r in rows) { var pp = Prefix(r).Split('/'); int len = int.Parse(pp[1]); if (len >= 32) continue; uint m = len == 0 ? 0 : 0xFFFFFFFFu << (32 - len); bcast.Add(IpS(IpH(pp[0]) | ~m) + "/32"); }
                 foreach (var r in rows) {
-                    var p = Prefix(r); if (!p.EndsWith("/32") || bcast.Contains(p) || direct.Contains(p)) continue;
+                    var p = Prefix(r); if (!p.EndsWith("/32") || bcast.Contains(p) || EpPins.ContainsKey(p) || zset.Contains(p)) continue;
+                    // уже есть прямой маршрут (поставлен до перезапуска агента), а туннель-владелец не работает — проверить так же, как новый
+                    if (direct.Contains(p)) { if (KindTraffic(OtherKind(k)) == false && !EpNoDirect.ContainsKey(p)) EpPins[p] = new EpPin { Via = k, Gw = phys.Gateway, If = phys.IfIndex, At = DateTime.Now }; continue; }
+                    DateTime nd; if (EpNoDirect.TryGetValue(p, out nd) && (DateTime.Now - nd).TotalHours < 6) continue;
                     var ip = p.Split('/')[0];
                     if (ip == own || System.Text.RegularExpressions.Regex.IsMatch(ip, @"^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|22[4-9]\.|23\d\.|24\d\.|25[0-5]\.)")) continue;
                     if (RouteAdd(p, phys.IfIndex, phys.Gateway, Math.Max(0, IfMetric(phys.IfIndex)))) {
-                        EpPins[p] = k; direct.Add(p);
+                        EpPins[p] = new EpPin { Via = k, Gw = phys.Gateway, If = phys.IfIndex, At = DateTime.Now }; direct.Add(p);
                         Log("Два туннеля: адрес " + ip + " (сервер другого VPN) шёл через туннель " + ModeNames[k] + " — при его сбое падали бы оба. Пускаю этот адрес напрямую", "WARN");
                     }
                 }
@@ -265,7 +283,7 @@ namespace VpnGuard
                 string oth = OtherKind(kind); bool othUp = Up(KindAdapter(oth)); bool? othTr = KindTraffic(oth);
                 sb = new Dictionary<string, object> { { "kind", oth }, { "name", ModeNames[oth] }, { "up", othUp }, { "ok", othUp && othTr == true },
                     { "state", !othUp ? "не подключён" : othTr == true ? "готов" : othTr == false ? "нет трафика" : "проверяется" },
-                    { "blocked", oth == "amnezia" && AvpnBlocked() }, { "why", oth == "amnezia" && AwgDiag != null && !AwgDiag.Ok ? AwgDiag.Short : "" } };
+                    { "blocked", oth == "amnezia" && AvpnBlocked() }, { "nested", EpNested.ContainsKey(oth) ? EpNested[oth] : "" }, { "why", oth == "amnezia" && AwgDiag != null && !AwgDiag.Ok ? AwgDiag.Short : "" } };
                 if (oth == "amnezia" && AvpnBlocked()) sb["state"] = "отключён защитой до " + AgBlockedUntil.ToString("HH:mm");
                 if (uL == 0) uS = othUp && othTr == true ? "Подключён · резерв готов" : "Подключён · резерв не готов";
             }

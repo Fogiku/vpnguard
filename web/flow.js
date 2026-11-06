@@ -50,7 +50,7 @@ function flowModel() {
     ? { col: 3, href: '#' + k, dot: lvl(comp('ultra')), acts: [{ t: '⟳', tip: 'Переподключить ' + KN[k], fn: "cmd('reconnect','переподключение туннеля')" }], c: 'var(--vpn)', t1: KN[k], r: u, t3: (mode === 'dual' ? 'активный · ' : '') + (nm.u || 'туннель') }
     : { col: 3, href: '#' + k, dot: sb.blocked ? 2 : rd ? 0 : sb.up ? 1 : 2, dim: true, c: 'var(--vpn)', t1: KN[k], r: null,
         acts: [{ t: '⇄', tip: 'Сделать активным — переключить трафик на ' + KN[k], fn: `cmd('dual-switch','переключение на ${KN[k]}','Переключить трафик на ${KN[k]}?${rd ? '' : ' Он сейчас не проходит проверку — клиенты могут остаться без интернета.'}')` }],
-        t3: 'резерв: ' + (sb.state ? (rd ? 'готов, трафик проходит' : sb.state === 'нет трафика' ? (sb.why || 'НЕ пропускает трафик') : sb.state) : 'нет данных') };
+        t3: 'резерв: ' + (sb.nested ? sb.nested : sb.state ? (rd ? 'готов, трафик проходит' : sb.state === 'нет трафика' ? (sb.why || 'НЕ пропускает трафик') : sb.state) : 'нет данных'), tip: sb.nested ? `${KN[k]} ${sb.nested}. При сбое ${KN[kind]} упадут оба — нужен другой сервер или протокол для ${KN[k]}.` : '' };
   // место узла закреплено за туннелем: vpn — MeduzaVPN, vpn2 — AmneziaVPN (в одиночном режиме — только vpn)
   const slot1 = mode === 'dual' ? 'meduza' : kind, slot2 = 'amnezia';
   if (vpnOn) N.push(Object.assign({ id: 'vpn' }, tun(slot1)));
