@@ -84,7 +84,7 @@ namespace VpnGuard
         }
         // записи раздачи удалённых адаптеров (старый ULTRA) мешают включить раздачу на новом (0x80040201): в WMI (HNet_ConnectionProperties)
         // и в реестре (SharedAccess\Parameters: SharingPublicInterface / SharingPrivateInterface — GUID адаптеров раздачи)
-        static int ClearStaleIcs()
+        static int ClearStaleIcs(bool purge = false)
         {
             int n = 0;
             var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -111,6 +111,22 @@ namespace VpnGuard
                         try { o["IsIcsPublic"] = false; o["IsIcsPrivate"] = false; o.Put(); n++; } catch (Exception e) { Log("ICS: не удалось очистить запись " + g + ": " + e.Message, "ERROR"); }
                     }
             } catch { }
+            // хранилище раздачи разрастается: VPN-адаптеры (MeduzaVPN ULTRA, wintun …) при каждом переподключении создаются заново с новым GUID,
+            // а Windows записи об удалённых не убирает (на целевом ПК их было 132 при 5 адаптерах). Раздача на каждое включение обходит весь
+            // список — и всё чаще падает с 0x80040201. Записей удалённых адаптеров 10 и больше (или раздача не включается) — удалить их целиком
+            try {
+                var stale = names.Keys.Where(g => !present.Contains(g)).ToList();
+                if (stale.Count >= 10 || (purge && stale.Count > 0)) {
+                    var st = new HashSet<string>(stale, StringComparer.OrdinalIgnoreCase); int del = 0;
+                    foreach (var cls in new[] { "HNet_ConnectionProperties", "HNet_Connection" })
+                        using (var ms = new ManagementObjectSearcher(@"root\Microsoft\HomeNet", "SELECT * FROM " + cls))
+                            foreach (ManagementObject o in ms.Get()) {
+                                var g = cls == "HNet_Connection" ? Convert.ToString(o["Guid"]) : Regex.Match(Convert.ToString(o["Connection"]), @"\{[0-9A-Fa-f\-]+\}").Value;
+                                if (st.Contains(g.Trim('{', '}'))) { try { o.Delete(); del++; } catch { } }
+                            }
+                    if (del > 0) { Log("ICS: из хранилища раздачи Windows убрано записей удалённых адаптеров: " + stale.Count + " (их копят VPN-адаптеры при переподключениях)", "WARN"); n++; }
+                }
+            } catch (Exception e) { Log("ICS: чистка хранилища раздачи: " + e.Message, "WARN"); }
             return n;
         }
         static void ResetAllIcs()
@@ -171,7 +187,7 @@ namespace VpnGuard
                 // почти всегда падает с 0x80040201 и стоит клиентам лишних 30 с — сразу снять всё, очистить записи, перезапустить службу и включить обе стороны
                 if (IcsFails > 0) IcsKick(IcsFails);
                 // старые записи (удалённый адаптер) — очистить; перезапуск службы — только если они были (после него раздаче нужно время)
-                if (ClearStaleIcs() > 0) { Log("ICS: перезапуск службы SharedAccess после очистки старых записей", "INFO"); IcsRestartService(); NetChanged(); }
+                if (ClearStaleIcs(IcsFails > 0) > 0) { Log("ICS: перезапуск службы SharedAccess после очистки старых записей", "INFO"); IcsRestartService(); NetChanged(); }
                 foreach (var c in IcsConnections()) {
                     if (!c.Enabled) continue;
                     bool right = (c.Name == up && c.Type == 0) || (c.Name == wg && c.Type == 1);
