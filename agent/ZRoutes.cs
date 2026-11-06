@@ -90,8 +90,7 @@ namespace VpnGuard
             foreach (var r in ZRoutes()) { var p = JS(r, "p"); if (p.EndsWith("/32")) add(p); }   // старые /32 оставляем (IP у CDN меняются)
             foreach (var k in seen.Keys.ToList()) { long t; if (!long.TryParse(Convert.ToString(seen[k]), out t) || nowT - t > keepT) seen.Remove(k); else add(k); }   // и найденные за неделю
             Z["prefixSeen"] = seen;
-            var rescue = new HashSet<string>(ZArr("rescue").Select(x => Convert.ToString(x))); foreach (var p in rescue) add(p);
-            var list = order.Where(p => rescue.Contains(p) || !Regex.IsMatch(p, @"^(8\.8\.8\.|8\.8\.4\.)")).ToList();    // публичный DNS остаётся в VPN (кроме аварийного)
+            var list = order.Where(p => !Regex.IsMatch(p, @"^(8\.8\.8\.|8\.8\.4\.)")).ToList();    // публичный DNS остаётся в VPN (MeduzaVPN проверяет, что он идёт через туннель)
             int max = ZI("maxRoutes"); if (max > 0 && list.Count > max) list = list.Take(max).ToList();
             return list;
         }
@@ -103,25 +102,22 @@ namespace VpnGuard
             foreach (var x in CfgStr("wg.clientDns", "").Split(',')) { var t = x.Trim(); if (Regex.IsMatch(t, @"^\d+\.\d+\.\d+\.\d+$")) l.Add(t); }
             return l.Distinct().Where(ip => !Regex.IsMatch(ip, @"^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)")).Select(ip => ip + "/32").ToArray();
         }
+        static volatile string[] RescueActive = new string[0];
         static void ZRescueApply()
         {
-            var cur = ZArr("rescue").Select(x => Convert.ToString(x)).ToList(); bool want = ZRescueWant;
-            if (want == (cur.Count > 0)) return;
-            var path = ZPhys(); if (path == null) return;
-            var routes = ZRoutes();
-            if (want) {
-                var add = RescueDns(); var have = new HashSet<string>(routes.Select(r => JS(r, "p")));
-                int ifm = Math.Max(0, IfMetric(path.IfIndex));
-                foreach (var p in add) if (!have.Contains(p)) { RouteAdd(p, path.IfIndex, path.Gateway, ifm); routes.Add(new Dictionary<string, object> { { "p", p }, { "i", path.IfIndex }, { "g", path.Gateway } }); }
-                Z["rescue"] = add.ToList(); Z["routes"] = routes;
-                Log("Туннели VPN не работают — DNS (" + string.Join(", ", add.Select(p => p.Replace("/32", ""))) + ") временно напрямую, чтобы YouTube и Discord открывались через zapret (и у клиентов WG-Server)", "WARN");
-            } else {
-                var rs = new HashSet<string>(cur);
+            // прежняя версия ставила для этого системные маршруты — убрать
+            var old = ZArr("rescue").Select(x => Convert.ToString(x)).ToList();
+            if (old.Count > 0) {
+                var routes = ZRoutes(); var rs = new HashSet<string>(old);
                 foreach (var r in routes.Where(r => rs.Contains(JS(r, "p"))).ToList()) { int i; int.TryParse(JS(r, "i"), out i); RouteDel(JS(r, "p"), i, JS(r, "g")); routes.Remove(r); }
-                Z["rescue"] = new object[0]; Z["routes"] = routes;
-                Log("Туннель VPN снова работает — DNS снова через VPN", "INFO");
+                Z["routes"] = routes; Z.Remove("rescue"); ZSave();
             }
-            ZSave();
+            bool want = ZRescueWant;
+            if (want == (RescueActive.Length > 0)) return;
+            if (want) {
+                RescueActive = RescueDns();
+                Log("Туннели VPN не работают — DNS клиентов WG-Server (" + string.Join(", ", RescueActive.Select(p => p.Replace("/32", ""))) + ") временно напрямую, чтобы YouTube и Discord открывались через zapret", "WARN");
+            } else { RescueActive = new string[0]; Log("Туннель VPN снова работает — DNS клиентов снова через VPN", "INFO"); }
         }
         static void ZRemoveRoutes()
         {

@@ -43,6 +43,7 @@ namespace VpnGuard
         static IntPtr CzFwd = WdInvalid, CzNet = WdInvalid, CzBlk = WdInvalid;
         static TcpListener CzRelay;
         const int CzRelayPort = 34010;
+        static HashSet<uint> CzRescue = new HashSet<uint>(); static string CzPhysIp;
         static uint CzWgIp; static int CzWgIdx, CzEthIdx; static string CzSig = "", CzError = "";
         static long CzPkts, CzPass, CzTcpConns, CzUdpPkts, CzBytes, CzErrors, CzTcpUp, CzTcpDown, CzUdpDown, CzUdpSendFail, CzQuicDrop, CzNetRw, CzNetMiss, CzNetSendFail,
             CzRelayNoFlow, CzConnFail, CzMssClamped, CzDropSum, CzDropMd5, CzDropTtl, CzDropTs, CzDropNoAck, CzSumChecked, CzLeakDrop;
@@ -179,9 +180,12 @@ namespace VpnGuard
         // адреса zapret — те же, что в маршрутах мимо VPN; слить в упорядоченные диапазоны
         static void CzUpdateSet()
         {
-            var routes = ZRoutes(); var key = routes.Count + "|" + ZS("lastRouteRefresh");
+            var routes = ZRoutes(); var resc = RescueActive; var key = routes.Count + "|" + ZS("lastRouteRefresh") + "|" + resc.Length;
             if (key == CzSetKey) return;
-            var rs = new List<KeyValuePair<uint, uint>>();
+            var rs = new List<KeyValuePair<uint, uint>>(); var rset = new HashSet<uint>();
+            foreach (var p in resc) { try { rset.Add(IpH(p.Split('/')[0])); } catch { } }
+            CzRescue = rset; try { var ph = ZPhys(); CzPhysIp = ph != null ? ph.Ip : null; } catch { }
+            foreach (var p in resc) routes.Add(new Dictionary<string, object> { { "p", p } });
             foreach (var r in routes) {
                 var pp = JS(r, "p").Split('/'); IPAddress ip; int len;
                 if (pp.Length != 2 || !IPAddress.TryParse(pp[0], out ip) || ip.AddressFamily != AddressFamily.InterNetwork || !int.TryParse(pp[1], out len) || len < 0 || len > 32) continue;
@@ -294,6 +298,8 @@ namespace VpnGuard
                 lock (CzLock) {
                     if (!CzUdp.TryGetValue(key, out f)) {
                         var s = NoInherit(new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp));
+                        // аварийный DNS (туннели не работают): от адреса физического адаптера — мимо VPN без системных маршрутов
+                        if (CzRescue.Contains(dst) && CzPhysIp != null) { try { s.Bind(new IPEndPoint(IPAddress.Parse(CzPhysIp), 0)); } catch { } }
                         s.Connect(new IPEndPoint(IpA(dst), dport));
                         f = new CzUdpFlow { Client = src, CPort = sport, Dst = dst, DPort = dport, Sock = s };
                         CzUdp[key] = f; var ff = f;

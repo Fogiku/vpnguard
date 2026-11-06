@@ -170,6 +170,33 @@ namespace VpnGuard
             Log("Два туннеля: сравнение (" + reason + ") — " + MeasTxt(a) + "; " + MeasTxt(b) + " → " + why, "INFO");
             if (win != cur && KindOk(win)) DualSwitch(win, "лучше по сравнению: " + why);
         }
+        // VPN-приложение при подключении «прибивает» адрес своего сервера к текущему маршруту по умолчанию. Подключился AmneziaVPN, когда
+        // трафик шёл через MeduzaVPN, — его сервер оказывается внутри MeduzaVPN: упал MeduzaVPN — падают оба, и MeduzaVPN видит «другой VPN».
+        // Такие адреса (/32 на адаптере туннеля, без прямого маршрута; не широковещательные и не частные) — пустить напрямую через физический адаптер
+        static readonly Dictionary<string, string> EpPins = new Dictionary<string, string>();
+        static void PinEndpoints()
+        {
+            if (TestMode) return;
+            var phys = ZPhys(); if (phys == null || string.IsNullOrEmpty(phys.Gateway)) return;
+            var table = RouteTable();
+            var direct = new HashSet<string>(table.Where(r => r.IfIndex == phys.IfIndex).Select(Prefix));
+            foreach (var k in new[] { "meduza", "amnezia" }) {
+                var n = KindAdapter(k); if (string.IsNullOrEmpty(n) || !Up(n)) continue;
+                int idx = IfIndexOf(n); if (idx <= 0) continue; string own = Ipv4(n);
+                var rows = table.Where(r => r.IfIndex == idx).ToList();
+                var bcast = new HashSet<string>();
+                foreach (var r in rows) { var pp = Prefix(r).Split('/'); int len = int.Parse(pp[1]); if (len >= 32) continue; uint m = len == 0 ? 0 : 0xFFFFFFFFu << (32 - len); bcast.Add(IpS(IpH(pp[0]) | ~m) + "/32"); }
+                foreach (var r in rows) {
+                    var p = Prefix(r); if (!p.EndsWith("/32") || bcast.Contains(p) || direct.Contains(p)) continue;
+                    var ip = p.Split('/')[0];
+                    if (ip == own || System.Text.RegularExpressions.Regex.IsMatch(ip, @"^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|22[4-9]\.|23\d\.|24\d\.|25[0-5]\.)")) continue;
+                    if (RouteAdd(p, phys.IfIndex, phys.Gateway, Math.Max(0, IfMetric(phys.IfIndex)))) {
+                        EpPins[p] = k; direct.Add(p);
+                        Log("Два туннеля: адрес " + ip + " (сервер другого VPN) шёл через туннель " + ModeNames[k] + " — при его сбое падали бы оба. Пускаю этот адрес напрямую", "WARN");
+                    }
+                }
+            }
+        }
         static void DualMidCheck()
         {
             if (Mode() != "dual" || !CfgBool("vpn.dualHot", true)) return;
@@ -179,6 +206,7 @@ namespace VpnGuard
         static void DualWatch()
         {
             bool hot = CfgBool("vpn.dualHot", true);
+            try { PinEndpoints(); } catch (Exception e) { Log("Два туннеля: адреса серверов VPN: " + e.Message, "WARN"); }
             string act = DualAct(), oth = OtherKind(act);
             // 1. быстрая проверка активного — до долгого восстановления, чтобы клиенты не ждали
             bool actUp = Up(KindAdapter(act)), actOk = false; PerfRun("VpnWatch/проверка активного", () => { actOk = actUp && KindOk(act); });

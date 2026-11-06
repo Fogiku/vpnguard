@@ -139,6 +139,14 @@ namespace VpnGuard
             bool ipOk = addr == null || wgIp == addr || (DateTime.Now - LastIpFix).TotalMinutes < 10;
             if (st.Ok && ipOk && !ForceIcs) return;
             if (!ForceIcs && (DateTime.Now - LastIcsApply).TotalSeconds < 20) return;
+            // ни один туннель не пропускает трафик — перестраивать раздачу бессмысленно (каждая перестройка снимает адрес wg_server и рвёт клиентам zapret)
+            string tk = TunnelKind();
+            if (tk.Length > 0 && (Mode() == "dual" ? FoBothDown : KindTraffic(tk) == false) && st.Ok == false && !ForceIcs) {
+                if ((DateTime.Now - IcsWaitLogAt).TotalMinutes >= 5) { IcsWaitLogAt = DateTime.Now; Log("ICS: туннели VPN сейчас не пропускают трафик — раздачу перестрою, когда заработает хотя бы один", "INFO"); }
+                return;
+            }
+            // прошлая настройка на этот же адаптер не удалась — пауза 30 с, 1, 2, 4 мин (не больше 5), чтобы не сбрасывать раздачу по кругу
+            if (up == IcsFailUp && DateTime.Now < IcsRetryAt) return;
             ForceIcs = false; LastIcsApply = DateTime.Now; var icsT0 = DateTime.Now;
             Log("ICS: настраиваю общий доступ '" + up + "' -> '" + wg + "'", "INFO"); SetActivity("настраиваю раздачу"); NetChanged();
             try {
@@ -167,8 +175,13 @@ namespace VpnGuard
                 }
                 if (IcsStatus().Ok) { NetChanged(); Log("ICS: общий доступ включён (за " + (int)(DateTime.Now - icsT0).TotalSeconds + " с)", "INFO"); LastIcsFix = DateTime.Now; IcsFixCount++; }
                 else Log("ICS: после настройки состояние не подтвердилось, повторю", "WARN");
-            } catch (Exception e) { Log("ICS: ошибка: " + (e.InnerException ?? e).Message, "ERROR"); }
+                if (IcsStatus().Ok) { IcsFails = 0; IcsFailUp = ""; }
+            } catch (Exception e) {
+                IcsFails++; IcsFailUp = up; int wait = Math.Min(300, 30 * (1 << Math.Min(4, IcsFails - 1))); IcsRetryAt = DateTime.Now.AddSeconds(wait);
+                Log("ICS: ошибка: " + (e.InnerException ?? e).Message + " — повторю через " + (wait >= 60 ? wait / 60 + " мин" : wait + " с"), "ERROR");
+            }
         }
+        static int IcsFails; static string IcsFailUp = ""; static DateTime IcsRetryAt = DateTime.MinValue, IcsWaitLogAt = DateTime.MinValue;
 
         // для окна и веба (сводка): часть «Раздача»
         static Dictionary<string, object> IcsComp(string mode)
