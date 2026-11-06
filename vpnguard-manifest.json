@@ -1,8 +1,8 @@
 {
-    "version":  "3.51.0",
-    "build":  "20261106-1630",
+    "version":  "3.51.1",
+    "build":  "20261106-1705",
     "notes":  "",
-    "date":  "2026-11-06T16:30:01.6896180+03:00",
+    "date":  "2026-11-06T17:05:41.7784551+03:00",
     "files":  [
                   {
                       "path":  "agent/Amnezia.cs",
@@ -21,8 +21,8 @@
                   },
                   {
                       "path":  "agent/ClientZapret.cs",
-                      "sha256":  "e92df44bfd6c7204a84aabdb6a315ea368f2657846e5c81af40a69ae6af4b793",
-                      "size":  39439
+                      "sha256":  "cc2b909a9f578bd28a56b68ede3a4d4bc8e8acbf8dd72530db3f7e998e1d5099",
+                      "size":  42244
                   },
                   {
                       "path":  "agent/Commands.cs",
@@ -266,7 +266,7 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "8fa107a482f24308baefad57a8e593f26e71b8086998941b7cba68a014feae9a",
+                      "sha256":  "75710dc27a0e7ec5132fdd2c9a47383a21bbe479e9de99aad70140c08900850e",
                       "size":  31379
                   },
                   {
@@ -276,8 +276,8 @@
                   },
                   {
                       "path":  "web/app.js",
-                      "sha256":  "36ba465117b316c7c212d432347082d33ce2e42f6f28b8ab9e6cbc4535740ba7",
-                      "size":  74388
+                      "sha256":  "da2883f9b4be0583e7e2361f19c6704675d68b4cdf54fac0756586df4317dc44",
+                      "size":  74848
                   },
                   {
                       "path":  "web/flow.js",

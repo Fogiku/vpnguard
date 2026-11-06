@@ -51,7 +51,29 @@ namespace VpnGuard
         static volatile CzRanges CzSet = new CzRanges(); static string CzSetKey = "";
         static DateTime CzFwAt = DateTime.MinValue, CzCleanAt = DateTime.MinValue; static string CzFwSig = "";
         // по клиентам: кому zapret не нужен (wg.clientNoZapret — их трафик целиком через VPN, как без этой функции) и счётчики
-        class CzCli { public long Pkts, ZPkts, Conns, Up, Down, Quic, Fail, Leak; public int Logged, FailLogged; public DateTime LastZ = DateTime.MinValue; }
+        class CzCli {
+            public long Pkts, ZPkts, Conns, Up, Down, Quic, Fail, Leak; public int Logged, FailLogged; public DateTime LastZ = DateTime.MinValue;
+            // куда клиент отправляет больше всего (весь его исходящий трафик, не только zapret): адрес|порт|протокол → байт за окно
+            public readonly ConcurrentDictionary<ulong, long> Dst = new ConcurrentDictionary<ulong, long>(); public DateTime DstAt = DateTime.UtcNow;
+            public object[] Top = new object[0]; public double UpMbit; public DateTime TopLogAt = DateTime.MinValue;
+        }
+        static string CzProto(int p) { return p == 6 ? "TCP" : p == 17 ? "UDP" : p == 1 ? "ICMP" : "IP" + p; }
+        // раз в минуту: топ-5 направлений каждого клиента; без интернета клиент всё равно шлёт много — в журнал, куда
+        static void CzTopTick()
+        {
+            foreach (var kv in CzClients) {
+                var c = kv.Value; double sec = Math.Max(1, (DateTime.UtcNow - c.DstAt).TotalSeconds); if (sec < 50) continue;
+                var snap = c.Dst.ToArray(); c.Dst.Clear(); c.DstAt = DateTime.UtcNow;
+                long total = snap.Sum(x => x.Value); c.UpMbit = Math.Round(total * 8 / sec / 1e6, 2);
+                c.Top = snap.OrderByDescending(x => x.Value).Take(5).Select(x => (object)new Dictionary<string, object> {
+                    { "dst", IpS((uint)(x.Key >> 24)) + ":" + ((x.Key >> 8) & 0xFFFF) }, { "proto", CzProto((int)(x.Key & 0xFF)) }, { "kbps", Math.Round(x.Value * 8 / sec / 1000) } }).ToArray();
+                if ((InetDown() || InetDirectDown) && c.UpMbit >= 1 && (DateTime.UtcNow - c.TopLogAt).TotalMinutes >= 10) {
+                    c.TopLogAt = DateTime.UtcNow; string ip = IpS(kv.Key), nm; if (!PeerNamesByIp.TryGetValue(ip, out nm)) nm = ip;
+                    Log("Клиент «" + nm + "» (" + ip + ") без интернета продолжает отправлять " + c.UpMbit + " Мбит/с — больше всего: " +
+                        string.Join(", ", c.Top.Cast<Dictionary<string, object>>().Select(t => t["dst"] + "/" + t["proto"] + " " + t["kbps"] + " Кбит/с")) + " (какое-то приложение на устройстве повторяет отправку)", "WARN");
+                }
+            }
+        }
         static readonly ConcurrentDictionary<uint, CzCli> CzClients = new ConcurrentDictionary<uint, CzCli>();
         static readonly Func<uint, CzCli> CzNewCli = k => new CzCli();
         static volatile HashSet<uint> CzNoZ = new HashSet<uint>();
@@ -73,7 +95,7 @@ namespace VpnGuard
             IPAddress a; CzCli c; if (!IPAddress.TryParse(ip, out a) || !CzClients.TryGetValue(IpH(a.GetAddressBytes(), 0), out c)) return null;
             return new Dictionary<string, object> { { "pkts", Interlocked.Read(ref c.Pkts) }, { "zPkts", Interlocked.Read(ref c.ZPkts) }, { "conns", Interlocked.Read(ref c.Conns) },
                 { "upKb", Interlocked.Read(ref c.Up) / 1024 }, { "downKb", Interlocked.Read(ref c.Down) / 1024 }, { "quic", Interlocked.Read(ref c.Quic) }, { "fail", Interlocked.Read(ref c.Fail) },
-                { "leak", Interlocked.Read(ref c.Leak) }, { "vpn", Interlocked.Read(ref c.Fail) }, { "rate", RateOf("cz:" + ip, Interlocked.Read(ref c.Down), Interlocked.Read(ref c.Up)) }, { "lastAgo", c.LastZ == DateTime.MinValue ? -1 : (long)(DateTime.UtcNow - c.LastZ).TotalSeconds } };
+                { "leak", Interlocked.Read(ref c.Leak) }, { "top", c.Top }, { "upMbit", c.UpMbit }, { "vpn", Interlocked.Read(ref c.Fail) }, { "rate", RateOf("cz:" + ip, Interlocked.Read(ref c.Down), Interlocked.Read(ref c.Up)) }, { "lastAgo", c.LastZ == DateTime.MinValue ? -1 : (long)(DateTime.UtcNow - c.LastZ).TotalSeconds } };
         }
 
         // ретранслятор (через zapret): [↓, ↑], байт/с
@@ -212,6 +234,7 @@ namespace VpnGuard
         }
         static void CzCleanup()
         {
+            try { CzTopTick(); } catch { }
             var now = DateTime.UtcNow;
             lock (CzLock) {
                 foreach (var k in CzTcp.Where(x => (now - x.Value.Last).TotalMinutes > 10).Select(x => x.Key).ToList()) CzTcp.Remove(k);
@@ -271,6 +294,10 @@ namespace VpnGuard
             if (n < ihl + 8) return false;
             uint src = IpH(b, o + 12), dst = IpH(b, o + 16);
             var cl = CzC(src); Interlocked.Increment(ref cl.Pkts);
+            {   // учёт направлений: адрес, порт назначения, протокол
+                int dp = (proto == 6 || proto == 17) ? (b[o + ihl + 2] << 8) | b[o + ihl + 3] : 0; ulong dk = ((ulong)dst << 24) | ((ulong)(uint)dp << 8) | (byte)proto;
+                if (cl.Dst.Count < 4000) cl.Dst.AddOrUpdate(dk, n, (k, v) => v + n);
+            }
             if (CzNoZ.Contains(src) || !CzInSet(dst)) { Interlocked.Increment(ref CzPass); return false; }
             // zapret к этому адресу не ответил — новые соединения клиента к нему через VPN (раздача); начатые через ретранслятор — как были
             if (CzBypassed(src, dst) && !CzIsRelayFlow(src, b[o + ihl] << 8 | b[o + ihl + 1], dst, proto == 6 && (b[o + ihl + 13] & 0x02) != 0)) { Interlocked.Increment(ref CzBypassPkts); Interlocked.Increment(ref CzPass); if (proto == 6 && (b[o + ihl + 13] & 0x02) != 0) CzDbgPkt(src, dst, (b[o + ihl + 2] << 8) | b[o + ihl + 3], "через VPN (обход)"); return false; }
