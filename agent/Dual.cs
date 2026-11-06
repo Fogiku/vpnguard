@@ -179,19 +179,84 @@ namespace VpnGuard
         static readonly Dictionary<string, EpPin> EpPins = new Dictionary<string, EpPin>();
         static readonly Dictionary<string, DateTime> EpNoDirect = new Dictionary<string, DateTime>();
         static readonly Dictionary<string, string> EpNested = new Dictionary<string, string>();   // туннель → «работает только через …»
+        [System.Runtime.InteropServices.DllImport("iphlpapi.dll")] static extern int GetBestInterface(uint destAddr, out uint bestIfIndex);
+        static int BestIf(string ip) { try { uint idx; return GetBestInterface(BitConverter.ToUInt32(IPAddress.Parse(ip).GetAddressBytes(), 0), out idx) == 0 ? (int)idx : 0; } catch { return 0; } }
+        // адрес сервера туннеля (узнаём по «прибитому» маршруту) — помним на диске: маршрут может исчезнуть, а знание нужно
+        static Dictionary<string, string> EpKnown;
+        static Dictionary<string, string> EpKnownMap()
+        {
+            if (EpKnown != null) return EpKnown;
+            EpKnown = new Dictionary<string, string>();
+            try { var o = Json.DeserializeObject(File.ReadAllText(Path.Combine(DataDir, "vpn-endpoints.json"))) as Dictionary<string, object>; if (o != null) foreach (var kv in o) EpKnown[kv.Key] = Convert.ToString(kv.Value); } catch { }
+            return EpKnown;
+        }
+        static void EpKnownSave() { try { File.WriteAllText(Path.Combine(DataDir, "vpn-endpoints.json"), Json.Serialize(EpKnown)); } catch { } }
+        static readonly Dictionary<string, string> EpLoopGuard = new Dictionary<string, string>();   // туннель → защитный маршрут к его серверу
+        // сервер туннеля только «внутри» другого, а тот упал: путь к серверу пошёл бы через сам туннель — петля (пакеты крутятся по кругу,
+        // сотни Мбит/с «отдачи» и ни байта ответа). Пока другой лежит — адрес сервера на физический адаптер; другой вернулся — защиту снять
+        static void EpLoopWatch(ZPath phys)
+        {
+            foreach (var kv in EpKnownMap().ToList()) {
+                string owner = kv.Key, ip = kv.Value, via = OtherKind(owner); if (!EpNested.ContainsKey(owner) || ip.Length == 0) continue;
+                string on = KindAdapter(owner); int ownIdx = !string.IsNullOrEmpty(on) && Up(on) ? IfIndexOf(on) : 0;
+                bool viaUp = Up(KindAdapter(via)); string pfx = ip + "/32";
+                if (!viaUp && ownIdx > 0 && !EpLoopGuard.ContainsKey(owner) && BestIf(ip) == ownIdx && phys != null) {
+                    if (RouteAdd(pfx, phys.IfIndex, phys.Gateway, Math.Max(0, IfMetric(phys.IfIndex)))) {
+                        EpLoopGuard[owner] = phys.IfIndex + "|" + phys.Gateway;
+                        Log("Два туннеля: " + ModeNames[via] + " упал, а сервер " + ModeNames[owner] + " (" + ip + ") доступен только через него — ставлю защиту от петли (адрес напрямую), " + ModeNames[owner] + " до возвращения " + ModeNames[via] + " работать не будет", "WARN");
+                    }
+                } else if (viaUp && EpLoopGuard.ContainsKey(owner)) {
+                    var g = EpLoopGuard[owner].Split('|'); int gi; int.TryParse(g[0], out gi); RouteDel(pfx, gi, g[1]); EpLoopGuard.Remove(owner);
+                    Log("Два туннеля: " + ModeNames[via] + " снова работает — защита от петли снята, " + ModeNames[owner] + " снова идёт через него", "INFO");
+                }
+            }
+        }
         static void PinEndpoints()
         {
             if (TestMode) return;
             foreach (var kv in EpPins.ToList()) {
                 string owner = OtherKind(kv.Value.Via); double age = (DateTime.Now - kv.Value.At).TotalSeconds;
-                if (KindTraffic(owner) == true && age > 30) { EpPins.Remove(kv.Key); EpNested.Remove(owner); Log("Два туннеля: " + ModeNames[owner] + " работает напрямую — от " + ModeNames[kv.Value.Via] + " больше не зависит", "INFO"); continue; }
+                if (KindTraffic(owner) == true && age > 75) { EpPins.Remove(kv.Key); EpNested.Remove(owner); Log("Два туннеля: " + ModeNames[owner] + " работает напрямую — от " + ModeNames[kv.Value.Via] + " больше не зависит", "INFO"); continue; }
                 if (age < 120) continue;
                 RouteDel(kv.Key, kv.Value.If, kv.Value.Gw); EpPins.Remove(kv.Key); EpNoDirect[kv.Key] = DateTime.Now;
                 EpNested[owner] = "работает только через " + ModeNames[kv.Value.Via] + " (сервер " + kv.Key.Replace("/32", "") + " напрямую недоступен)";
+                EpKnownMap()["nested:" + owner] = kv.Value.Via + "|" + DateTime.Now.ToString("o"); EpKnownSave();
                 Log("Два туннеля: сервер " + ModeNames[owner] + " (" + kv.Key.Replace("/32", "") + ") напрямую недоступен — вероятно, его блокирует провайдер. Возвращаю прежний путь через " + ModeNames[kv.Value.Via] +
                     ": " + ModeNames[owner] + " снова заработает, но резервом при сбое " + ModeNames[kv.Value.Via] + " он быть не может — они падают вместе. Нужен другой сервер или протокол для " + ModeNames[owner] + ". Повторю проверку через 6 ч", "WARN");
             }
             var phys = ZPhys(); if (phys == null || string.IsNullOrEmpty(phys.Gateway)) return;
+            // признак «работает только через другой» после перезапуска агента — с диска (держится 6 ч, потом снова проверка напрямую)
+            foreach (var kv in EpKnownMap().Where(x => x.Key.StartsWith("nested:")).ToList()) {
+                var o = kv.Key.Substring(7); var v = kv.Value.Split('|'); DateTime at;
+                if (v.Length == 2 && DateTime.TryParse(v[1], out at) && (DateTime.Now - at).TotalHours < 6) {
+                    string sip; if (!EpNested.ContainsKey(o) && EpKnownMap().TryGetValue(o, out sip)) { EpNested[o] = "работает только через " + ModeNames[v[0]] + " (сервер " + sip + " напрямую недоступен)"; EpNoDirect[sip + "/32"] = at; }
+                } else { EpKnownMap().Remove(kv.Key); EpNested.Remove(o); EpKnownSave(); }
+            }
+            // адрес сервера AmneziaVPN — ещё и из конфига его службы туннеля (Endpoint = хост:порт), если маршрута-подсказки нет
+            if (!EpKnownMap().ContainsKey("amnezia")) {
+                try {
+                    var sc = WgLib.ServiceConf(AvpnSvcName());
+                    if (sc != null && File.Exists(sc) && sc.EndsWith(".conf", StringComparison.OrdinalIgnoreCase)) {
+                        var m = System.Text.RegularExpressions.Regex.Match(File.ReadAllText(sc), @"(?im)^\s*Endpoint\s*=\s*\[?([^\]\s:]+)\]?:\d+");
+                        if (m.Success) { IPAddress a; var h = m.Groups[1].Value; if (!IPAddress.TryParse(h, out a)) a = Dns.GetHostAddresses(h).FirstOrDefault(x => x.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork);
+                            if (a != null) { EpKnownMap()["amnezia"] = a.ToString(); EpKnownSave(); Log("Два туннеля: сервер AmneziaVPN — " + a + " (из конфига его службы)", "INFO"); } }
+                    }
+                } catch { }
+            }
+            // известен адрес сервера, а прямого маршрута нет — проверить, не идёт ли он через другой туннель
+            foreach (var o in new[] { "amnezia", "meduza" }) {
+                string sip; if (!EpKnownMap().TryGetValue(o, out sip) || EpNested.ContainsKey(o) || EpLoopGuard.ContainsKey(o)) continue;
+                var vn = KindAdapter(OtherKind(o)); int vIdx = !string.IsNullOrEmpty(vn) && Up(vn) ? IfIndexOf(vn) : 0;
+                if (vIdx > 0 && BestIf(sip) == vIdx && KindTraffic(o) == true) {
+                    DateTime nd; if (EpNoDirect.TryGetValue(sip + "/32", out nd) && (DateTime.Now - nd).TotalHours < 6) { EpNested[o] = "работает только через " + ModeNames[OtherKind(o)] + " (сервер " + sip + " напрямую недоступен)"; continue; }
+                    // проверить напрямую тем же способом, что и прибитый маршрут: поставить и смотреть 2 мин
+                    if (!EpPins.ContainsKey(sip + "/32") && RouteAdd(sip + "/32", phys.IfIndex, phys.Gateway, Math.Max(0, IfMetric(phys.IfIndex)))) {
+                        EpPins[sip + "/32"] = new EpPin { Via = OtherKind(o), Gw = phys.Gateway, If = phys.IfIndex, At = DateTime.Now };
+                        Log("Два туннеля: сервер " + ModeNames[o] + " (" + sip + ") идёт через " + ModeNames[OtherKind(o)] + " — проверяю, доступен ли он напрямую", "INFO");
+                    }
+                }
+            }
+            try { EpLoopWatch(phys); } catch (Exception e) { Log("Два туннеля: защита от петли: " + e.Message, "WARN"); }
             var table = RouteTable();
             var direct = new HashSet<string>(table.Where(r => r.IfIndex == phys.IfIndex).Select(Prefix));
             var zset = new HashSet<string>(ZRoutes().Select(x => JS(x, "p")).Concat(RescueActive));        // маршруты zapret не трогать
@@ -208,6 +273,7 @@ namespace VpnGuard
                     DateTime nd; if (EpNoDirect.TryGetValue(p, out nd) && (DateTime.Now - nd).TotalHours < 6) continue;
                     var ip = p.Split('/')[0];
                     if (ip == own || System.Text.RegularExpressions.Regex.IsMatch(ip, @"^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|22[4-9]\.|23\d\.|24\d\.|25[0-5]\.)")) continue;
+                    EpKnownMap()[OtherKind(k)] = ip; EpKnownSave();
                     if (RouteAdd(p, phys.IfIndex, phys.Gateway, Math.Max(0, IfMetric(phys.IfIndex)))) {
                         EpPins[p] = new EpPin { Via = k, Gw = phys.Gateway, If = phys.IfIndex, At = DateTime.Now }; direct.Add(p);
                         Log("Два туннеля: адрес " + ip + " (сервер другого VPN) шёл через туннель " + ModeNames[k] + " — при его сбое падали бы оба. Пускаю этот адрес напрямую", "WARN");

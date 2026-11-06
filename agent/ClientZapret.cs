@@ -86,7 +86,7 @@ namespace VpnGuard
             if (!CzWanted()) why = "off";
             else if (ZDirect()) why = "в режиме «без VPN» клиенты и так идут напрямую — нужен режим с VPN";
             else if (ZRoutes().Count == 0) why = "zapret не включён (нет маршрутов мимо VPN)";
-            string wgIp = Ipv4(WgIf()); var phys = why == null ? ZPhys() : null;
+            string wgIp = WgIp(); var phys = why == null ? ZPhys() : null;
             if (why == null && wgIp == null) why = "адаптер " + WgIf() + " без адреса";
             if (why == null && phys == null) why = "нет физического выхода в интернет";
             string dll = Path.Combine(ZDir(), "bin", "WinDivert.dll");

@@ -158,7 +158,7 @@ namespace VpnGuard
             if (!CfgBool("sharing.enabled", true)) return;
             string up = UplinkName(), wg = WgIf();
             if (string.IsNullOrEmpty(up) || !Up(up) || !Up(wg)) return;
-            string addr = WgServerAddress(); string wgIp = Ipv4(wg);
+            string addr = WgServerAddress(); string wgIp = WgIp();
             if (!ForceIcs && IcsLast != null && IcsLast.Ok && up == IcsLastUp && (addr == null || wgIp == addr) && (DateTime.UtcNow - IcsLastAt).TotalSeconds < 60) return;
             var st = IcsStatus(); IcsLast = st; IcsLastAt = DateTime.UtcNow; IcsLastUp = up;
             bool ipOk = addr == null || wgIp == addr || (DateTime.Now - LastIpFix).TotalMinutes < 10;
@@ -194,7 +194,7 @@ namespace VpnGuard
                     if (!right) { Log("ICS: снимаю общий доступ с '" + c.Name + "' (тип " + c.Type + ")", "INFO"); Call(c.Config, "DisableSharing"); Thread.Sleep(1000); }
                 }
                 EnableIcsSide(up, 0); EnableIcsSide(wg, 1); Thread.Sleep(3000);
-                wgIp = Ipv4(wg);
+                wgIp = WgIp();
                 if (addr != null && wgIp != addr && (DateTime.Now - LastIpFix).TotalMinutes >= 10) {
                     LastIpFix = DateTime.Now; Log("ICS: адрес wg_server стал " + wgIp + ", ожидается " + addr + " — перезапуск туннеля", "WARN");
                     SvcRestart(CfgStr("wg.serviceName", "WireGuardTunnel$wg_server"));

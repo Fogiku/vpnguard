@@ -263,6 +263,14 @@ namespace VpnGuard
             try { return AllNics().FirstOrDefault(n => string.Equals(n.Name, name, StringComparison.OrdinalIgnoreCase)); } catch { return null; }
         }
         static bool Up(string name) { var n = Nic(name); return n != null && n.OperationalStatus == OperationalStatus.Up; }
+        // адрес wg_server: из конфига, если он есть на адаптере (у адаптера может оказаться и чужой 192.168.137.1 от ICS)
+        static string WgIp()
+        {
+            string want = null; try { want = WgServerAddress(); } catch { }
+            var n = Nic(WgIf()); if (n == null) return null;
+            try { if (want != null && n.GetIPProperties().UnicastAddresses.Any(u => u.Address.ToString() == want)) return want; } catch { }
+            return Ipv4(WgIf());
+        }
         static string Ipv4(string name)
         {
             var n = Nic(name); if (n == null) return null;

@@ -78,6 +78,17 @@ namespace VpnGuard
                 return;
             }
             if (!Up(WgIf())) { Log("wg_server: служба работает, но адаптер не поднят — перезапуск службы", "WARN"); SvcRestart(sn); return; }
+            // ICS при неудачных включениях добавляет адаптеру свой адрес 192.168.137.1 — рядом с нашим он только путает (ретранслятор, клиенты)
+            try {
+                string want = WgServerAddress(); var n = Nic(WgIf());
+                if (want != null && n != null) {
+                    var ips = n.GetIPProperties().UnicastAddresses.Where(u => u.Address.AddressFamily == AddressFamily.InterNetwork).Select(u => u.Address.ToString()).ToList();
+                    if (ips.Contains(want)) foreach (var ip in ips.Where(x => x != want && x.StartsWith("192.168.137."))) {
+                        Exe("netsh.exe", "interface ipv4 delete address name=\"" + WgIf() + "\" address=" + ip, 15);
+                        Log("wg_server: убран лишний адрес " + ip + " (его добавила раздача Windows) — остаётся " + want, "INFO");
+                    }
+                }
+            } catch { }
             WgServiceHeal(sn, wgExe, conf);
         }
         // служба туннеля установлена с другим файлом, чем конфиг VpnGuard (например, её успели поставить из прежнего конфига) —
