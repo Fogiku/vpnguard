@@ -51,6 +51,13 @@ namespace VpnGuard
                 St(hasJob && got == "данные" && b.TickNow, "события: подписчик получил событие (в своей очереди) и проверит себя");
                 lock (EventLog) St(EventLog.Any(e => e.Name == "test.event" && e.To.Contains("Тест Б")), "события: событие записано в журнал событий с получателями");
 
+                // ---- интернет нестабилен (провалы за последнюю минуту) — проверки служб и переключения приостановлены; без провалов — нет
+                InetState = 0; lock (InetHist) { InetHist.Clear(); foreach (var x in new[] { true, false, true, false, true }) InetHist.Enqueue(x); }
+                bool unst = InetBad() && InetLive() == 2;
+                lock (InetHist) { InetHist.Clear(); for (int i = 0; i < 12; i++) InetHist.Enqueue(true); }
+                St(unst && !InetBad() && InetLive() == 0, "интернет: провалы за минуту — «нестабилен», проверки служб приостановлены; без провалов — снова в работе");
+                InetState = -1; lock (InetHist) InetHist.Clear();
+
                 // ---- быстрое переключение (режим «два туннеля»): основной не пропускает трафик, резерв пропускает — переключиться
                 var ics = AddModule("ics", "Раздача", () => 60000, () => { }); var fo = AddModule("failover", "Быстрое переключение", () => 60000, () => { });
                 Subscribe();

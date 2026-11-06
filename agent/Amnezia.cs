@@ -110,7 +110,7 @@ namespace VpnGuard
         }
         static void AwgRestart(string reason)
         {
-            if (InetDown()) { Log("AmneziaVPN: перезапуск отменён — нет интернета (" + InetWhy + ")", "INFO"); return; }
+            if (InetBad()) { Log("AmneziaVPN: перезапуск отменён — нет интернета или он нестабилен (" + (InetWhy.Length > 0 ? InetWhy : "связь нестабильна") + ")", "INFO"); return; }
             AwgRestarts.RemoveAll(d => d < DateTime.Now.AddMinutes(-30));
             if (AwgRestarts.Count >= CfgInt("meduza.maxRestartsPer30Min", 5)) { Log("AmneziaVPN: слишком много перезапусков за 30 мин, пауза (" + reason + ")", "WARN"); return; }
             AwgRestarts.Add(DateTime.Now); AwgLastRestart = DateTime.Now; AwgLastReason = reason; RestartCount++;

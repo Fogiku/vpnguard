@@ -105,7 +105,7 @@ namespace VpnGuard
         }
         static void MzRestart(string reason)
         {
-            if (InetDown()) { Log("MeduzaVPN: перезапуск отменён — нет интернета (" + InetWhy + ")", "INFO"); return; }
+            if (InetBad()) { Log("MeduzaVPN: перезапуск отменён — нет интернета или он нестабилен (" + (InetWhy.Length > 0 ? InetWhy : "связь нестабильна") + ")", "INFO"); return; }
             Restarts.RemoveAll(d => d < DateTime.Now.AddMinutes(-30));
             if (Restarts.Count >= CfgInt("meduza.maxRestartsPer30Min", 5)) { Log("MeduzaVPN: слишком много перезапусков за 30 мин, пауза (причина: " + reason + ")", "WARN"); return; }
             Restarts.Add(DateTime.Now); LastRestart = DateTime.Now; LastRestartReason = reason; RestartCount++;
@@ -156,7 +156,7 @@ namespace VpnGuard
         {
             if (!CfgBool("meduza.autoProtocol", true) || !MzPipe()) return false;
             if ((DateTime.Now - MzFallbackAt).TotalMinutes < 15) return false;
-            if (InetDown()) return true;                 // интернета нет вообще — перебирать протоколы бессмысленно
+            if (InetBad()) return true;                 // интернета нет вообще — перебирать протоколы бессмысленно
             MzFallbackAt = DateTime.Now;
             string cur = MzProtocol(), chosen = CfgStr("meduza.protocol", "ultra");
             try { MzCatalog(false); } catch { }
@@ -168,7 +168,7 @@ namespace VpnGuard
             Log("MeduzaVPN: " + reason + ", протокол " + cur + " — пробую другие: " + string.Join(", ", order), "WARN");
             string prev = MzOverride; int noConn = 0, maxNoConn = Math.Max(2, CfgInt("meduza.fallbackMaxTimeouts", 3));
             foreach (var p in order) {
-                if (InetDown()) { MzOverride = prev; Log("MeduzaVPN: пропал интернет — перебор протоколов прерван", "WARN"); MzDisconnect(); Thread.Sleep(1000); MzConnect(0); return true; }
+                if (InetBad()) { MzOverride = prev; Log("MeduzaVPN: пропал интернет — перебор протоколов прерван", "WARN"); MzDisconnect(); Thread.Sleep(1000); MzConnect(0); return true; }
                 DualMidCheck();
                 SetActivity("MeduzaVPN: пробую протокол " + p);
                 MzDisconnect(); Thread.Sleep(2000);

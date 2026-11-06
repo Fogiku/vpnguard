@@ -84,8 +84,12 @@ namespace VpnGuard
             var set = new HashSet<string>(); var order = new List<string>();
             Action<string> add = p => { if (set.Add(p)) order.Add(p); };
             if (ZB("routeGoogleRanges")) { foreach (var p in GoogleRanges()) add(p); if (ZB("routeIspVideo")) foreach (var p in ZArr("ggc")) add(Convert.ToString(p)); }
-            foreach (var kv in ResolveMany(RouteDomains(), 10000)) foreach (var a in kv.Value) add(a + "/32");
+            var seen = Z.ContainsKey("prefixSeen") ? Z["prefixSeen"] as Dictionary<string, object> : null; if (seen == null) seen = new Dictionary<string, object>();
+            long nowT = DateTime.UtcNow.Ticks, keepT = TimeSpan.FromDays(7).Ticks;
+            foreach (var kv in ResolveMany(RouteDomains(), 10000)) foreach (var a in kv.Value) { add(a + "/32"); seen[a + "/32"] = nowT; }
             foreach (var r in ZRoutes()) { var p = JS(r, "p"); if (p.EndsWith("/32")) add(p); }   // старые /32 оставляем (IP у CDN меняются)
+            foreach (var k in seen.Keys.ToList()) { long t; if (!long.TryParse(Convert.ToString(seen[k]), out t) || nowT - t > keepT) seen.Remove(k); else add(k); }   // и найденные за неделю
+            Z["prefixSeen"] = seen;
             var list = order.Where(p => !Regex.IsMatch(p, @"^(8\.8\.8\.|8\.8\.4\.)")).ToList();    // публичный DNS остаётся в VPN
             int max = ZI("maxRoutes"); if (max > 0 && list.Count > max) list = list.Take(max).ToList();
             return list;
@@ -112,6 +116,7 @@ namespace VpnGuard
                 ZRemoveRoutes(); routes = new List<Dictionary<string, object>>(); refresh = true;
             }
             bool need = refresh || routes.Count == 0 || (DateTime.Now - ZD("lastRouteRefresh")).TotalMinutes >= 30;
+            if (need && routes.Count > 0 && InetBad()) need = false;                 // связь плохая — DNS ответит не на всё; обновлю позже
             var want = need ? ZPrefixes() : routes.Select(r => JS(r, "p")).ToList();
             if (need) ZSetD("lastRouteRefresh", DateTime.Now);
             var table = RouteTable();

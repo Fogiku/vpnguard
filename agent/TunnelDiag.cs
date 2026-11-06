@@ -104,7 +104,7 @@ namespace VpnGuard
         // ---------------------------------------------------------------- проверка узлов (одна для всех модулей)
         // TCP-соединения с адреса srcIp ко всем узлам сразу. all = false — ответ по первому успеху; true — дождаться всех (сколько
         // открылось, время каждого). Не дольше timeoutMs (+1,5 с запаса).
-        class ProbeRes { public bool Ok; public long FirstMs = -1; public int OkCount, Total; public readonly List<long> Ms = new List<long>(); }
+        class ProbeRes { public bool Ok; public long FirstMs = -1; public string FirstHost; public int OkCount, Total; public readonly List<long> Ms = new List<long>(); }
         static ProbeRes Probe(string srcIp, string[] hosts, int timeoutMs, bool all = false)
         {
             var r = new ProbeRes { Total = hosts == null ? 0 : hosts.Length };
@@ -116,13 +116,13 @@ namespace VpnGuard
                     var hh = h;
                     ThreadPool.QueueUserWorkItem(_ => {
                         long t0 = sw.ElapsedMilliseconds; bool ok = TcpVia(srcIp, hh, timeoutMs);
-                        lock (lk) if (ok) { r.Ok = true; r.OkCount++; r.Ms.Add(sw.ElapsedMilliseconds - t0); if (r.FirstMs < 0) r.FirstMs = sw.ElapsedMilliseconds; }
+                        lock (lk) if (ok) { r.Ok = true; r.OkCount++; r.Ms.Add(sw.ElapsedMilliseconds - t0); if (r.FirstMs < 0) { r.FirstMs = sw.ElapsedMilliseconds; r.FirstHost = hh; } }
                         if ((ok && !all) | Interlocked.Decrement(ref left) == 0) { try { done.Set(); } catch { } }
                     });
                 }
                 done.WaitOne(timeoutMs + 1500);
             } finally { done.Close(); }
-            lock (lk) { var c = new ProbeRes { Ok = r.Ok, FirstMs = r.FirstMs, OkCount = r.OkCount, Total = r.Total }; c.Ms.AddRange(r.Ms); return c; }
+            lock (lk) { var c = new ProbeRes { Ok = r.Ok, FirstMs = r.FirstMs, FirstHost = r.FirstHost, OkCount = r.OkCount, Total = r.Total }; c.Ms.AddRange(r.Ms); return c; }
         }
         static ProbeRes ProbeAll(string srcIp, string[] hosts, int timeoutMs) { return Probe(srcIp, hosts, timeoutMs, true); }
     }

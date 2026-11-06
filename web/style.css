@@ -170,3 +170,12 @@ tr.cur td:first-child { box-shadow: inset 3px 0 var(--accent); }
 .flow .f1 { font-family: var(--hud-font); text-transform: uppercase; letter-spacing: .06em; }
 .qr { border-radius: 0; }
 @media (prefers-reduced-motion: no-preference) { .tile, button, nav a { transition: box-shadow .15s, background .15s, color .15s; } }
+
+/* журнал: ошибки — красным, предупреждения — жёлтым */
+pre.log { width: 100%; height: 60vh; overflow: auto; resize: vertical; margin: 0; }
+.lgv .le { color: var(--bad); font-weight: 600; }
+.lgv .lw { color: var(--warn); }
+.lgv .li { color: var(--dim); }
+/* схема без связи с агентом */
+.flowoff { color: var(--bad); border: 1px solid var(--bad); padding: 6px 10px; margin-bottom: 8px; font-size: 13px; }
+.flow svg.off { filter: grayscale(1); opacity: .55; }

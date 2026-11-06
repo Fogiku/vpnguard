@@ -11,7 +11,7 @@ namespace VpnGuard
         static int FoFails; static string FoAct = "";
         static void FailoverTick()
         {
-            if (Mode() != "dual" || !CfgBool("vpn.dualHot", true) || InetDown()) { FoFails = 0; return; }
+            if (Mode() != "dual" || !CfgBool("vpn.dualHot", true) || InetBad()) { FoFails = 0; return; }
             string act = DualAct(), oth = OtherKind(act);
             if (act != FoAct) { FoAct = act; FoFails = 0; }
             // только что переключились или основной только запускается — маршруты и раздача перестраиваются

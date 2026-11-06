@@ -6,9 +6,17 @@
 // «Мимо VPN» и «программы ПК» — оценка: физический − туннель − зашифрованный трафик клиентов.
 let LIVE = null, FL = null;
 const FLP = 11;                                  // шаг стрелок: символ 10px Consolas (0,55 em = 5,5) + разрядка 5,5
+// связь с агентом: живые данные не приходят (веб-сервер не отвечает) или не обновляются (агент не работает) — схема не показывает старые скорости
+let FLOW_OFF = '', LIVE_T = 0, LIVE_AT = 0, LIVE_FAILS = 0;
+function flowOffline() {
+  if (LIVE_FAILS >= 2) return 'нет связи с веб-интерфейсом VpnGuard';
+  if (LIVE_AT && Date.now() - LIVE_AT > 8000) return 'агент не присылает данные ' + Math.round((Date.now() - LIVE_AT) / 1000) + ' с';
+  return '';
+}
 function flowModel() {
   const tr = S.traffic || {}, nm = tr.names || {}, wgc = comp('wg') || {}, cz = wgc.clientZapret || {};
-  const R = (LIVE && LIVE.rate) || tr.rate || {}, LP = (LIVE && LIVE.peers) || null;
+  const off = !!FLOW_OFF;
+  const R = off ? {} : (LIVE && LIVE.rate) || tr.rate || {}, LP = off ? {} : (LIVE && LIVE.peers) || null;
   const mode = (S.vpn && S.vpn.mode) || 'meduza', vpnOn = mode !== 'zapret';
   const r2 = k => [+(R[k] || [])[0] || 0, +(R[k] || [])[1] || 0];
   const u = vpnOn ? r2('u') : [0, 0], w = r2('w'), pAll = r2('p');
@@ -17,10 +25,10 @@ function flowModel() {
   const p = [Math.max(0, pAll[0] - l[0]), Math.max(0, pAll[1] - l[1])];
   const byp = vpnOn ? [Math.max(0, p[0] - u[0] - w[0]), Math.max(0, p[1] - u[1] - w[1])] : [Math.max(0, p[0] - w[0]), Math.max(0, p[1] - w[1])];
   const apps = [Math.max(0, u[0] + byp[0] + l[0] - w[1]), Math.max(0, u[1] + byp[1] + l[1] - w[0])];
-  const czr = (LIVE && LIVE.cz) || cz.rate || [0, 0];
+  const czr = off ? [0, 0] : (LIVE && LIVE.cz) || cz.rate || [0, 0];
   const peers = (wgc.peers || []).slice().sort((a, b) => (b.active - a.active) || String(a.name).localeCompare(String(b.name)));
   const shown = peers.slice(0, 6), more = peers.length - shown.length;
-  const pr = c => { const l = LP && LP[c.ip]; return l ? [+l.tx || 0, +l.rx || 0] : [+c.txRate || 0, +c.rxRate || 0]; };
+  const pr = c => { const l = LP && LP[c.ip]; return off ? [0, 0] : l ? [+l.tx || 0, +l.rx || 0] : [+c.txRate || 0, +c.rxRate || 0]; };
   const N = [], E = [];
   shown.forEach((c, i) => {
     const on = !c.off && c.active, r = on ? pr(c) : [0, 0];
@@ -37,23 +45,32 @@ function flowModel() {
     t4: cz.running && cz.bypass ? `${cz.bypass} адр. временно через VPN` : '' });
   // какой туннель несёт трафик; в режиме «два туннеля» второй — отдельным узлом «Резерв»
   const KN = { meduza: 'MeduzaVPN', amnezia: 'AmneziaVPN' }, kind = (S.vpn && S.vpn.kind) || (mode === 'amnezia' ? 'amnezia' : 'meduza'), other = kind === 'meduza' ? 'amnezia' : 'meduza';
-  if (vpnOn) N.push({ id: 'vpn', col: 3, href: '#' + kind, dot: lvl(comp('ultra')), acts: [{ t: '⟳', tip: 'Переподключить туннель', fn: "cmd('reconnect','переподключение туннеля')" }], c: 'var(--vpn)', t1: KN[kind], r: u, t3: (mode === 'dual' ? 'активный · ' : '') + (nm.u || 'туннель') });
-  if (mode === 'dual') {
-    const sb = (comp('ultra') || {}).standby || {}, rd = sb.ok === true;
-    N.push({ id: 'vpn2', col: 3, href: '#' + other, dot: sb.blocked ? 2 : rd ? 0 : sb.up ? 1 : 2, dim: true,
-      acts: [{ t: '⇄', tip: 'Сделать активным — переключить трафик на ' + KN[other], fn: `cmd('dual-switch','переключение на ${KN[other]}','Переключить трафик на ${KN[other]}?${rd ? '' : ' Он сейчас не проходит проверку — клиенты могут остаться без интернета.'}')` }], c: 'var(--vpn)', t1: KN[other], r: null,
-      t3: 'резерв: ' + (sb.state ? (rd ? 'готов, трафик проходит' : sb.state === 'нет трафика' ? (sb.why || 'НЕ пропускает трафик') : sb.state) : 'нет данных') });
-  }
+  const sb = (comp('ultra') || {}).standby || {}, rd = sb.ok === true;
+  const tun = k => k === kind
+    ? { col: 3, href: '#' + k, dot: lvl(comp('ultra')), acts: [{ t: '⟳', tip: 'Переподключить ' + KN[k], fn: "cmd('reconnect','переподключение туннеля')" }], c: 'var(--vpn)', t1: KN[k], r: u, t3: (mode === 'dual' ? 'активный · ' : '') + (nm.u || 'туннель') }
+    : { col: 3, href: '#' + k, dot: sb.blocked ? 2 : rd ? 0 : sb.up ? 1 : 2, dim: true, c: 'var(--vpn)', t1: KN[k], r: null,
+        acts: [{ t: '⇄', tip: 'Сделать активным — переключить трафик на ' + KN[k], fn: `cmd('dual-switch','переключение на ${KN[k]}','Переключить трафик на ${KN[k]}?${rd ? '' : ' Он сейчас не проходит проверку — клиенты могут остаться без интернета.'}')` }],
+        t3: 'резерв: ' + (sb.state ? (rd ? 'готов, трафик проходит' : sb.state === 'нет трафика' ? (sb.why || 'НЕ пропускает трафик') : sb.state) : 'нет данных') };
+  // место узла закреплено за туннелем: vpn — MeduzaVPN, vpn2 — AmneziaVPN (в одиночном режиме — только vpn)
+  const slot1 = mode === 'dual' ? 'meduza' : kind, slot2 = 'amnezia';
+  if (vpnOn) N.push(Object.assign({ id: 'vpn' }, tun(slot1)));
+  if (mode === 'dual') N.push(Object.assign({ id: 'vpn2' }, tun(slot2)));
   if (lanOn) N.push({ id: 'lan', col: 3, dot: 0, c: 'var(--lan)', t1: 'Локальная сеть', r: l, t3: (lanI.net || 'домашняя сеть') + ' · не интернет' });
   const zc = comp('zapret'), zOn = !!(zc && zc.enabled);
   N.push({ id: 'zp', col: 3, href: '#zapret', dot: lvl(comp('zapret')), acts: vpnOn ? [zOn ? { t: '⏻', bad: 1, tip: 'Выключить zapret', fn: "cmd('zapret-off','выключение zapret')" } : { t: '⏻', tip: 'Включить zapret', fn: "cmd('zapret-on','включение zapret','Включить zapret? YouTube и Discord этого ПК пойдут мимо VPN.')" }] : [], c: 'var(--zp)', t1: 'zapret', r: byp, t3: vpnOn ? 'YouTube, Discord …' : '' });
-  const ni = comp('inet'), nOk = LIVE && LIVE.inet !== undefined ? LIVE.inet : ni ? (ni.level === 0 ? 0 : ni.level === 2 ? 1 : -1) : -1;
-  N.push({ id: 'net', col: 4, dot: nOk === 0 ? 0 : nOk === 1 ? 2 : -1, dim: nOk === 1, t1: nOk === 1 ? 'Интернет · НЕТ СВЯЗИ' : 'Интернет', r: p,
-    t3: nOk === 1 ? (ni && ni.details && ni.details[0]) || 'провайдер не отвечает' : (nm.p || 'физический адаптер') + (ni && ni.level === 0 ? ' · ' + ni.state.replace(/^Есть · /, '') : '') });
+  const ni = comp('inet') || {}, nOk = off ? -1 : LIVE && LIVE.inet !== undefined ? LIVE.inet : ni.level === 0 ? 0 : ni.level === 2 ? 1 : ni.unstable ? 2 : -1;
+  const gwT = ni.gw ? `роутер ${ni.gw}` + (ni.gwMs >= 0 ? ` ${ni.gwMs} мс` : ' не отвечает') : '';
+  const pingT = ni.ms > 0 ? `${ni.ms} мс до ${ni.hostName || ni.host}` : ni.ms === 0 ? 'есть через туннель' : '';
+  N.push({ id: 'net', col: 4, dot: nOk === 0 ? 0 : nOk === 1 ? 2 : nOk === 2 ? 1 : -1, dim: nOk === 1, t1: nOk === 1 ? 'Интернет · НЕТ СВЯЗИ' : nOk === 2 ? 'Интернет · НЕСТАБИЛЕН' : 'Интернет', r: p,
+    t3: nOk === 1 ? (ni.details && ni.details[0]) || 'провайдер не отвечает' : nOk === 2 ? `провалов ${ni.loss || 0} из 12 за минуту` : pingT || (nm.p || 'физический адаптер'),
+    tip: `Проверка интернета: TCP-подключение напрямую через ${nm.p || 'физический адаптер'} (мимо VPN) к ${(ni.kv || []).filter(x => x[0] === 'Узлы проверки').map(x => x[1])[0] || 'публичным узлам'}.\n` +
+      (pingT ? `Последний отклик: ${pingT}${ni.host && ni.host !== 'через туннель' ? ' (' + ni.host + ')' : ''}, ответило ${ni.okHosts} из ${ni.hosts}.\n` : '') + (gwT ? gwT.replace(/^р/, 'Р') + ' (ping).' : '') });
   E.push({ a: 'wg', b: 'pc', r: [w[1], w[0]], c: 'var(--accent)' });
   E.push({ a: 'apps', b: 'pc', r: apps, c: 'var(--dim)' });
-  if (vpnOn) { E.push({ a: 'pc', b: 'vpn', r: u, c: 'var(--vpn)' }); E.push({ a: 'vpn', b: 'net', r: u, c: 'var(--vpn)' }); }
-  if (mode === 'dual') { E.push({ a: 'pc', b: 'vpn2', r: [0, 0], c: 'var(--vpn)', off: true }); E.push({ a: 'vpn2', b: 'net', r: [0, 0], c: 'var(--vpn)', off: true }); }
+  // трафик — к узлу активного туннеля; к резервному — пустые связи
+  const actId = mode === 'dual' && kind === 'amnezia' ? 'vpn2' : 'vpn', idleId = actId === 'vpn' ? 'vpn2' : 'vpn';
+  if (vpnOn) { E.push({ a: 'pc', b: actId, r: u, c: 'var(--vpn)' }); E.push({ a: actId, b: 'net', r: u, c: 'var(--vpn)' }); }
+  if (mode === 'dual') { E.push({ a: 'pc', b: idleId, r: [0, 0], c: 'var(--vpn)', off: true }); E.push({ a: idleId, b: 'net', r: [0, 0], c: 'var(--vpn)', off: true }); }
   E.push({ a: 'pc', b: 'zp', r: byp, c: 'var(--zp)' });
   if (lanOn) E.push({ a: 'pc', b: 'lan', r: l, c: 'var(--lan)', near: true }); E.push({ a: 'zp', b: 'net', r: byp, c: 'var(--zp)' });
   return { N, E, key: N.map(n => n.id + (n.dim ? '-' : '+')).join(',') + '|' + vpnOn + '|' + kind + '|' + zOn };
@@ -146,7 +163,7 @@ function flowBuild(m) {
     const c = 10, sh = `M${n.x + c},${n.y} H${n.x + n.w} V${n.y + n.h - c} L${n.x + n.w - c},${n.y + n.h} H${n.x} V${n.y + c} Z`;
     const lc = n.dot >= 0 ? `var(--${['ok', 'warn', 'bad'][n.dot]})` : 'var(--none)';
     const ba = (n.acts || []).length ? FBS + 12 : 0, rx = n.x + n.w - 14 - ba;     // правый край текста и графика
-    const g = `<g id="fln-${n.id}"${n.dim ? ' opacity=".5"' : ''}><path d="${sh}" class="fl-node"${n.c ? ` style="stroke:${n.c}"` : ''}/>
+    const g = `<g id="fln-${n.id}"${n.dim ? ' opacity=".5"' : ''}>${n.tip ? `<title>${esc(n.tip)}</title>` : ''}<path d="${sh}" class="fl-node"${n.c ? ` style="stroke:${n.c}"` : ''}/>
       <path d="M${n.x},${n.y} h13 L${n.x},${n.y + 13} Z" fill="${n.c || 'var(--accent)'}"/>
       <rect x="${ba ? n.x + n.w - FBS - 8 - 6 - 18 : rx - 18}" y="${n.y + 10}" width="18" height="3" fill="${lc}"/>
       <text x="${n.x + 14}" y="${n.y + 21}" class="f1">${esc(clip(n.t1, ba ? n.w - 46 : n.w - 30, 9.2))}</text>
@@ -173,7 +190,7 @@ function flowUpdate(m) {
   m.E.forEach((e, i) => {
     for (const [lane, v] of [['u', e.r[1]], ['d', e.r[0]]]) {
       const k = i + lane, L = FL.lanes[k] || (FL.lanes[k] = { tp: svg.querySelector(`#fl${k}p`), tx: svg.querySelector(`#fl${k}t`), sp: 0, ph: Math.random() * FLP, op: .14, up: lane === 'u' });
-      L.tsp = e.off ? 0 : laneSpeed(v); L.top = L.tsp > 0 ? (lane === 'd' ? 1 : .85) : .14;
+      L.tsp = e.off || FLOW_OFF ? 0 : laneSpeed(v); L.top = L.tsp > 0 ? (lane === 'd' ? 1 : .85) : .14;
     }
   });
   if (!FL.raf) { FL.last = performance.now(); FL.raf = requestAnimationFrame(flowFrame); }
@@ -217,18 +234,22 @@ function flowMount() {
   flowUpdate(m);
 }
 function flowBlock() {
-  return `<div class="sec">Схема трафика — кто с кем соединён и сколько пропускает</div><div class="card flow"><div id="flowhost"></div>
+  return `<div class="sec">Схема трафика — кто с кем соединён и сколько пропускает</div><div class="card flow"><div id="flowoff" class="flowoff" style="display:none"></div><div id="flowhost"></div>
     <div class="legend" style="flex-wrap:wrap;margin-top:8px"><span><b style="background:var(--vpn)"></b>через VPN</span><span><b style="background:var(--zp)"></b>мимо VPN через zapret</span><span><b style="background:var(--accent)"></b>клиенты WG-Server</span><span><b style="background:var(--lan)"></b>локальная сеть (не интернет)</span><span><span class="ftx">&gt;&gt;&gt; ↑ отдача</span> · <span class="frx">&lt;&lt;&lt; ↓ загрузка</span> · чем быстрее стрелки, тем больше трафика · Мбит/с</span></div></div>`;
 }
 // живые скорости раз в секунду — только на главной и пока вкладка видна
 const SPK = {}, SPN = 180;
 async function liveTick() {
   if (page !== 'home' || document.hidden || !S) return;
-  try { LIVE = await api('/api/live'); if (!LIVE || !LIVE.rate) LIVE = null; } catch (e) { LIVE = null; }
+  try { LIVE = await api('/api/live'); if (!LIVE || !LIVE.rate) LIVE = null; LIVE_FAILS = 0; } catch (e) { LIVE = null; LIVE_FAILS++; }
+  if (LIVE && LIVE.t !== LIVE_T) { LIVE_T = LIVE.t; LIVE_AT = Date.now(); }
+  FLOW_OFF = flowOffline(); const ob = $('#flowoff');
+  if (ob) { ob.style.display = FLOW_OFF ? '' : 'none'; ob.textContent = FLOW_OFF ? '⚠ ' + FLOW_OFF + ' — скорости не показываются (данные не обновляются)' : ''; }
+  if (FL && FL.svg) FL.svg.classList.toggle('off', !!FLOW_OFF);
   if (!FL) return;
   flowMount();                                     // состав узлов изменился (клиент пропал/появился) — пересобрать
   flowBusyPaint();
-  for (const n of flowModel().N) { const h = SPK[n.id] || (SPK[n.id] = []); h.push(n.r ? [+n.r[0] || 0, +n.r[1] || 0] : [0, 0]); if (h.length > SPN) h.shift(); }
+  if (!FLOW_OFF) for (const n of flowModel().N) { const h = SPK[n.id] || (SPK[n.id] = []); h.push(n.r ? [+n.r[0] || 0, +n.r[1] || 0] : [0, 0]); if (h.length > SPN) h.shift(); }
   flowSpark();
 }
 // история скоростей из агента (он пишет её всегда) — при открытии главной графики сразу показывают последние 3 мин

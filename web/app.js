@@ -27,7 +27,7 @@ async function setCfg(key, value, label) {
   try { await api('/api/config', { key, value }); toast('Сохранено: ' + (label || key) + ' — агент применит на следующей проверке'); setTimeout(load, 2500); } catch (e) { toast(e.message, true); }
 }
 async function load() {
-  try { S = await api('/api/status'); } catch (e) { $('#agent').textContent = 'нет связи с агентом: ' + e.message; return; }
+  try { S = await api('/api/status'); } catch (e) { $('#agent').textContent = 'нет связи с агентом: ' + e.message; $('#adot').className = 'dot l2'; return; }
   head(); render();
   if (page === 'diag' && $('#mods')) { $('#mods').innerHTML = modsHtml(); $('#evts').innerHTML = evtsHtml(); }   // остальное на вкладке не перерисовывается
 }
@@ -107,7 +107,7 @@ function head() {
 // ---------------------------------------------------------------- страницы
 const P = {};
 P.home = () => `<div id="htop">${P.home.top()}</div><div class="hsplit"><div id="htiles">${P.home.tiles()}</div>
-  <div class="card hev"><div class="sec" style="margin-top:0">Последние предупреждения и ошибки</div><pre id="events" class="muted">${esc(P.home.ev || 'загрузка…')}</pre></div></div>
+  <div class="card hev"><div class="sec" style="margin-top:0">Последние предупреждения и ошибки</div><pre id="events" class="lgv">${P.home.evH || esc(P.home.ev || 'загрузка…')}</pre></div></div>
   <div id="hflow">${flowBlock()}</div>`;
 P.home.top = () => {
   const keys = [['inet', 'Интернет'], ['ultra', 'Туннель'], ['meduza', 'MeduzaVPN'], ['amnezia', 'AmneziaVPN'], ['wg', 'WG-Server'], ['ics', 'Раздача ICS'], ['zapret', 'zapret']];
@@ -138,7 +138,7 @@ P.home.tiles = () => {
   </div>
 `;
 };
-P.home.after = async () => { flowMount(); if (!P.home.histAt || Date.now() - P.home.histAt > 600000) { P.home.histAt = Date.now(); setTimeout(sparkHist, 2500); } if (Date.now() - (P.home.evAt || 0) < 60000) return; P.home.evAt = Date.now(); try { const t = await api('/api/logs?minutes=720&lines=3000'); const l = t.split('\n').filter(s => /\[(WARN|ERROR)\]/.test(s)).slice(-15).reverse(); P.home.ev = l.join('\n') || 'за 12 часов — ничего'; if ($('#events')) $('#events').textContent = P.home.ev; } catch (e) { } };
+P.home.after = async () => { flowMount(); if (!P.home.histAt || Date.now() - P.home.histAt > 600000) { P.home.histAt = Date.now(); setTimeout(sparkHist, 2500); } if (Date.now() - (P.home.evAt || 0) < 60000) return; P.home.evAt = Date.now(); try { const t = await api('/api/logs?minutes=720&lines=3000'); const l = t.split('\n').filter(s => /\[(WARN|ERROR)\]/.test(s)).slice(-15).reverse(); P.home.ev = l.join('\n') || 'за 12 часов — ничего'; P.home.evH = l.length ? logHtml(l) : esc(P.home.ev); if ($('#events')) $('#events').innerHTML = P.home.evH; } catch (e) { } };
 async function setZVer() {
   const v = $('#zver').value;
   if (!confirm(v ? `Установить zapret ${v} и закрепить эту версию?` : 'Вернуться к последней версии zapret (обновляется сама)?')) return;
@@ -478,10 +478,12 @@ async function runDiag() {
 function dlText(fn, text) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' })); a.download = fn; a.click(); }
 P.logs = () => `<div class="card row"><select id="lmin" onchange="loadLog()"><option value="60">за 1 час</option><option value="360">за 6 часов</option><option value="1440" selected>за сутки</option><option value="4320">за 3 дня</option></select>
   <select id="llev" onchange="showLog()"><option value="">все</option><option value="WARN|ERROR">предупреждения и ошибки</option><option value="ERROR">только ошибки</option></select>
-  <input type="text" id="lq" placeholder="поиск" oninput="showLog()">${btn('Обновить', 'loadLog()')}</div><textarea class="log" id="log" readonly></textarea>`;
+  <input type="text" id="lq" placeholder="поиск" oninput="showLog()">${btn('Обновить', 'loadLog()')}</div><pre class="log lgv" id="log"></pre>`;
 P.logs.after = () => { if (!logCache) loadLog(); else showLog(); };
 async function loadLog() { const m = +($('#lmin') || { value: 1440 }).value; try { logCache = await api(`/api/logs?minutes=${m}&days=${Math.ceil(m / 1440) + 1}&lines=6000`); showLog(); } catch (e) { toast(e.message, true); } }
-function showLog() { const lev = $('#llev').value, q = $('#lq').value.toLowerCase(); let l = logCache.split('\n'); if (lev) l = l.filter(s => new RegExp('\\[(' + lev + ')\\]').test(s)); if (q) l = l.filter(s => s.toLowerCase().includes(q)); const t = $('#log'); t.value = l.reverse().join('\n'); }
+function showLog() { const lev = $('#llev').value, q = $('#lq').value.toLowerCase(); let l = logCache.split('\n'); if (lev) l = l.filter(s => new RegExp('\\[(' + lev + ')\\]').test(s)); if (q) l = l.filter(s => s.toLowerCase().includes(q)); $('#log').innerHTML = logHtml(l.reverse()); }
+// строки журнала: [ERROR] — красным, [WARN] — жёлтым
+function logHtml(lines) { return lines.map(s => { const c = /\[ERROR\]/.test(s) ? 'le' : /\[WARN\]/.test(s) ? 'lw' : 'li'; return `<span class="${c}">${esc(s)}</span>`; }).join('\n'); }
 
 // ---------------------------------------------------------------- отрисовка
 function render(force) {

@@ -135,7 +135,7 @@ namespace VpnGuard
                     }
                     if (watched || (DateTime.UtcNow - liveAt).TotalSeconds >= 30) {
                         liveAt = DateTime.UtcNow;
-                        var o = new Dictionary<string, object> { { "t", now }, { "rate", ad }, { "cz", czRate }, { "peers", peers }, { "inet", InetState } };
+                        var o = new Dictionary<string, object> { { "t", now }, { "rate", ad }, { "cz", czRate }, { "peers", peers }, { "inet", InetLive() } };
                         File.WriteAllText(path + ".tmp", Json.Serialize(o), Encoding.UTF8); try { File.Copy(path + ".tmp", path, true); } catch { }
                     }
                     if ((DateTime.UtcNow - histAt).TotalSeconds >= (watched ? 2 : 30)) {

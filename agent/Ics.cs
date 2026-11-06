@@ -147,6 +147,10 @@ namespace VpnGuard
                 if (!WaitIcs(30)) throw new Exception("служба SharedAccess не запускается");
                 if (scope) { Log("ICS: перезапуск службы SharedAccess для нового адреса", "INFO"); IcsRestartService(); NetChanged(); }
                 if (ClearStaleIcs() > 0) { Log("ICS: перезапуск службы SharedAccess после очистки старых записей", "INFO"); IcsRestartService(); }
+                // публичная сторона раздачи меняется (другой туннель): включение поверх прежней почти всегда падает с 0x80040201 —
+                // сразу снять всё и перезапустить службу, затем включить обе стороны
+                var conns = IcsConnections();
+                if (conns.Any(c => c.Enabled && c.Type == 0 && c.Name != up)) { Log("ICS: сменился туннель — переключаю раздачу на '" + up + "' с полным сбросом", "INFO"); ResetAllIcs(); NetChanged(); }
                 foreach (var c in IcsConnections()) {
                     if (!c.Enabled) continue;
                     bool right = (c.Name == up && c.Type == 0) || (c.Name == wg && c.Type == 1);

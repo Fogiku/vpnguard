@@ -42,7 +42,7 @@ namespace VpnGuard
                 LastMode = mode;
             }
             if (mode == "amnezia" || mode == "dual") { try { PerfRun("VpnWatch/защита Amnezia", AvpnGuard); } catch (Exception e) { Log("Защита AmneziaVPN: " + e.Message, "WARN"); } }
-            if (InetDown() && mode != "zapret") { ProbeFailures = 0; DownTicks = 0; AwgProbeFailures = 0; AwgDownTicks = 0; DualFails = 0; return; }   // нет интернета у провайдера — туннель ни при чём
+            if (InetBad() && mode != "zapret") { ProbeFailures = 0; DownTicks = 0; AwgProbeFailures = 0; AwgDownTicks = 0; DualFails = 0; return; }   // нет интернета у провайдера — туннель ни при чём
             if (mode == "meduza") { MeduzaWatch(); AvpnDisable(false); }
             else if (mode == "amnezia") { if (Up(MzAdapterName())) { Log("MeduzaVPN: подключён, но выбран режим AmneziaVPN — отключаю", "WARN"); MzDisconnect(); } AmneziaWatch(); }
             else if (mode == "dual") DualWatch();

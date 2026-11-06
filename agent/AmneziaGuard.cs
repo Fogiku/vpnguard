@@ -30,8 +30,20 @@ namespace VpnGuard
         // подряд — гасим AmneziaVPN и смотрим, вернулось ли. Вернулось — виноват он: отключаем на amnezia.guardBlockMin минут
         // (в режиме AmneziaVPN — переключаем на MeduzaVPN). Не вернулось — дело не в нём, запускаем обратно.
         static DateTime AgBlockedUntil = DateTime.MinValue, AgTripAt = DateTime.MinValue, AgBaseAt = DateTime.MinValue;
-        static string AgTripWhy = ""; static int AgFails, AgTrips, AgPeersBase = -1; static bool AgGwBase;
+        static string AgTripWhy = ""; static DateTime AgArpLogAt = DateTime.MinValue; static int AgFails, AgTrips, AgPeersBase = -1; static bool AgGwBase;
         static bool AvpnBlocked() { return DateTime.Now < AgBlockedUntil; }
+        // ARP — ниже брандмауэра: Kill Switch AmneziaVPN режет IP (ping), но не ARP. Роутер не отвечает и на ARP — он сам недоступен (перезагрузка, завис)
+        [System.Runtime.InteropServices.DllImport("iphlpapi.dll", ExactSpelling = true)] static extern int SendARP(uint destIp, uint srcIp, byte[] mac, ref int macLen);
+        static bool AgArpOk(string gw)
+        {
+            if (string.IsNullOrEmpty(gw)) return true;
+            try {
+                Exe("arp.exe", "-d " + gw, 5);                               // свежий ответ, не из кэша
+                var b = IPAddress.Parse(gw).GetAddressBytes(); uint d = BitConverter.ToUInt32(b, 0);
+                for (int i = 0; i < 3; i++) { var mac = new byte[6]; int len = 6; if (SendARP(d, 0, mac, ref len) == 0 && len > 0) return true; Thread.Sleep(500); }
+                return false;
+            } catch { return true; }
+        }
         // сеть перестраивается (раздача ICS, подключение/отключение MeduzaVPN): роутер может не отвечать десятки секунд — защита это время не судит
         static DateTime NetChangeAt = DateTime.MinValue;
         static void NetChanged() { NetChangeAt = DateTime.Now; }
@@ -73,6 +85,10 @@ namespace VpnGuard
             string bad = !gwOk && (AgGwBase || AgBaseAt == DateTime.MinValue) ? "роутер " + gw + " не отвечает"
                 : AgPeersBase > 0 && peers == 0 ? "клиенты WG-Server пропали (было на связи " + AgPeersBase + ")" : null;
             if (bad == null) { AgFails = 0; return; }
+            if (bad.StartsWith("роутер") && !AgArpOk(gw)) {             // роутер недоступен совсем — не AmneziaVPN
+                if (AgFails > 0 || (DateTime.Now - AgArpLogAt).TotalMinutes >= 10) { AgArpLogAt = DateTime.Now; Log("Защита AmneziaVPN: роутер " + gw + " не отвечает даже на ARP — он сам недоступен (перезагрузка, завис), AmneziaVPN не виноват", "INFO"); }
+                AgFails = 0; return;
+            }
             AgFails++;
             Log("Защита AmneziaVPN: при поднятом туннеле " + bad + " (" + AgFails + "/2)", "WARN");
             if (AgFails < 2) return;
@@ -101,6 +117,7 @@ namespace VpnGuard
             Thread.Sleep(20000);
             bool again = byGw ? Wait(() => !AgGwOk(gw, 4), 45) : Wait(() => AgPeers() == 0, 200);
             if (again && byGw) again = !AgGwOk(gw);                      // и ещё раз — не случайный провал
+            if (again && byGw && !AgArpOk(gw)) { again = false; Log("Защита AmneziaVPN: при повторной проверке роутер не отвечает и на ARP — он сам недоступен", "INFO"); }
             if (!again) {
                 Log("Защита AmneziaVPN: ложная тревога — с AmneziaVPN локальная сеть в порядке, она пропадала по другой причине" + (NetSettling() || (DateTime.Now - NetChangeAt).TotalMinutes < 5 ? " (в это время перестраивалась сеть: раздача или переподключение MeduzaVPN)" : "") + ". AmneziaVPN не блокирую", "WARN");
                 AvpnStartedAt = DateTime.Now; return;

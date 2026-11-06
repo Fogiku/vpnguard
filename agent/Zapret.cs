@@ -134,10 +134,11 @@ namespace VpnGuard
             }
             if (!ZDirect() && ZB("routeIspVideo")) { try { UpdateIspVideo(false); } catch (Exception e) { Log("zapret: видеосерверы провайдера: " + e.Message, "WARN"); } }
             ZSyncRoutes(false);
-            if ((DateTime.Now - ZD("healthAt")).TotalMinutes >= ZI("healthCheckMin") && !InetDown()) {
+            if ((DateTime.Now - ZD("healthAt")).TotalMinutes >= ZI("healthCheckMin") && !InetBad()) {
                 var path = ZPhys();
                 if (path != null) {
                     var r = ZTest(path.Ip, ZTargets(), ZI("curlTimeoutSec"));
+                    if (InetBad()) { ZSave(); return; }               // пока проверяли, связь начала пропадать — результат ничего не говорит о zapret
                     int ok = r.Count(x => x.Ok);
                     ZSetD("healthAt", DateTime.Now); Z["healthOk"] = ok; Z["healthTotal"] = r.Count; Z["healthChecks"] = ZChecks(r);
                     int minOk = Math.Max(1, Math.Min(ZN("lastScore"), r.Count) - 1);

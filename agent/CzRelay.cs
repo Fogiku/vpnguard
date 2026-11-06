@@ -106,7 +106,7 @@ namespace VpnGuard
                     Interlocked.Increment(ref CzConnFail); Interlocked.Increment(ref cl.Fail);
                     // сразу после (пере)запуска winws обход DPI ещё не работает — такой сбой не повод уводить адрес в VPN
                     bool fresh = (DateTime.UtcNow - ZWinwsStartedAt).TotalSeconds < 30 || (DateTime.UtcNow - CzStartedAt).TotalSeconds < 30;
-                    if (!fresh && !InetDown() && !ispCache) {
+                    if (!fresh && !InetBad() && !ispCache) {
                         CzBypass[((ulong)cip << 32) | f.Dst] = DateTime.UtcNow.AddMinutes(CzBypassMin); Interlocked.Increment(ref CzBypassAdded);
                         if (host != null && !CzIsVideoHost(host) && lists != "в списках zapret") CzBadHost[host] = DateTime.UtcNow.AddMinutes(30);    // не из списков zapret: то же имя на других адресах — сразу через VPN
                     }

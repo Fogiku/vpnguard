@@ -165,7 +165,7 @@ namespace VpnGuard
         static void ZStartTest(string reason)
         {
             if (ZTestRunner() != null) return;
-            if (InetDown()) { Log("zapret: подбор стратегии отложен — нет интернета (" + reason + ")", "INFO"); return; }
+            if (InetBad()) { Log("zapret: подбор стратегии отложен — нет интернета или он нестабилен (" + reason + ")", "INFO"); return; }
             if (!ZInstalled()) { Log("zapret: не установлен — подбирать нечего", "WARN"); return; }
             Log("zapret: запускаю подбор стратегии (" + reason + ")", "INFO");
             ZRunTest();                                        // в потоке модуля zapret: winws и состояние zapret трогает только он
