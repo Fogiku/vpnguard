@@ -27,7 +27,18 @@ namespace VpnGuard
         static string DualActive = "", DualReason = ""; static int DualFails, DualSwitches; static DateTime DualSwitchAt = DateTime.MinValue, DualOkSince = DateTime.MinValue;
         static readonly List<KeyValuePair<int, string>> DualRoutes = new List<KeyValuePair<int, string>>();   // маршруты, добавленные агентом: индекс адаптера, префикс
         static string DualPrimary() { return CfgStr("vpn.primary", "meduza") == "amnezia" ? "amnezia" : "meduza"; }
-        static string DualAct() { return DualActive == "meduza" || DualActive == "amnezia" ? DualActive : DualPrimary(); }
+        static string DualAct()
+        {
+            if (DualActive.Length == 0 && !DualLoaded) {
+                DualLoaded = true;
+                try {
+                    var f = Path.Combine(DataDir, "dual-active.txt");
+                    if (!TestMode && File.Exists(f) && (DateTime.Now - File.GetLastWriteTime(f)).TotalHours < 12) { var k = File.ReadAllText(f).Trim(); if (k == "meduza" || k == "amnezia") DualActive = k; }
+                } catch { }
+            }
+            return DualActive == "meduza" || DualActive == "amnezia" ? DualActive : DualPrimary();
+        }
+        static bool DualLoaded;
         static string OtherKind(string k) { return k == "meduza" ? "amnezia" : "meduza"; }
         // какой VPN несёт трафик сейчас: meduza | amnezia | "" (без VPN)
         static string TunnelKind() { var m = Mode(); return m == "dual" ? DualAct() : m == "zapret" ? "" : m; }
@@ -52,7 +63,8 @@ namespace VpnGuard
         static void DualSwitchCore(string k, string reason)
         {
             string from = DualAct(); if (from == k) return;
-            DualActive = k; DualSwitchAt = DateTime.Now; DualSwitches++; DualReason = reason; DualFails = 0; DualOkSince = DateTime.MinValue;
+            DualActive = k; DualSwitchAt = DateTime.Now; DualSwitches++;
+            if (!TestMode) { try { File.WriteAllText(Path.Combine(DataDir, "dual-active.txt"), k); } catch { } } DualReason = reason; DualFails = 0; DualOkSince = DateTime.MinValue;
             Log("Два туннеля: трафик переключён " + ModeNames[from] + " → " + ModeNames[k] + " — " + reason, "WARN");
             try { DualSyncRoutes(); } catch (Exception e) { Log("Два туннеля: маршруты: " + e.Message, "ERROR"); }
             Emit("tunnel.switched", ModeNames[from] + " → " + ModeNames[k]); ProbeFailures = 0;
@@ -120,8 +132,15 @@ namespace VpnGuard
             for (int i = 0; i < 3; i++) { var r = ProbeAll(ip, ProbeHosts(), 3000); m.Ok += r.OkCount; m.Total += r.Total; all.AddRange(r.Ms); Thread.Sleep(300); }
             if (all.Count > 0) { all.Sort(); m.Ms = all[all.Count / 2]; }
             if (m.Ok > 0 && CfgBool("vpn.compareSpeed", true)) {
-                var r = Exe(Curl, "-s -o NUL -w \"%{speed_download}\" --interface " + ip + " --connect-timeout 5 -m 12 \"" + CfgStr("vpn.speedUrl", "https://speed.cloudflare.com/__down?bytes=4000000") + "\"", 16);
-                double bps; if (double.TryParse(r.Out.Trim().Trim('"').Replace(',', '.'), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out bps) && bps > 0) m.Mbit = Math.Round(bps * 8 / 1e6, 1);
+                var errs = new List<string>();
+                foreach (var url in new[] { CfgStr("vpn.speedUrl", "https://speed.cloudflare.com/__down?bytes=4000000"), "http://speedtest.tele2.net/1MB.zip", "https://proof.ovh.net/files/1Mb.dat" }.Distinct()) {
+                    var r = Exe(Curl, "-s -L -o NUL -A \"Mozilla/5.0\" -w \"%{speed_download} %{http_code} %{size_download}\" --interface " + ip + " --connect-timeout 5 -m 12 \"" + url + "\"", 16);
+                    var p = r.Out.Trim().Trim('"').Split(' '); double bps; long size;
+                    if (p.Length >= 3 && p[1] == "200" && long.TryParse(p[2], out size) && size >= 200000 &&
+                        double.TryParse(p[0].Replace(',', '.'), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out bps) && bps > 0) { m.Mbit = Math.Round(bps * 8 / 1e6, 1); break; }
+                    errs.Add(new Uri(url).Host + ": код curl " + r.Code + (p.Length >= 2 ? ", HTTP " + p[1] : "") + (p.Length >= 3 ? ", " + p[2] + " Б" : ""));
+                }
+                if (m.Mbit < 0) Log("Два туннеля: скорость через " + ModeNames[k] + " не измерилась (" + string.Join("; ", errs) + ")", "INFO");
             }
             return m;
         }
