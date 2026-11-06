@@ -674,6 +674,10 @@ namespace VpnGuard
                 case "/net": Text(ctx, 200, HideSecrets(DiagNet())); return;
                 case "/system": Text(ctx, 200, HideSecrets(DiagSystem())); return;
                 case "/files": RawJson(ctx, DiagFiles()); return;
+                case "/ics-test":
+                    // раздача: подробное состояние и пробное включение (меняет раздачу — только при разрешённых действиях)
+                    if (!CfgBool("remote.allowActions", false)) { Text(ctx, 403, "проба раздачи меняет её — нужны разрешённые действия"); return; }
+                    Text(ctx, 200, HideSecrets(PsTask("ics-test", (q["pub"] ?? "") + "|" + (q["priv"] ?? "wg_server"), 180))); return;
                 case "/bundle": Text(ctx, 200, HideSecrets(DiagBundle() + (q["diag"] == "1" ? "\n################ ДИАГНОСТИКА ################\n" + PsTask("diag", "", 300) : ""))); return;
                 default: Text(ctx, 404, "нет такого адреса. Список: /"); return;
             }

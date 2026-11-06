@@ -1,8 +1,8 @@
 {
-    "version":  "3.49.3",
-    "build":  "20261106-1455",
+    "version":  "3.49.4",
+    "build":  "20261106-1518",
     "notes":  "",
-    "date":  "2026-11-06T14:55:47.0947035+03:00",
+    "date":  "2026-11-06T15:18:50.0766951+03:00",
     "files":  [
                   {
                       "path":  "agent/Amnezia.cs",
@@ -226,8 +226,8 @@
                   },
                   {
                       "path":  "Remote.ps1",
-                      "sha256":  "42fab194897b075bffec1cf9e99d3dd251481866dad631affdd2cbaa1df4e22a",
-                      "size":  5510
+                      "sha256":  "a0b104c70fcf373bf1f9997754e8c70045cb85f150e89bb13a9aa021d7c29569",
+                      "size":  10497
                   },
                   {
                       "path":  "RemoteDiag.ps1",
@@ -266,13 +266,13 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "0de7fcff4b142622f78ab323d4ae0117c93aa7b2f2e72617c7b8d129e0b2313a",
+                      "sha256":  "69e9908542ac7135f550a6bc1ba07b6adc321859764a370ac3f846a919de9ea8",
                       "size":  31379
                   },
                   {
                       "path":  "Web.cs",
-                      "sha256":  "c8252ea08abfc95d7edef2f402f5273728eefc365471b838e7295859ceb6c2bc",
-                      "size":  58291
+                      "sha256":  "0aeeff99c87632c070662ebe4ed6c822acfaa06d32d1e32979fdb3225eefc7eb",
+                      "size":  58864
                   },
                   {
                       "path":  "web/app.js",
