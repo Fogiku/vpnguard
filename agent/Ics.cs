@@ -82,13 +82,22 @@ namespace VpnGuard
             }
             return false;
         }
-        // записи раздачи удалённых адаптеров (старый ULTRA) мешают включить раздачу на новом (0x80040201)
+        // записи раздачи удалённых адаптеров (старый ULTRA) мешают включить раздачу на новом (0x80040201): в WMI (HNet_ConnectionProperties)
+        // и в реестре (SharedAccess\Parameters: SharingPublicInterface / SharingPrivateInterface — GUID адаптеров раздачи)
         static int ClearStaleIcs()
         {
             int n = 0;
             var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             try { foreach (var ni in NetworkInterface.GetAllNetworkInterfaces()) present.Add(ni.Id.Trim('{', '}')); } catch { }
             try { using (var ms = new ManagementObjectSearcher(@"root\StandardCimv2", "SELECT InterfaceGuid FROM MSFT_NetAdapter")) foreach (ManagementObject o in ms.Get()) present.Add(Convert.ToString(o["InterfaceGuid"]).Trim('{', '}')); } catch { }
+            try {
+                using (var k = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters", true)) {
+                    if (k != null) foreach (var v in new[] { "SharingPublicInterface", "SharingPrivateInterface" }) {
+                        var g = Convert.ToString(k.GetValue(v) ?? "").Trim().Trim('{', '}');
+                        if (g.Length > 0 && !present.Contains(g)) { k.DeleteValue(v, false); n++; Log("ICS: в реестре раздачи (" + v + ") остался удалённый адаптер {" + g.ToUpper() + "} — убираю", "WARN"); }
+                    }
+                }
+            } catch (Exception e) { Log("ICS: реестр раздачи: " + e.Message, "WARN"); }
             var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             try { using (var ms = new ManagementObjectSearcher(@"root\Microsoft\HomeNet", "SELECT * FROM HNet_Connection")) foreach (ManagementObject o in ms.Get()) names[Convert.ToString(o["Guid"]).Trim('{', '}')] = Convert.ToString(o["Name"]); } catch { }
             try {
@@ -121,8 +130,8 @@ namespace VpnGuard
                 catch (Exception e) {
                     last = e.InnerException ?? e; var s = Svc("SharedAccess");
                     Log("ICS: '" + name + "' попытка " + t + "/3: " + last.Message + " (служба: " + (s == null ? "?" : s.Status.ToString()) + ")", "WARN");
-                    if (t == 1) { WaitIcsReady(15); Thread.Sleep(3000); }                 // обычно служба просто ещё не готова
-                    else if (t == 2) ResetAllIcs();
+                    if (t == 1) { WaitIcsReady(15); Thread.Sleep(5000); }                 // обычно служба просто ещё не готова
+                    else if (t == 2) { ResetAllIcs(); Thread.Sleep(8000); }               // всё снять, перезапустить службу и дать ей освоиться
                     Thread.Sleep(2000);
                 }
             }
@@ -160,8 +169,8 @@ namespace VpnGuard
                 if (!conns.Any(c => c.Name == up)) { Log("ICS: адаптера '" + up + "' пока нет в списке подключений — повторю через несколько секунд", "WARN"); ForceIcs = true; LastIcsApply = DateTime.Now.AddSeconds(-15); return; }
                 // публичная сторона раздачи ещё не на этом туннеле (сменился туннель или прежний адаптер удалён): включение поверх прежней
                 // почти всегда падает с 0x80040201 и стоит клиентам лишних 30 с — сразу снять всё, очистить записи, перезапустить службу и включить обе стороны
-                if (!conns.Any(c => c.Enabled && c.Type == 0 && c.Name == up)) { Log("ICS: раздача переходит на '" + up + "' — полный сброс и включение заново", "INFO"); ResetAllIcs(); NetChanged(); }
-                else if (ClearStaleIcs() > 0) { Log("ICS: перезапуск службы SharedAccess после очистки старых записей", "INFO"); IcsRestartService(); }
+                // старые записи (удалённый адаптер) — очистить; перезапуск службы — только если они были (после него раздаче нужно время)
+                if (ClearStaleIcs() > 0) { Log("ICS: перезапуск службы SharedAccess после очистки старых записей", "INFO"); IcsRestartService(); NetChanged(); }
                 foreach (var c in IcsConnections()) {
                     if (!c.Enabled) continue;
                     bool right = (c.Name == up && c.Type == 0) || (c.Name == wg && c.Type == 1);
