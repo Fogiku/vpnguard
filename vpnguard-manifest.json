@@ -1,8 +1,8 @@
 {
-    "version":  "3.50.0",
-    "build":  "20261106-1529",
+    "version":  "3.50.1",
+    "build":  "20261106-1553",
     "notes":  "",
-    "date":  "2026-11-06T15:29:55.8319551+03:00",
+    "date":  "2026-11-06T15:53:34.1156466+03:00",
     "files":  [
                   {
                       "path":  "agent/Amnezia.cs",
@@ -21,8 +21,8 @@
                   },
                   {
                       "path":  "agent/ClientZapret.cs",
-                      "sha256":  "74f40436fbdea53472786be4ba6909efbad9e81078122941f08ce630633b9813",
-                      "size":  38748
+                      "sha256":  "0055507efe97868c5fe10d5bcc6267edf2f8952097f12a62ef1b35ca715ba5c2",
+                      "size":  39267
                   },
                   {
                       "path":  "agent/Commands.cs",
@@ -156,8 +156,8 @@
                   },
                   {
                       "path":  "agent/Zapret.cs",
-                      "sha256":  "e49f70fa43ad96046caeec696dec5af763bcd0f809e07cbca428666d4641e6e6",
-                      "size":  24529
+                      "sha256":  "21618a27feabc3dc45a3201b71879c7e02ab7871f2863a807331f3fbc10b4e02",
+                      "size":  24694
                   },
                   {
                       "path":  "agent/ZInstall.cs",
@@ -166,8 +166,8 @@
                   },
                   {
                       "path":  "agent/ZRoutes.cs",
-                      "sha256":  "32c176bfd1b9a5f7d98c7c9dcdffeabfadb74334b67a131bd837ffbbb28661d7",
-                      "size":  12490
+                      "sha256":  "1a57236844001249848a5fefc8208239f7b8dbe704a9af80c4151929a05e4d15",
+                      "size":  13246
                   },
                   {
                       "path":  "agent/ZTest.cs",
@@ -266,7 +266,7 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "22858dd39d04e7538a0c2cbcc02801df62ed952de184a741d4a04bcd2f5406a0",
+                      "sha256":  "08ebd5ca471fd63c0a907e2b19d6b69c15f8bd8a2e8c69a45dd963b83e258247",
                       "size":  31379
                   },
                   {

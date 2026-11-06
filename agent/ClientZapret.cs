@@ -80,12 +80,13 @@ namespace VpnGuard
         static long[] CzRates() { return RateOf("cz", Interlocked.Read(ref CzTcpDown), Interlocked.Read(ref CzTcpUp)); }
         static bool CzWanted() { return CfgBool("wg.clientZapret", false); }
 
+        // адреса zapret для ретранслятора: с VPN — маршруты мимо VPN, без VPN — тот же список без маршрутов
+        static List<string> CzPrefixes() { return ZDirect() ? ZArr("relaySet").Select(x => Convert.ToString(x)).ToList() : ZRoutes().Select(r => JS(r, "p")).ToList(); }
         static void ClientZapretWatch()
         {
             string why = null;
             if (!CzWanted()) why = "off";
-            else if (ZDirect()) why = "в режиме «без VPN» клиенты и так идут напрямую — нужен режим с VPN";
-            else if (ZRoutes().Count == 0) why = "zapret не включён (нет маршрутов мимо VPN)";
+            else if (CzPrefixes().Count == 0) why = ZDirect() ? "список адресов zapret ещё не готов" : "zapret не включён (нет маршрутов мимо VPN)";
             string wgIp = WgIp(); var phys = why == null ? ZPhys() : null;
             if (why == null && wgIp == null) why = "адаптер " + WgIf() + " без адреса";
             if (why == null && phys == null) why = "нет физического выхода в интернет";
@@ -155,7 +156,7 @@ namespace VpnGuard
             new Thread(() => CzBatchLoop(hn, () => CzNet, CzOnNet)) { IsBackground = true, Name = "cz-net" }.Start();
             if (hb != WdInvalid) new Thread(() => CzBatchLoop(hb, () => CzBlk, CzOnBlk)) { IsBackground = true, Name = "cz-blk" }.Start();
             CzAcceptLoop(relay);
-            Log("zapret для клиентов WG-Server: включён — трафик клиентов к адресам zapret (" + ZRoutes().Count + " маршрутов) идёт через zapret этого ПК, остальное — через VPN (" + phys.Alias + ", ретранслятор " + wgIp + ":" + CzRelayPort + ")", "WARN");
+            Log("zapret для клиентов WG-Server: включён — трафик клиентов к адресам zapret (" + CzPrefixes().Count + (ZDirect() ? " адресов) идёт через zapret этого ПК, остальное — напрямую" : " маршрутов) идёт через zapret этого ПК, остальное — через VPN") + " (" + phys.Alias + ", ретранслятор " + wgIp + ":" + CzRelayPort + ")", "WARN");
         }
         static void CzStop()
         {
@@ -180,7 +181,8 @@ namespace VpnGuard
         // адреса zapret — те же, что в маршрутах мимо VPN; слить в упорядоченные диапазоны
         static void CzUpdateSet()
         {
-            var routes = ZRoutes(); var resc = RescueActive; var key = routes.Count + "|" + ZS("lastRouteRefresh") + "|" + resc.Length;
+            var routes = CzPrefixes().Select(p => new Dictionary<string, object> { { "p", p } }).ToList(); var resc = RescueActive;
+            var key = ZDirect() + "|" + routes.Count + "|" + ZS("lastRouteRefresh") + "|" + ZS("relaySetAt") + "|" + resc.Length;
             if (key == CzSetKey) return;
             var rs = new List<KeyValuePair<uint, uint>>(); var rset = new HashSet<uint>();
             foreach (var p in resc) { try { rset.Add(IpH(p.Split('/')[0])); } catch { } }

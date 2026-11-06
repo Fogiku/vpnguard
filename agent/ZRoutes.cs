@@ -133,7 +133,15 @@ namespace VpnGuard
         }
         static void ZSyncRoutes(bool refresh)
         {
-            if (ZDirect()) { if (ZRoutes().Count > 0) ZRemoveRoutes(); return; }      // без VPN всё и так напрямую
+            if (ZDirect()) {                                                          // без VPN всё и так напрямую — маршруты не нужны
+                if (ZRoutes().Count > 0) ZRemoveRoutes();
+                // но трафик клиентов WG-Server, который Windows просто пересылает (раздача), zapret (winws) не обрабатывает — его ведёт ретранслятор;
+                // ему нужен тот же список адресов YouTube/Discord — без маршрутов
+                if (CzWanted() && (ZArr("relaySet").Count == 0 || refresh || (DateTime.Now - ZD("relaySetAt")).TotalMinutes >= 30) && !InetBad()) {
+                    Z["relaySet"] = ZPrefixes(); ZSetD("relaySetAt", DateTime.Now); ZSave();
+                }
+                return;
+            }
             var path = ZPhys(); if (path == null) { Log("zapret: нет физического выхода в интернет — маршруты не ставлю", "WARN"); return; }
             var routes = ZRoutes();
             if (routes.Count > 0 && routes.Any(r => JS(r, "i") != path.IfIndex.ToString() || JS(r, "g") != path.Gateway)) {

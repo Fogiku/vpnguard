@@ -136,11 +136,12 @@ namespace VpnGuard
             try { ZRescueApply(); } catch (Exception e) { Log("zapret: аварийный DNS: " + e.Message, "WARN"); }
             ZSyncRoutes(false);
             // сеть перестраивается (переключение туннеля, раздача, переподключение MeduzaVPN) или все туннели лежат — проверка zapret сейчас ничего не скажет
-            if ((DateTime.Now - ZD("healthAt")).TotalMinutes >= ZI("healthCheckMin") && !InetBad() && !NetSettling() && !ZRescueWant) {
+            if ((DateTime.Now - ZD("healthAt")).TotalMinutes >= ZI("healthCheckMin") && !InetBad() && ((!NetSettling() && !ZRescueWant) || ZCheckForced)) {
+                bool forced = ZCheckForced; ZCheckForced = false;
                 var path = ZPhys();
                 if (path != null) {
                     var r = ZTest(path.Ip, ZTargets(), ZI("curlTimeoutSec"));
-                    if (InetBad() || NetSettling()) { ZSave(); return; }   // пока проверяли, связь пропадала или сеть перестраивалась — результат ничего не говорит о zapret
+                    if (InetBad() || (NetSettling() && !forced)) { ZSave(); return; }   // пока проверяли, связь пропадала или сеть перестраивалась — результат ничего не говорит о zapret
                     int ok = r.Count(x => x.Ok);
                     ZSetD("healthAt", DateTime.Now); Z["healthOk"] = ok; Z["healthTotal"] = r.Count; Z["healthChecks"] = ZChecks(r);
                     int minOk = Math.Max(1, Math.Min(ZN("lastScore"), r.Count) - 1);
@@ -164,6 +165,7 @@ namespace VpnGuard
             }
             ZSave();
         }
+        static volatile bool ZCheckForced;
         static void ZReload()
         {
             if (!ZOn()) { Log("zapret: списки сохранены — применятся при включении zapret", "INFO"); return; }
@@ -180,7 +182,7 @@ namespace VpnGuard
             switch (a) {
                 case "zapret-on": ZSetEnabled(true); return true;
                 case "zapret-off": ZSetEnabled(false); return true;
-                case "zapret-check": ZSetD("healthAt", DateTime.MinValue); return true;
+                case "zapret-check": ZSetD("healthAt", DateTime.MinValue); ZCheckForced = true; return true;
                 case "zapret-releases": ZReleases(true); return true;
                 case "zapret-update": ZUpdate(true); return true;
                 case "zapret-reload": ZReload(); return true;
