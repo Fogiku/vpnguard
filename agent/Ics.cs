@@ -190,7 +190,7 @@ namespace VpnGuard
                 if (ClearStaleIcs(IcsFails > 0) > 0) { Log("ICS: перезапуск службы SharedAccess после очистки старых записей", "INFO"); IcsRestartService(); NetChanged(); }
                 // раздача уходит с одного адаптера на другой (смена туннеля или режима): включение поверх прежней почти всегда падает
                 // дважды с 0x80040201 — сразу снять всё и перезапустить службу (так быстрее на 20–30 с)
-                else if (conns.Any(c => c.Enabled && c.Type == 0 && c.Name != up)) { Log("ICS: раздача переходит на '" + up + "' — снимаю прежнюю и перезапускаю службу", "INFO"); ResetAllIcs(); Thread.Sleep(3000); NetChanged(); }
+                if (conns.Any(c => c.Enabled && c.Type == 0 && c.Name != up)) { Log("ICS: раздача переходит на '" + up + "' — снимаю прежнюю и перезапускаю службу", "INFO"); ResetAllIcs(); Thread.Sleep(3000); NetChanged(); }
                 foreach (var c in IcsConnections()) {
                     if (!c.Enabled) continue;
                     bool right = (c.Name == up && c.Type == 0) || (c.Name == wg && c.Type == 1);

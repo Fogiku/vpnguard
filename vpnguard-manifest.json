@@ -1,8 +1,8 @@
 {
-    "version":  "3.51.1",
-    "build":  "20261106-1705",
+    "version":  "3.51.2",
+    "build":  "20261106-1717",
     "notes":  "",
-    "date":  "2026-11-06T17:05:41.7784551+03:00",
+    "date":  "2026-11-06T17:17:45.9156972+03:00",
     "files":  [
                   {
                       "path":  "agent/Amnezia.cs",
@@ -71,13 +71,13 @@
                   },
                   {
                       "path":  "agent/Ics.cs",
-                      "sha256":  "ec9f52538153578cccfef183bc27e8ab10904abf05e2dee02530e1359eb22bd6",
-                      "size":  23025
+                      "sha256":  "062387aa6428bb5611716e1e81159f72417c7e594987d67598319c6a68aa2c44",
+                      "size":  23020
                   },
                   {
                       "path":  "agent/Inet.cs",
-                      "sha256":  "3e37a6c90cce50773a96ec9baa5bed3490bda6e9ac3cfedbfb847526eeca146d",
-                      "size":  13394
+                      "sha256":  "8f5865c8b5128b5ec32467254622d87567ebd065556f11820d6a46f07686e4b4",
+                      "size":  13445
                   },
                   {
                       "path":  "agent/Lan.cs",
@@ -91,8 +91,8 @@
                   },
                   {
                       "path":  "agent/Mode.cs",
-                      "sha256":  "96778823f8c7b34ab165701304db0ecd246b0104f087e0fa97f81fb54c6df8d1",
-                      "size":  3782
+                      "sha256":  "c6d46e1653752812d1355259bab6ce58632af4a4003dee13ead4af59679ed5cc",
+                      "size":  4952
                   },
                   {
                       "path":  "agent/Modules.cs",
@@ -266,7 +266,7 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "75710dc27a0e7ec5132fdd2c9a47383a21bbe479e9de99aad70140c08900850e",
+                      "sha256":  "515f3289b5af96d543e2bb1ee9fd0592ac3c7d89cf58d74bcfbfd1a6faa06e3f",
                       "size":  31379
                   },
                   {

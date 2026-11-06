@@ -54,7 +54,7 @@ namespace VpnGuard
         // интернет плохой (нет, нестабилен или только что был провал): проверять VPN, zapret, перебирать протоколы и переключать туннели бессмысленно
         static bool InetBad() { return InetState == 1 || InetFails > 0 || InetUnstable(); }
         static int InetLive() { return InetState == 1 ? 1 : InetDirectDown ? 3 : InetUnstable() ? 2 : InetState; }   // для схемы: 0 есть, 1 нет, 2 нестабилен, 3 только через VPN
-        static int InetDirectFails;
+        static int InetDirectFails; static DateTime InetVpnKickAt = DateTime.MinValue;
         static string[] InetHosts() { return CfgList("net.probeHosts", new[] { "77.88.8.8:53", "8.8.8.8:53", "1.1.1.1:443", "87.250.250.242:443" }); }
         static string InetHostName(string h)
         {

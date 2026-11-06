@@ -42,7 +42,17 @@ namespace VpnGuard
                 LastMode = mode;
             }
             if (mode == "amnezia" || mode == "dual") { try { PerfRun("VpnWatch/защита Amnezia", AvpnGuard); } catch (Exception e) { Log("Защита AmneziaVPN: " + e.Message, "WARN"); } }
-            if (InetBad() && mode != "zapret") { ProbeFailures = 0; DownTicks = 0; AwgProbeFailures = 0; AwgDownTicks = 0; DualFails = 0; return; }   // нет интернета у провайдера — туннель ни при чём
+            if (InetBad() && mode != "zapret") {   // нет интернета у провайдера — туннель ни при чём
+                // но VPN может оказаться единственным путём наружу (провайдер режет только прямой трафик): выбранный VPN не поднят —
+                // запустить и подключить (раз в 3 мин, без перезапусков по кругу)
+                bool mzNeed = (mode == "meduza" || mode == "dual") && !Up(MzAdapterName()), awNeed = (mode == "amnezia" || mode == "dual") && !Up(KindAdapter("amnezia"));
+                if ((mzNeed || awNeed) && (DateTime.Now - InetVpnKickAt).TotalMinutes >= 3) {
+                    InetVpnKickAt = DateTime.Now;
+                    Log("Интернета напрямую нет, а " + (mzNeed && awNeed ? "VPN" : mzNeed ? "MeduzaVPN" : "AmneziaVPN") + " не подключён — подключаю: через VPN связь может работать", "INFO");
+                    try { if (mode == "meduza") MeduzaWatch(); else if (mode == "amnezia") AmneziaWatch(); else DualWatch(); } catch (Exception e) { Log("VPN: " + e.Message, "WARN"); }
+                }
+                ProbeFailures = 0; DownTicks = 0; AwgProbeFailures = 0; AwgDownTicks = 0; DualFails = 0; return;
+            }
             if (mode == "meduza") { MeduzaWatch(); AvpnDisable(false); }
             else if (mode == "amnezia") { if (Up(MzAdapterName())) { Log("MeduzaVPN: подключён, но выбран режим AmneziaVPN — отключаю", "WARN"); MzDisconnect(); } AmneziaWatch(); }
             else if (mode == "dual") DualWatch();
