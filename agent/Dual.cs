@@ -110,6 +110,47 @@ namespace VpnGuard
             }
         }
         // во время восстановления одного туннеля (перебор протоколов, перезапуск) — если он не работает, а другой работает, трафик сразу на другой
+        // ---- сравнение туннелей: отклик и надёжность (несколько проверок узлов) и скорость загрузки через каждый
+        class TunMeas { public string Kind; public int Ok, Total; public long Ms = -1; public double Mbit = -1; }
+        static bool DualNeedCmp = true; static DateTime DualBothOkSince = DateTime.MinValue; static Dictionary<string, object> DualCmp;
+        static TunMeas MeasureKind(string k)
+        {
+            var m = new TunMeas { Kind = k }; var n = KindAdapter(k); string ip = !string.IsNullOrEmpty(n) && Up(n) ? Ipv4(n) : null; if (ip == null) return m;
+            var all = new List<long>();
+            for (int i = 0; i < 3; i++) { var r = ProbeAll(ip, ProbeHosts(), 3000); m.Ok += r.OkCount; m.Total += r.Total; all.AddRange(r.Ms); Thread.Sleep(300); }
+            if (all.Count > 0) { all.Sort(); m.Ms = all[all.Count / 2]; }
+            if (m.Ok > 0 && CfgBool("vpn.compareSpeed", true)) {
+                var r = Exe(Curl, "-s -o NUL -w \"%{speed_download}\" --interface " + ip + " --connect-timeout 5 -m 12 \"" + CfgStr("vpn.speedUrl", "https://speed.cloudflare.com/__down?bytes=4000000") + "\"", 16);
+                double bps; if (double.TryParse(r.Out.Trim().Trim('"').Replace(',', '.'), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out bps) && bps > 0) m.Mbit = Math.Round(bps * 8 / 1e6, 1);
+            }
+            return m;
+        }
+        static string MeasTxt(TunMeas m) { return ModeNames[m.Kind] + ": " + (m.Total == 0 ? "не подключён" : "ответило " + m.Ok + "/" + m.Total + (m.Ms >= 0 ? ", отклик " + m.Ms + " мс" : "") + (m.Mbit > 0 ? ", " + m.Mbit + " Мбит/с" : "")); }
+        // кто лучше: заметно надёжнее → заметно быстрее → заметно меньше отклик; примерно одинаковы — остаться на текущем (переключение стоит клиентам секунд связи)
+        static string DualPick(TunMeas a, TunMeas b, string cur, out string why)
+        {
+            double ra = a.Total > 0 ? (double)a.Ok / a.Total : 0, rb = b.Total > 0 ? (double)b.Ok / b.Total : 0;
+            if (Math.Abs(ra - rb) >= 0.2) { var w = ra > rb ? a : b; why = ModeNames[w.Kind] + " надёжнее (ответило " + Math.Round(100 * Math.Max(ra, rb)) + "% проверок против " + Math.Round(100 * Math.Min(ra, rb)) + "%)"; return w.Kind; }
+            if (a.Mbit > 0 && b.Mbit > 0) {
+                var f = a.Mbit >= b.Mbit ? a : b; var s = f == a ? b : a;
+                if (f.Mbit >= 1.5 * s.Mbit && f.Mbit - s.Mbit >= 3) { why = ModeNames[f.Kind] + " быстрее (" + f.Mbit + " против " + s.Mbit + " Мбит/с)"; return f.Kind; }
+            }
+            if (a.Ms > 0 && b.Ms > 0) {
+                var f = a.Ms <= b.Ms ? a : b; var s = f == a ? b : a;
+                if (s.Ms >= 1.5 * f.Ms && s.Ms - f.Ms >= 40) { why = ModeNames[f.Kind] + " отзывчивее (отклик " + f.Ms + " против " + s.Ms + " мс)"; return f.Kind; }
+            }
+            why = "туннели примерно одинаковы — остаюсь на " + ModeNames[cur]; return cur;
+        }
+        static void DualCompare(string reason)
+        {
+            if (Mode() != "dual") return;
+            SetActivity("сравниваю туннели");
+            var a = MeasureKind("meduza"); var b = MeasureKind("amnezia"); string cur = DualAct(), why; var win = DualPick(a, b, cur, out why);
+            DualCmp = new Dictionary<string, object> { { "at", DateTime.Now.ToString("o") }, { "reason", reason }, { "winner", win }, { "why", why },
+                { "results", new object[] { a, b }.Cast<TunMeas>().Select(m => (object)new Dictionary<string, object> { { "kind", m.Kind }, { "name", ModeNames[m.Kind] }, { "ok", m.Ok }, { "total", m.Total }, { "ms", m.Ms }, { "mbit", m.Mbit } }).ToArray() } };
+            Log("Два туннеля: сравнение (" + reason + ") — " + MeasTxt(a) + "; " + MeasTxt(b) + " → " + why, "INFO");
+            if (win != cur && KindOk(win)) DualSwitch(win, "лучше по сравнению: " + why);
+        }
         static void DualMidCheck()
         {
             if (Mode() != "dual" || !CfgBool("vpn.dualHot", true)) return;
@@ -147,13 +188,13 @@ namespace VpnGuard
                 }
             }
             else { KindWatch(act); StopKind(OtherKind(act)); }
-            // 3. основной снова работает N минут — вернуть трафик на него
-            string prim = DualPrimary(); int fb = CfgInt("vpn.failbackMin", 5);
-            if (hot && DualAct() != prim && fb > 0) {
-                bool pOk = KindTraffic(prim) == true && Up(KindAdapter(prim));
-                if (!pOk) DualOkSince = DateTime.MinValue;
-                else if (DualOkSince == DateTime.MinValue) DualOkSince = DateTime.Now;
-                else if ((DateTime.Now - DualOkSince).TotalMinutes >= fb) DualSwitch(prim, "основной туннель работает уже " + fb + " мин");
+            // 3. был сбой (или агент только запустился), а теперь оба туннеля работают N минут — сравнить их и пустить трафик через лучший
+            int fb = CfgInt("vpn.failbackMin", 3);
+            if (hot && fb > 0) {
+                bool both = new[] { "meduza", "amnezia" }.All(k => KindTraffic(k) == true && Up(KindAdapter(k)));
+                if (!both) { DualBothOkSince = DateTime.MinValue; DualNeedCmp = true; }
+                else if (DualBothOkSince == DateTime.MinValue) DualBothOkSince = DateTime.Now;
+                else if (DualNeedCmp && (DateTime.Now - DualBothOkSince).TotalMinutes >= fb && !InetBad()) { DualNeedCmp = false; DualCompare("оба туннеля работают " + fb + " мин после сбоя"); }
             }
             try { DualSyncRoutes(); } catch { }
         }
@@ -184,16 +225,17 @@ namespace VpnGuard
             var dualKv = mode != "dual" ? new List<object[]>() : new List<object[]> {
                 Kv("Трафик идёт через", ModeNames[kind] + (kind == DualPrimary() ? " (основной)" : " (резервный)")),
                 Kv("Переключений", DualSwitches + (DualSwitches > 0 ? " · последнее " + When(DualSwitchAt) + ": " + DualReason : "")),
-                Kv("Резерв", (CfgBool("vpn.dualHot", true) ? "горячий — оба туннеля подняты" : "холодный — поднимается при сбое") + (CfgInt("vpn.failbackMin", 5) > 0 ? ", возврат на основной через " + CfgInt("vpn.failbackMin", 5) + " мин" : "")) };
+                Kv("Резерв", (CfgBool("vpn.dualHot", true) ? "горячий — оба туннеля подняты" : "холодный — поднимается при сбое") + (CfgInt("vpn.failbackMin", 3) > 0 ? ", после сбоя — сравнение через " + CfgInt("vpn.failbackMin", 3) + " мин и выбор лучшего" : "")),
+                Kv("Сравнение туннелей", DualCmp == null ? "ещё не было" : When(DateTime.Parse(Convert.ToString(DualCmp["at"]))) + ": " + DualCmp["why"]) };
             var ultra = Comp(uL, uS, new[] { mode == "zapret" ? "Выход: " + PhysAlias() + " · YouTube/Discord — через zapret" : "",
                 sb != null ? "Резерв: " + sb["name"] + " — " + sb["state"] + " · переключений: " + DualSwitches : "",
                 "Адаптер: " + (ma != null ? tun + " · " + ma.OperationalStatus + ", IP " + uIp : mode == "zapret" ? "не нужен" : "отсутствует"),
                 "Трафик: " + trTxt + ", проверка " + When(tTrAt), "Сбоев проверки подряд: " + tFail, tWhy.Length > 0 ? "Последняя причина: " + tWhy : "" }, new List<object[]> {
-                Kv("Режим", ModeNames[mode]), dualKv.Count > 0 ? dualKv[0] : null, dualKv.Count > 1 ? dualKv[1] : null, dualKv.Count > 2 ? dualKv[2] : null, Kv("Адаптер", ma != null ? tun + " · " + ma.OperationalStatus + " · " + ma.Description : "отсутствует"), Kv("IP", uIp ?? "—"),
+                Kv("Режим", ModeNames[mode]), dualKv.Count > 0 ? dualKv[0] : null, dualKv.Count > 1 ? dualKv[1] : null, dualKv.Count > 2 ? dualKv[2] : null, dualKv.Count > 3 ? dualKv[3] : null, Kv("Адаптер", ma != null ? tun + " · " + ma.OperationalStatus + " · " + ma.Description : "отсутствует"), Kv("IP", uIp ?? "—"),
                 Kv("Скорость канала", ma != null ? (ma.Speed / 1000000) + " Мбит/с" : "—"), Kv("Подключён с", UltraUpSince == DateTime.MinValue ? "—" : When(UltraUpSince)),
                 Kv("Протокол", kind == "meduza" ? MzProtocol() : amz ? "выбран в AmneziaVPN" : "—"), Kv("Проверка трафика", trTxt + " · " + When(tTrAt)), Kv("Узлы проверки", string.Join(", ", ProbeHosts())),
                 Kv("Сбоев проверки подряд", tFail + " (переподключение после " + CfgInt("meduza.probeFailuresBeforeReconnect", 3) + ")"), Kv("Переподключений с запуска агента", ReconnectCount) });
-            ultra["title"] = mode == "zapret" ? "Без VPN (только zapret)" : "Туннель: " + kindTitle; ultra["kind"] = kind; ultra["standby"] = sb; ultra["switches"] = DualSwitches;
+            ultra["title"] = mode == "zapret" ? "Без VPN (только zapret)" : "Туннель: " + kindTitle; ultra["kind"] = kind; ultra["standby"] = sb; ultra["switches"] = DualSwitches; ultra["compare"] = DualCmp;
             return ultra;
         }
     }

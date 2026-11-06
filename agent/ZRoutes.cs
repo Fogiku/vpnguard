@@ -90,9 +90,38 @@ namespace VpnGuard
             foreach (var r in ZRoutes()) { var p = JS(r, "p"); if (p.EndsWith("/32")) add(p); }   // старые /32 оставляем (IP у CDN меняются)
             foreach (var k in seen.Keys.ToList()) { long t; if (!long.TryParse(Convert.ToString(seen[k]), out t) || nowT - t > keepT) seen.Remove(k); else add(k); }   // и найденные за неделю
             Z["prefixSeen"] = seen;
-            var list = order.Where(p => !Regex.IsMatch(p, @"^(8\.8\.8\.|8\.8\.4\.)")).ToList();    // публичный DNS остаётся в VPN
+            var rescue = new HashSet<string>(ZArr("rescue").Select(x => Convert.ToString(x))); foreach (var p in rescue) add(p);
+            var list = order.Where(p => rescue.Contains(p) || !Regex.IsMatch(p, @"^(8\.8\.8\.|8\.8\.4\.)")).ToList();    // публичный DNS остаётся в VPN (кроме аварийного)
             int max = ZI("maxRoutes"); if (max > 0 && list.Count > max) list = list.Take(max).ToList();
             return list;
+        }
+        // аварийный DNS: все туннели VPN не работают — DNS-серверы клиентов и ПК временно напрямую (маршруты мимо VPN; ретранслятор клиентов
+        // берёт их из того же списка), иначе YouTube и Discord не открываются и через zapret. Заработал туннель — обратно в VPN
+        static string[] RescueDns()
+        {
+            var l = new List<string> { "8.8.8.8", "1.1.1.1", "8.8.4.4", "77.88.8.8" };
+            foreach (var x in CfgStr("wg.clientDns", "").Split(',')) { var t = x.Trim(); if (Regex.IsMatch(t, @"^\d+\.\d+\.\d+\.\d+$")) l.Add(t); }
+            return l.Distinct().Where(ip => !Regex.IsMatch(ip, @"^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)")).Select(ip => ip + "/32").ToArray();
+        }
+        static void ZRescueApply()
+        {
+            var cur = ZArr("rescue").Select(x => Convert.ToString(x)).ToList(); bool want = ZRescueWant;
+            if (want == (cur.Count > 0)) return;
+            var path = ZPhys(); if (path == null) return;
+            var routes = ZRoutes();
+            if (want) {
+                var add = RescueDns(); var have = new HashSet<string>(routes.Select(r => JS(r, "p")));
+                int ifm = Math.Max(0, IfMetric(path.IfIndex));
+                foreach (var p in add) if (!have.Contains(p)) { RouteAdd(p, path.IfIndex, path.Gateway, ifm); routes.Add(new Dictionary<string, object> { { "p", p }, { "i", path.IfIndex }, { "g", path.Gateway } }); }
+                Z["rescue"] = add.ToList(); Z["routes"] = routes;
+                Log("Туннели VPN не работают — DNS (" + string.Join(", ", add.Select(p => p.Replace("/32", ""))) + ") временно напрямую, чтобы YouTube и Discord открывались через zapret (и у клиентов WG-Server)", "WARN");
+            } else {
+                var rs = new HashSet<string>(cur);
+                foreach (var r in routes.Where(r => rs.Contains(JS(r, "p"))).ToList()) { int i; int.TryParse(JS(r, "i"), out i); RouteDel(JS(r, "p"), i, JS(r, "g")); routes.Remove(r); }
+                Z["rescue"] = new object[0]; Z["routes"] = routes;
+                Log("Туннель VPN снова работает — DNS снова через VPN", "INFO");
+            }
+            ZSave();
         }
         static void ZRemoveRoutes()
         {

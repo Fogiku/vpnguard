@@ -152,8 +152,14 @@ P.ultra = () => {
   const u = comp('ultra'), dual = S.vpn && S.vpn.mode === 'dual';
   return compHead('ultra', btn('Переподключить', "cmd('reconnect','переподключение туннеля')") + (dual ? btn('Переключить на другой', "cmd('dual-switch','переключение туннеля')") : '')) +
     (dual ? `<div class="card row"><span class="muted">Основной туннель:</span><select onchange="setCfg('vpn.primary',this.value,'основной туннель')">${[['meduza', 'MeduzaVPN'], ['amnezia', 'AmneziaVPN']].map(([v, t]) => `<option value="${v}"${S.vpn.primary === v ? ' selected' : ''}>${t}</option>`).join('')}</select></div>` : '') +
-    timeline('ultra') + '<div class="sec">Подробности</div><div class="card">' + kvTable(u) + '</div>' + chartBlock('u', 'Скорость — последние 2 часа');
+    (dual ? cmpCard(u.compare) : '') + timeline('ultra') + '<div class="sec">Подробности</div><div class="card">' + kvTable(u) + '</div>' + chartBlock('u', 'Скорость — последние 2 часа');
 };
+// сравнение туннелей (режим «два туннеля»): после сбоя, когда оба снова работают, агент сам выбирает лучший; можно запустить вручную
+function cmpCard(c) {
+  const rows = c && c.results ? c.results.map(r => `<tr class="${r.kind === c.winner ? 'cur' : ''}"><td>${esc(r.name)}${r.kind === c.winner ? ' <b class="c0">— лучше</b>' : ''}</td><td>${r.total ? r.ok + ' из ' + r.total : 'не подключён'}</td><td>${r.ms >= 0 ? r.ms + ' мс' : '—'}</td><td>${r.mbit > 0 ? r.mbit + ' Мбит/с' : '—'}</td></tr>`).join('') : '';
+  return `<div class="sec">Сравнение туннелей</div><div class="card">${c ? `<p>${esc(c.why)}</p><table><tr><th>Туннель</th><th>Проверки узлов</th><th>Отклик</th><th>Скорость загрузки</th></tr>${rows}</table><p class="sub">${esc(new Date(c.at).toLocaleString())} · ${esc(c.reason)}</p>` : '<p class="muted">Сравнения ещё не было. Оно запускается само, когда после сбоя оба туннеля снова работают несколько минут.</p>'}
+    <div class="row" style="margin-top:8px">${btn('Сравнить туннели сейчас', "cmd('dual-compare','сравнение туннелей','Проверить оба туннеля (около 30 с, скачивается по 4 МБ через каждый) и пустить трафик через лучший?')")}</div></div>`;
+}
 P.meduza = () => {
   const m = comp('meduza') || {}, cat = m.catalog, pt = m.protoTest;
   const protos = (cat && cat.protocols) || [], cur = m.protocol || 'ultra';

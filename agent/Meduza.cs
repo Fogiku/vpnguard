@@ -163,7 +163,10 @@ namespace VpnGuard
             var tested = new List<string>();
             if (ProtoTest != null && ProtoTest.ContainsKey("results")) foreach (Dictionary<string, object> r in ((IEnumerable)ProtoTest["results"]).Cast<Dictionary<string, object>>().Where(r => r["ok"] is bool && (bool)r["ok"]).OrderBy(r => Convert.ToInt32(r["pingMs"]))) tested.Add(Convert.ToString(r["protocol"]));
             var same = new[] { cur, "meduza-" + cur, Regex.Replace(cur, "^meduza-", "") };
-            var order = tested.Concat(MzProtocols()).Concat(new[] { chosen }).Where(p => p.Length > 0 && !same.Contains(p)).Distinct().ToList();
+            // протокол wireguard у MeduzaVPN включает блокировку всего трафика мимо своего туннеля (kill switch WireGuard): на время попытки
+            // пропадают резервный туннель, маршруты zapret и локальная сеть — при автоматическом переборе его не пробуем (meduza.protoFallbackSkip)
+            var skip = new HashSet<string>(CfgList("meduza.protoFallbackSkip", new[] { "wireguard" }).Select(x => x.Trim().ToLowerInvariant()));
+            var order = tested.Concat(MzProtocols()).Concat(new[] { chosen }).Where(p => p.Length > 0 && !same.Contains(p) && !skip.Contains(p.ToLowerInvariant()) && !skip.Contains(Regex.Replace(p.ToLowerInvariant(), "^meduza-", ""))).Distinct().ToList();
             if (order.Count == 0) { Log("MeduzaVPN: " + reason + " — других протоколов нет (список не получен), пробовать нечего", "WARN"); return false; }
             Log("MeduzaVPN: " + reason + ", протокол " + cur + " — пробую другие: " + string.Join(", ", order), "WARN");
             string prev = MzOverride; int noConn = 0, maxNoConn = Math.Max(2, CfgInt("meduza.fallbackMaxTimeouts", 3));

@@ -51,6 +51,17 @@ namespace VpnGuard
                 St(hasJob && got == "данные" && b.TickNow, "события: подписчик получил событие (в своей очереди) и проверит себя");
                 lock (EventLog) St(EventLog.Any(e => e.Name == "test.event" && e.To.Contains("Тест Б")), "события: событие записано в журнал событий с получателями");
 
+                // ---- сравнение туннелей: примерно одинаковы — остаться; заметно надёжнее / быстрее / отзывчивее — перейти
+                string cwhy;
+                var ma = new TunMeas { Kind = "meduza", Ok = 12, Total = 12, Ms = 40, Mbit = 50 }; var mb = new TunMeas { Kind = "amnezia", Ok = 12, Total = 12, Ms = 45, Mbit = 48 };
+                bool cp1 = DualPick(ma, mb, "amnezia", out cwhy) == "amnezia";
+                mb.Ok = 6; bool cp2 = DualPick(ma, mb, "amnezia", out cwhy) == "meduza";
+                mb.Ok = 12; mb.Mbit = 10; bool cp3 = DualPick(ma, mb, "amnezia", out cwhy) == "meduza";
+                mb.Mbit = 48; mb.Ms = 200; bool cp4 = DualPick(ma, mb, "amnezia", out cwhy) == "meduza";
+                ma.Total = 0; ma.Ok = 0; mb.Ms = 45; bool cp5 = DualPick(ma, mb, "meduza", out cwhy) == "amnezia";
+                St(cp1 && cp2 && cp3 && cp4 && cp5, "два туннеля: выбор лучшего (одинаковы — остаться; надёжнее, быстрее, отзывчивее — перейти)");
+                St(RescueDns().Contains("8.8.8.8/32") && RescueDns().Contains("1.1.1.1/32") && !RescueDns().Any(x => x.StartsWith("192.168.") || x.StartsWith("10.")), "туннели не работают: аварийный DNS — только публичные адреса");
+
                 // ---- интернет нестабилен (провалы за последнюю минуту) — проверки служб и переключения приостановлены; без провалов — нет
                 InetState = 0; lock (InetHist) { InetHist.Clear(); foreach (var x in new[] { true, false, true, false, true }) InetHist.Enqueue(x); }
                 bool unst = InetBad() && InetLive() == 2;

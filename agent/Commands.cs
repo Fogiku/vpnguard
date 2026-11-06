@@ -37,6 +37,7 @@ namespace VpnGuard
                 case "meduza-test": MzProtoTest(); break;
                 case "meduza-catalog": MzCatalog(true); break;
                 case "meduza-proto-reset": if (MzOverride.Length > 0) { MzReturnAt = DateTime.MinValue; MzProtoReturn(); } break;
+                case "dual-compare": if (Mode() == "dual") DualCompare("вручную из окна"); else Log("Сравнение туннелей — только в режиме «два туннеля»", "WARN"); break;
                 case "dual-switch":
                     if (Mode() == "dual") { string to = OtherKind(DualAct()); if (KindOk(to)) DualSwitch(to, "вручную из окна"); else Log("Два туннеля: " + ModeNames[to] + " сейчас не пропускает трафик — не переключаю", "WARN"); }
                     break;

@@ -139,18 +139,21 @@ namespace VpnGuard
             bool ipOk = addr == null || wgIp == addr || (DateTime.Now - LastIpFix).TotalMinutes < 10;
             if (st.Ok && ipOk && !ForceIcs) return;
             if (!ForceIcs && (DateTime.Now - LastIcsApply).TotalSeconds < 20) return;
-            ForceIcs = false; LastIcsApply = DateTime.Now;
+            ForceIcs = false; LastIcsApply = DateTime.Now; var icsT0 = DateTime.Now;
             Log("ICS: настраиваю общий доступ '" + up + "' -> '" + wg + "'", "INFO"); SetActivity("настраиваю раздачу"); NetChanged();
             try {
                 if (StartMode("SharedAccess") != "Auto") SetAutoStart("SharedAccess");
                 bool scope = IcsScope(addr);
                 if (!WaitIcs(30)) throw new Exception("служба SharedAccess не запускается");
                 if (scope) { Log("ICS: перезапуск службы SharedAccess для нового адреса", "INFO"); IcsRestartService(); NetChanged(); }
-                if (ClearStaleIcs() > 0) { Log("ICS: перезапуск службы SharedAccess после очистки старых записей", "INFO"); IcsRestartService(); }
-                // публичная сторона раздачи меняется (другой туннель): включение поверх прежней почти всегда падает с 0x80040201 —
-                // сразу снять всё и перезапустить службу, затем включить обе стороны
+                // туннель только что поднялся: адаптера может ещё не быть в списке раздачи, или он меняет имя (wintun → AmneziaVPN) — подождать до 20 с
                 var conns = IcsConnections();
-                if (conns.Any(c => c.Enabled && c.Type == 0 && c.Name != up)) { Log("ICS: сменился туннель — переключаю раздачу на '" + up + "' с полным сбросом", "INFO"); ResetAllIcs(); NetChanged(); }
+                for (int w = 0; w < 20 && !conns.Any(c => c.Name == up); w++) { Thread.Sleep(1000); var nu = UplinkName(); if (!string.IsNullOrEmpty(nu)) up = nu; conns = IcsConnections(); }
+                if (!conns.Any(c => c.Name == up)) { Log("ICS: адаптера '" + up + "' пока нет в списке подключений — повторю через несколько секунд", "WARN"); ForceIcs = true; LastIcsApply = DateTime.Now.AddSeconds(-15); return; }
+                // публичная сторона раздачи ещё не на этом туннеле (сменился туннель или прежний адаптер удалён): включение поверх прежней
+                // почти всегда падает с 0x80040201 и стоит клиентам лишних 30 с — сразу снять всё, очистить записи, перезапустить службу и включить обе стороны
+                if (!conns.Any(c => c.Enabled && c.Type == 0 && c.Name == up)) { Log("ICS: раздача переходит на '" + up + "' — полный сброс и включение заново", "INFO"); ResetAllIcs(); NetChanged(); }
+                else if (ClearStaleIcs() > 0) { Log("ICS: перезапуск службы SharedAccess после очистки старых записей", "INFO"); IcsRestartService(); }
                 foreach (var c in IcsConnections()) {
                     if (!c.Enabled) continue;
                     bool right = (c.Name == up && c.Type == 0) || (c.Name == wg && c.Type == 1);
@@ -162,7 +165,7 @@ namespace VpnGuard
                     LastIpFix = DateTime.Now; Log("ICS: адрес wg_server стал " + wgIp + ", ожидается " + addr + " — перезапуск туннеля", "WARN");
                     SvcRestart(CfgStr("wg.serviceName", "WireGuardTunnel$wg_server"));
                 }
-                if (IcsStatus().Ok) { NetChanged(); Log("ICS: общий доступ включён", "INFO"); LastIcsFix = DateTime.Now; IcsFixCount++; }
+                if (IcsStatus().Ok) { NetChanged(); Log("ICS: общий доступ включён (за " + (int)(DateTime.Now - icsT0).TotalSeconds + " с)", "INFO"); LastIcsFix = DateTime.Now; IcsFixCount++; }
                 else Log("ICS: после настройки состояние не подтвердилось, повторю", "WARN");
             } catch (Exception e) { Log("ICS: ошибка: " + (e.InnerException ?? e).Message, "ERROR"); }
         }

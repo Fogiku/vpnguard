@@ -107,11 +107,11 @@
   },
   {
    "key": "vpn.failbackMin",
-   "default": 5,
+   "default": 3,
    "type": "int:0:1440",
    "group": "Режим",
-   "title": "Два туннеля: вернуться на основной через, мин",
-   "desc": "0 — не возвращать"
+   "title": "Два туннеля: после сбоя сравнить туннели через, мин",
+   "desc": "оба снова работают N минут — сравнение (надёжность, скорость, отклик) и переход на лучший; 0 — не сравнивать"
   },
   {
    "key": "vpn.stopInactive",
@@ -511,6 +511,20 @@
   {
    "key": "wg.clientKeepalive",
    "default": 25
+  },
+  {
+   "key": "vpn.compareSpeed",
+   "default": true
+  },
+  {
+   "key": "vpn.speedUrl",
+   "default": "https://speed.cloudflare.com/__down?bytes=4000000"
+  },
+  {
+   "key": "meduza.protoFallbackSkip",
+   "default": [
+    "wireguard"
+   ]
   },
   {
    "key": "wg.configPath",
