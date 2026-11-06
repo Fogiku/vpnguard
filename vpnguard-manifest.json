@@ -1,8 +1,8 @@
 {
-    "version":  "3.49.2",
-    "build":  "20261106-1447",
+    "version":  "3.49.3",
+    "build":  "20261106-1455",
     "notes":  "",
-    "date":  "2026-11-06T14:47:22.2218282+03:00",
+    "date":  "2026-11-06T14:55:47.0947035+03:00",
     "files":  [
                   {
                       "path":  "agent/Amnezia.cs",
@@ -71,8 +71,8 @@
                   },
                   {
                       "path":  "agent/Ics.cs",
-                      "sha256":  "73a02c950fb225862a408e27061ba75861fba43d4f8a9a9c759fbf17faf71bcb",
-                      "size":  18640
+                      "sha256":  "baa2def0de2357b119b42fdf4972776d36ba791af7341a1bbf46a4a590d93c3f",
+                      "size":  20312
                   },
                   {
                       "path":  "agent/Inet.cs",
@@ -126,8 +126,8 @@
                   },
                   {
                       "path":  "agent/Traffic.cs",
-                      "sha256":  "53de873bc9a1e94eec954381d1211ec8a90340191fae10d2697932106ce35af4",
-                      "size":  12637
+                      "sha256":  "d0f15d8fcd03d6c4c717a0aa2ab1dda815a98cbdb5d4a3b93c6967838b65ef4d",
+                      "size":  13401
                   },
                   {
                       "path":  "agent/TunnelDiag.cs",
@@ -266,7 +266,7 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "5985e3c40fc214884348a28d24d2dd8732323416260be5d1505792b141e15fcf",
+                      "sha256":  "0de7fcff4b142622f78ab323d4ae0117c93aa7b2f2e72617c7b8d129e0b2313a",
                       "size":  31379
                   },
                   {
@@ -281,8 +281,8 @@
                   },
                   {
                       "path":  "web/flow.js",
-                      "sha256":  "12f3b57f8079876f176a962e5e3d3c36ae160e7da8ac29c75be9862da2b23a00",
-                      "size":  26723
+                      "sha256":  "1487d8b1caad7f6aa2eda4c2ac40df48c8fdf91b6808e44505963cac62bef1b2",
+                      "size":  26724
                   },
                   {
                       "path":  "web/index.html",

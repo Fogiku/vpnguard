@@ -10,7 +10,7 @@ const FLP = 11;                                  // шаг стрелок: си�
 let FLOW_OFF = '', LIVE_T = 0, LIVE_AT = 0, LIVE_FAILS = 0;
 function flowOffline() {
   if (LIVE_FAILS >= 2) return 'нет связи с веб-интерфейсом VpnGuard';
-  if (LIVE_AT && Date.now() - LIVE_AT > 8000) return 'агент не присылает данные ' + Math.round((Date.now() - LIVE_AT) / 1000) + ' с';
+  if (LIVE_AT && Date.now() - LIVE_AT > 12000) return 'агент не присылает данные ' + Math.round((Date.now() - LIVE_AT) / 1000) + ' с';
   return '';
 }
 function flowModel() {

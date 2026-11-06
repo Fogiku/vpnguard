@@ -169,6 +169,7 @@ namespace VpnGuard
                 if (!conns.Any(c => c.Name == up)) { Log("ICS: адаптера '" + up + "' пока нет в списке подключений — повторю через несколько секунд", "WARN"); ForceIcs = true; LastIcsApply = DateTime.Now.AddSeconds(-15); return; }
                 // публичная сторона раздачи ещё не на этом туннеле (сменился туннель или прежний адаптер удалён): включение поверх прежней
                 // почти всегда падает с 0x80040201 и стоит клиентам лишних 30 с — сразу снять всё, очистить записи, перезапустить службу и включить обе стороны
+                if (IcsFails > 0) IcsKick(IcsFails);
                 // старые записи (удалённый адаптер) — очистить; перезапуск службы — только если они были (после него раздаче нужно время)
                 if (ClearStaleIcs() > 0) { Log("ICS: перезапуск службы SharedAccess после очистки старых записей", "INFO"); IcsRestartService(); NetChanged(); }
                 foreach (var c in IcsConnections()) {
@@ -184,11 +185,24 @@ namespace VpnGuard
                 }
                 if (IcsStatus().Ok) { NetChanged(); Log("ICS: общий доступ включён (за " + (int)(DateTime.Now - icsT0).TotalSeconds + " с)", "INFO"); LastIcsFix = DateTime.Now; IcsFixCount++; }
                 else Log("ICS: после настройки состояние не подтвердилось, повторю", "WARN");
-                if (IcsStatus().Ok) { IcsFails = 0; IcsFailUp = ""; }
+                if (IcsStatus().Ok) { if (IcsFails > 0) Log("ICS: раздача восстановлена после " + IcsFails + " неудач", "INFO"); IcsFails = 0; IcsFailUp = ""; }
             } catch (Exception e) {
-                IcsFails++; IcsFailUp = up; int wait = Math.Min(300, 30 * (1 << Math.Min(4, IcsFails - 1))); IcsRetryAt = DateTime.Now.AddSeconds(wait);
+                IcsFails++; IcsFailUp = up; int wait = Math.Min(120, 30 * (1 << Math.Min(2, IcsFails - 1))); IcsRetryAt = DateTime.Now.AddSeconds(wait);
                 Log("ICS: ошибка: " + (e.InnerException ?? e).Message + " — повторю через " + (wait >= 60 ? wait / 60 + " мин" : wait + " с"), "ERROR");
             }
+        }
+        // 0x80040201 «событие не смогло вызвать ни одного из абонентов»: раздача оповещает другие службы через систему событий COM+,
+        // а та «залипла» (бывает после пропажи сети). Перезапуск самой SharedAccess не помогает — перезапускать тех, кого она оповещает
+        static void IcsKick(int level)
+        {
+            string[] svcs = level <= 1 ? new[] { "Netman" } : level == 2 ? new[] { "SENS", "EventSystem" } : new[] { "RasMan", "Netman" };
+            Log("ICS: раздача не включается (попытка восстановления " + level + ") — перезапускаю службы " + string.Join(", ", svcs) + " и SharedAccess", "WARN");
+            SetActivity("восстанавливаю службы раздачи");
+            Exe("net.exe", "stop SharedAccess /y", 60);
+            foreach (var s in svcs) Exe("net.exe", "stop " + s + " /y", 60);
+            foreach (var s in svcs.Reverse()) Exe("net.exe", "start " + s, 60);
+            foreach (var s in new[] { "EventSystem", "SENS", "Netman", "RasMan" }) { var sv = Svc(s); if (sv != null && sv.Status == ServiceControllerStatus.Stopped && StartMode(s) != "Disabled") Exe("net.exe", "start " + s, 60); }
+            WaitIcs(30); WaitIcsReady(20); Thread.Sleep(5000); NetChanged();
         }
         static int IcsFails; static string IcsFailUp = ""; static DateTime IcsRetryAt = DateTime.MinValue, IcsWaitLogAt = DateTime.MinValue;
 

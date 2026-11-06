@@ -95,11 +95,13 @@ namespace VpnGuard
                 try {
                     Thread.Sleep(1000); tick++;
                     var names = LiveNames; if (names == null) continue;
+                    var lsw = System.Diagnostics.Stopwatch.StartNew(); long tNics = 0, tWg = 0;
                     bool watched = false; try { watched = File.Exists(want) && (DateTime.UtcNow - File.GetLastWriteTimeUtc(want)).TotalSeconds < 15; } catch { }
                     // адаптеры: перечень — раз в 10 с или когда нужного нет; счётчики берутся у запомненного объекта (это быстро)
                     if ((DateTime.UtcNow - nicsAt).TotalSeconds >= 10 || names.Values.Any(n => n.Length > 0 && !nicByName.ContainsKey(n))) {
                         nicByName.Clear(); nicsAt = DateTime.UtcNow;
                         try { foreach (var n in NetworkInterface.GetAllNetworkInterfaces()) nicByName[n.Name] = n; } catch { }
+                        tNics = lsw.ElapsedMilliseconds;
                     }
                     var ad = new Dictionary<string, object>();
                     foreach (var kv in names) {
@@ -111,7 +113,7 @@ namespace VpnGuard
                     if (peers == null || (DateTime.UtcNow - peersAt).TotalSeconds >= (watched ? 2 : 10)) {
                         peersAt = DateTime.UtcNow;
                         var pr = new Dictionary<string, object>();
-                        var dump = WgDump();
+                        long w0 = lsw.ElapsedMilliseconds; var dump = WgDump(); tWg = lsw.ElapsedMilliseconds - w0;
                         if (dump != null) foreach (var l in dump.Skip(1)) {
                             var p = l.Split('\t'); if (p.Length < 7) continue;
                             string ip = Regex.Replace(p[3].Split(',')[0], @"/\d+$", ""); long rx, tx; long.TryParse(p[5], out rx); long.TryParse(p[6], out tx);
@@ -122,6 +124,10 @@ namespace VpnGuard
                         peers = pr;
                     }
                     var czRate = RateOf("live:cz", Interlocked.Read(ref CzTcpDown), Interlocked.Read(ref CzTcpUp));
+                    if (lsw.ElapsedMilliseconds > 5000 && (DateTime.UtcNow - LiveSlowLogAt).TotalMinutes >= 10) {
+                        LiveSlowLogAt = DateTime.UtcNow;
+                        Log("Живые скорости: проход занял " + lsw.ElapsedMilliseconds / 1000 + " с (перечень адаптеров " + tNics + " мс, wg.exe " + tWg + " мс) — схема в это время не обновлялась", "WARN");
+                    }
                     long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                     // история: точка в секунду
                     lock (LiveH) {
@@ -146,6 +152,7 @@ namespace VpnGuard
                 } catch { Thread.Sleep(5000); }
             }
         }
+        static DateTime LiveSlowLogAt = DateTime.MinValue;
         // скорость (байт/с) по приращению счётчиков между снимками состояния
         static readonly Dictionary<string, KeyValuePair<DateTime, long[]>> RatePrev = new Dictionary<string, KeyValuePair<DateTime, long[]>>();
         static long[] RateOf(string key, params long[] vals)
