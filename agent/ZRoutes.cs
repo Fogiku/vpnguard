@@ -133,6 +133,11 @@ namespace VpnGuard
         }
         static void ZSyncRoutes(bool refresh)
         {
+            // напрямую провайдер не пропускает — маршруты мимо VPN ведут в никуда: снять, YouTube/Discord через VPN; вернётся — поставить заново
+            if (InetDirectDown && !ZDirect()) {
+                if (ZRoutes().Count > 0) { ZRemoveRoutes(); Log("zapret: напрямую провайдер не пропускает — маршруты мимо VPN сняты, YouTube и Discord через VPN, пока прямой путь не вернётся", "WARN"); }
+                return;
+            }
             if (ZDirect()) {                                                          // без VPN всё и так напрямую — маршруты не нужны
                 if (ZRoutes().Count > 0) ZRemoveRoutes();
                 // но трафик клиентов WG-Server, который Windows просто пересылает (раздача), zapret (winws) не обрабатывает — его ведёт ретранслятор;

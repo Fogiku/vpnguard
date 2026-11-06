@@ -58,11 +58,11 @@ function flowModel() {
   if (lanOn) N.push({ id: 'lan', col: 3, dot: 0, c: 'var(--lan)', t1: 'Локальная сеть', r: l, t3: (lanI.net || 'домашняя сеть') + ' · не интернет' });
   const zc = comp('zapret'), zOn = !!(zc && zc.enabled);
   N.push({ id: 'zp', col: 3, href: '#zapret', dot: lvl(comp('zapret')), acts: vpnOn ? [zOn ? { t: '⏻', bad: 1, tip: 'Выключить zapret', fn: "cmd('zapret-off','выключение zapret')" } : { t: '⏻', tip: 'Включить zapret', fn: "cmd('zapret-on','включение zapret','Включить zapret? YouTube и Discord этого ПК пойдут мимо VPN.')" }] : [], c: 'var(--zp)', t1: 'zapret', r: byp, t3: vpnOn ? 'YouTube, Discord …' : '' });
-  const ni = comp('inet') || {}, nOk = off ? -1 : LIVE && LIVE.inet !== undefined ? LIVE.inet : ni.level === 0 ? 0 : ni.level === 2 ? 1 : ni.unstable ? 2 : -1;
+  const ni = comp('inet') || {}, nOk = off ? -1 : LIVE && LIVE.inet !== undefined ? LIVE.inet : ni.directDown ? 3 : ni.level === 0 ? 0 : ni.level === 2 ? 1 : ni.unstable ? 2 : -1;
   const gwT = ni.gw ? `роутер ${ni.gw}` + (ni.gwMs >= 0 ? ` ${ni.gwMs} мс` : ' не отвечает') : '';
   const pingT = ni.ms > 0 ? `${ni.ms} мс до ${ni.hostName || ni.host}` : ni.ms === 0 ? 'есть через туннель' : '';
-  N.push({ id: 'net', col: 4, dot: nOk === 0 ? 0 : nOk === 1 ? 2 : nOk === 2 ? 1 : -1, dim: nOk === 1, t1: nOk === 1 ? 'Интернет · НЕТ СВЯЗИ' : nOk === 2 ? 'Интернет · НЕСТАБИЛЕН' : 'Интернет', r: p,
-    t3: nOk === 1 ? (ni.details && ni.details[0]) || 'провайдер не отвечает' : nOk === 2 ? `провалов ${ni.loss || 0} из 12 за минуту` : pingT || (nm.p || 'физический адаптер'),
+  N.push({ id: 'net', col: 4, dot: nOk === 0 ? 0 : nOk === 1 ? 2 : nOk === 2 || nOk === 3 ? 1 : -1, dim: nOk === 1, t1: nOk === 1 ? 'Интернет · НЕТ СВЯЗИ' : nOk === 2 ? 'Интернет · НЕСТАБИЛЕН' : nOk === 3 ? 'Интернет · ТОЛЬКО VPN' : 'Интернет', r: p,
+    t3: nOk === 1 ? (ni.details && ni.details[0]) || 'провайдер не отвечает' : nOk === 3 ? 'напрямую не пропускает · zapret ждёт' : nOk === 2 ? `провалов ${ni.loss || 0} из 12 за минуту` : pingT || (nm.p || 'физический адаптер'),
     tip: `Проверка интернета: TCP-подключение напрямую через ${nm.p || 'физический адаптер'} (мимо VPN) к ${(ni.kv || []).filter(x => x[0] === 'Узлы проверки').map(x => x[1])[0] || 'публичным узлам'}.\n` +
       (pingT ? `Последний отклик: ${pingT}${ni.host && ni.host !== 'через туннель' ? ' (' + ni.host + ')' : ''}, ответило ${ni.okHosts} из ${ni.hosts}.\n` : '') + (gwT ? gwT.replace(/^р/, 'Р') + ' (ping).' : '') });
   E.push({ a: 'wg', b: 'pc', r: [w[1], w[0]], c: 'var(--accent)' });

@@ -136,7 +136,7 @@ namespace VpnGuard
             try { ZRescueApply(); } catch (Exception e) { Log("zapret: аварийный DNS: " + e.Message, "WARN"); }
             ZSyncRoutes(false);
             // сеть перестраивается (переключение туннеля, раздача, переподключение MeduzaVPN) или все туннели лежат — проверка zapret сейчас ничего не скажет
-            if ((DateTime.Now - ZD("healthAt")).TotalMinutes >= ZI("healthCheckMin") && !InetBad() && ((!NetSettling() && !ZRescueWant) || ZCheckForced)) {
+            if ((DateTime.Now - ZD("healthAt")).TotalMinutes >= ZI("healthCheckMin") && !InetBad() && !InetDirectDown && ((!NetSettling() && !ZRescueWant) || ZCheckForced)) {
                 bool forced = ZCheckForced; ZCheckForced = false;
                 var path = ZPhys();
                 if (path != null) {

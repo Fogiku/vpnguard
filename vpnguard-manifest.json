@@ -1,8 +1,8 @@
 {
-    "version":  "3.50.2",
-    "build":  "20261106-1619",
+    "version":  "3.51.0",
+    "build":  "20261106-1624",
     "notes":  "",
-    "date":  "2026-11-06T16:19:24.5636772+03:00",
+    "date":  "2026-11-06T16:24:12.7267050+03:00",
     "files":  [
                   {
                       "path":  "agent/Amnezia.cs",
@@ -21,8 +21,8 @@
                   },
                   {
                       "path":  "agent/ClientZapret.cs",
-                      "sha256":  "0055507efe97868c5fe10d5bcc6267edf2f8952097f12a62ef1b35ca715ba5c2",
-                      "size":  39267
+                      "sha256":  "e92df44bfd6c7204a84aabdb6a315ea368f2657846e5c81af40a69ae6af4b793",
+                      "size":  39439
                   },
                   {
                       "path":  "agent/Commands.cs",
@@ -76,8 +76,8 @@
                   },
                   {
                       "path":  "agent/Inet.cs",
-                      "sha256":  "24f328af30f6f374213f26dcab3c4b2eb828fabf1a89f0bfd73aed8a22d6baac",
-                      "size":  10588
+                      "sha256":  "3e37a6c90cce50773a96ec9baa5bed3490bda6e9ac3cfedbfb847526eeca146d",
+                      "size":  13394
                   },
                   {
                       "path":  "agent/Lan.cs",
@@ -156,8 +156,8 @@
                   },
                   {
                       "path":  "agent/Zapret.cs",
-                      "sha256":  "21618a27feabc3dc45a3201b71879c7e02ab7871f2863a807331f3fbc10b4e02",
-                      "size":  24694
+                      "sha256":  "33427b0c86c7069d1edbb2cfb6a2977f74f34bdbe233b69ac95b7520ddf3933b",
+                      "size":  24713
                   },
                   {
                       "path":  "agent/ZInstall.cs",
@@ -166,13 +166,13 @@
                   },
                   {
                       "path":  "agent/ZRoutes.cs",
-                      "sha256":  "1a57236844001249848a5fefc8208239f7b8dbe704a9af80c4151929a05e4d15",
-                      "size":  13246
+                      "sha256":  "9e96155eb840982956201e8f2d68ce6c9b3ff9dce974eb7b01cbb935fbc8faf2",
+                      "size":  13855
                   },
                   {
                       "path":  "agent/ZTest.cs",
-                      "sha256":  "c3ff1a1b3d2f2e3b7b0008a2b2d100dbeba2ad1224ccc47af6374cde75a79b36",
-                      "size":  22915
+                      "sha256":  "690cda46e78320d667845db411e88fb316103c7a85d8950c0a92dc2aeac8d549",
+                      "size":  22948
                   },
                   {
                       "path":  "agent/ZWinws.cs",
@@ -266,7 +266,7 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "d144c8ddfbc212a26a73a124bcb7f51c80b0b90fa68e3c6848462b260828d820",
+                      "sha256":  "8fa107a482f24308baefad57a8e593f26e71b8086998941b7cba68a014feae9a",
                       "size":  31379
                   },
                   {
@@ -281,8 +281,8 @@
                   },
                   {
                       "path":  "web/flow.js",
-                      "sha256":  "1487d8b1caad7f6aa2eda4c2ac40df48c8fdf91b6808e44505963cac62bef1b2",
-                      "size":  26724
+                      "sha256":  "6aa617c046534c1a37b02e84962739cfef6a7d33c6f98c130966a2cfbc266339",
+                      "size":  26888
                   },
                   {
                       "path":  "web/index.html",

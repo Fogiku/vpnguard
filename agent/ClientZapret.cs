@@ -86,6 +86,7 @@ namespace VpnGuard
         {
             string why = null;
             if (!CzWanted()) why = "off";
+            else if (InetDirectDown && !ZDirect()) why = "напрямую провайдер не пропускает — клиенты целиком через VPN";
             else if (CzPrefixes().Count == 0) why = ZDirect() ? "список адресов zapret ещё не готов" : "zapret не включён (нет маршрутов мимо VPN)";
             string wgIp = WgIp(); var phys = why == null ? ZPhys() : null;
             if (why == null && wgIp == null) why = "адаптер " + WgIf() + " без адреса";
