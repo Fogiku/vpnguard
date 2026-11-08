@@ -94,8 +94,74 @@ namespace VpnGuard
                 }
                 if (!found) return null;
                 var nic = byIdx[best.IfIndex]; var ip = Ipv4(nic.Name); if (ip == null) return null;
-                return new ZPath { IfIndex = best.IfIndex, Alias = nic.Name, Gateway = UIp(best.NextHop), Ip = ip };
+                var z = new ZPath { IfIndex = best.IfIndex, Alias = nic.Name, Gateway = UIp(best.NextHop), Ip = ip };
+                lock (PhysGwKnown) PhysGwKnown[nic.Id] = z.Gateway;
+                return z;
             } catch { return null; }
+        }
+
+        // ---------------------------------------------------------------- шлюз физического адаптера
+        // Некоторые VPN-клиенты (MeduzaVPN ULTRA) при подключении удаляют маршрут 0.0.0.0/0 у Ethernet/Wi-Fi и не всегда
+        // возвращают его. Тогда у ПК нет прямого выхода: zapret и раздача клиентам WG-Server не работают, проверка
+        // интернета видит «нет сети», а если туннель упадёт — он не переподключится (api VPN недоступен) и ПК остаётся
+        // без интернета совсем. Возвращаем маршрут сами — с метрикой 9999, чтобы VPN (свои 0.0.0.0/0 и /1) оставался главным.
+        static readonly Dictionary<string, string> PhysGwKnown = new Dictionary<string, string>();   // Id адаптера → последний шлюз
+        static DateTime PhysGwLogAt = DateTime.MinValue; static int PhysGwRepairs;
+        const int PhysGwMetric = 9999;
+        static void PhysGwRepair()
+        {
+            if (!CfgBool("net.restoreGateway", true)) return;
+            try {
+                if (ZPhys() != null) return;
+                var routes = RouteTable();
+                foreach (var n in AllNics().OrderBy(n => n.NetworkInterfaceType == NetworkInterfaceType.Ethernet ? 0 : 1)) {
+                    if (n.OperationalStatus != OperationalStatus.Up || IsTunnel(n.Name)) continue;
+                    if (n.NetworkInterfaceType == NetworkInterfaceType.Loopback || n.NetworkInterfaceType == NetworkInterfaceType.Tunnel) continue;
+                    IPv4InterfaceProperties p4; IPAddress ip = null, mask = null;
+                    try {
+                        var pr = n.GetIPProperties(); p4 = pr.GetIPv4Properties(); if (p4 == null) continue;
+                        foreach (var u in pr.UnicastAddresses)
+                            if (u.Address.AddressFamily == AddressFamily.InterNetwork && !u.Address.ToString().StartsWith("169.254.")) { ip = u.Address; mask = u.IPv4Mask; break; }
+                    } catch { continue; }
+                    if (ip == null || mask == null) continue;
+                    string gw = PhysGwCandidate(n, ip, mask); if (gw == null) continue;
+                    // маршрут уже есть (может, без шлюза в свойствах адаптера) — не дублируем
+                    if (routes.Any(r => r.Dest == 0 && r.Mask == 0 && r.IfIndex == p4.Index && UIp(r.NextHop) == gw)) return;
+                    var row = new MIB_IPFORWARDROW { Dest = 0, Mask = 0, NextHop = IpU(gw), IfIndex = p4.Index, Type = 4, Proto = 3, Metric1 = PhysGwMetric, Metric2 = uint.MaxValue, Metric3 = uint.MaxValue, Metric4 = uint.MaxValue, Metric5 = uint.MaxValue };
+                    int rc = CreateIpForwardEntry(ref row);
+                    bool ok = rc == 0 || rc == 5010;
+                    if (!ok) ok = Exe("route.exe", "ADD 0.0.0.0 MASK 0.0.0.0 " + gw + " METRIC " + PhysGwMetric + " IF " + p4.Index, 10).Code == 0;
+                    PhysGwRepairs++;
+                    if ((DateTime.Now - PhysGwLogAt).TotalMinutes >= 10 || !ok) {
+                        PhysGwLogAt = DateTime.Now;
+                        Log(ok ? "Сеть: у '" + n.Name + "' пропал маршрут в интернет (его убирает VPN-клиент) — вернул 0.0.0.0/0 через " + gw + " с метрикой " + PhysGwMetric + " (VPN остаётся главным; возвратов с запуска агента: " + PhysGwRepairs + ")"
+                               : "Сеть: у '" + n.Name + "' нет маршрута в интернет, вернуть через " + gw + " не удалось (код " + rc + ")", ok ? "WARN" : "ERROR");
+                    }
+                    return;
+                }
+            } catch { }
+        }
+        // шлюз адаптера, когда маршрута нет: из реестра (DHCP или вручную), иначе последний известный; только из его же подсети
+        static string PhysGwCandidate(NetworkInterface n, IPAddress ip, IPAddress mask)
+        {
+            var c = new List<string>();
+            try {
+                using (var k = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\" + n.Id)) {
+                    if (k != null) foreach (var name in new[] { "DefaultGateway", "DhcpDefaultGateway" }) {
+                        var v = k.GetValue(name);
+                        if (v is string[]) c.AddRange((string[])v); else if (v is string) c.Add((string)v);
+                    }
+                }
+            } catch { }
+            lock (PhysGwKnown) { string g; if (PhysGwKnown.TryGetValue(n.Id, out g)) c.Add(g); }
+            uint m = BitConverter.ToUInt32(mask.GetAddressBytes(), 0), me = BitConverter.ToUInt32(ip.GetAddressBytes(), 0);
+            foreach (var s in c) {
+                IPAddress a; if (string.IsNullOrWhiteSpace(s) || !IPAddress.TryParse(s.Trim(), out a) || a.AddressFamily != AddressFamily.InterNetwork) continue;
+                uint g = BitConverter.ToUInt32(a.GetAddressBytes(), 0);
+                if (g == 0 || g == me || (g & m) != (me & m)) continue;
+                return a.ToString();
+            }
+            return null;
         }
     }
 }

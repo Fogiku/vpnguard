@@ -395,6 +395,10 @@
    ]
   },
   {
+   "key": "net.restoreGateway",
+   "default": true
+  },
+  {
    "key": "remote.allowActions",
    "default": false
   },

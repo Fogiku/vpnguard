@@ -92,7 +92,8 @@ namespace VpnGuard
             foreach (var r in Cim("SELECT InterfaceIndex, InterfaceAlias, RouteMetric, NextHop FROM MSFT_NetRoute WHERE DestinationPrefix='0.0.0.0/0' AND AddressFamily=2")) {
                 string al = Convert.ToString(r["InterfaceAlias"]), nh = Convert.ToString(r["NextHop"]);
                 if (IsTunnel(al) || nh == "0.0.0.0") continue;
-                int m = Convert.ToInt32(r["RouteMetric"]) + Math.Max(0, IfMetric(Convert.ToInt32(r["InterfaceIndex"])));
+                if (Convert.ToInt32(r["RouteMetric"]) >= PhysGwMetric) continue;   // наш запасной маршрут (PhysGwRepair) — не ориентир для метрик
+                int m =Convert.ToInt32(r["RouteMetric"]) + Math.Max(0, IfMetric(Convert.ToInt32(r["InterfaceIndex"])));
                 if (m < best) best = m;
             }
             if (best != int.MaxValue) physM = best;

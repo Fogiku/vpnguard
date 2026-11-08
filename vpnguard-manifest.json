@@ -1,8 +1,8 @@
 {
-    "version":  "3.51.2",
-    "build":  "20261106-1717",
-    "notes":  "",
-    "date":  "2026-11-06T17:17:45.9156972+03:00",
+    "version":  "3.51.3",
+    "build":  "20261108-2347",
+    "notes":  "Сеть: агент возвращает маршрут 0.0.0.0/0 у Ethernet/Wi-Fi (метрика 9999), если его удалил VPN-клиент (MeduzaVPN ULTRA) — zapret, раздача и переподключение VPN снова работают",
+    "date":  "2026-11-08T23:47:21.2583589+03:00",
     "files":  [
                   {
                       "path":  "agent/Amnezia.cs",
@@ -61,8 +61,8 @@
                   },
                   {
                       "path":  "agent/Dual.cs",
-                      "sha256":  "aaca416b4b7d7165c55444eae5988fe75de32fbe39dff52adc7b5f977cabf08d",
-                      "size":  37179
+                      "sha256":  "5a8c2ae7b7daf346508e3ab171bd166c549b1a56f3dba3202cee55e29f720531",
+                      "size":  37364
                   },
                   {
                       "path":  "agent/Failover.cs",
@@ -76,8 +76,8 @@
                   },
                   {
                       "path":  "agent/Inet.cs",
-                      "sha256":  "8f5865c8b5128b5ec32467254622d87567ebd065556f11820d6a46f07686e4b4",
-                      "size":  13445
+                      "sha256":  "46f01a1cbe45d2fd9128eb17f5a22df5bfd098aa8b110ff5515f662712ba3f18",
+                      "size":  13473
                   },
                   {
                       "path":  "agent/Lan.cs",
@@ -101,8 +101,8 @@
                   },
                   {
                       "path":  "agent/Net.cs",
-                      "sha256":  "7fbc29ee68b145eccebb84896c599bd9f99105ade7ecc6da3823ac6925d28bc8",
-                      "size":  6711
+                      "sha256":  "9a108a9044020ee2db8bac947fdaac8d9caa61201b33b3e92c513690bf4eb9d8",
+                      "size":  12433
                   },
                   {
                       "path":  "agent/PsPart.cs",
@@ -186,8 +186,8 @@
                   },
                   {
                       "path":  "config-schema.txt",
-                      "sha256":  "733fc7c22c8d5c7f9fadb3d0071811baab3b709528f107c6fe7a3434427e1786",
-                      "size":  16749
+                      "sha256":  "34e242492c7f821115c869af6891b564c477d2362da2f1e48549bc5229a582c6",
+                      "size":  16813
                   },
                   {
                       "path":  "Diag.ps1",
@@ -266,7 +266,7 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "515f3289b5af96d543e2bb1ee9fd0592ac3c7d89cf58d74bcfbfd1a6faa06e3f",
+                      "sha256":  "b0b0e7edbf26ca0a71448603c018d551a21ba71fb8e8184c976d93cac2c0e3d6",
                       "size":  31379
                   },
                   {

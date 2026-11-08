@@ -78,6 +78,7 @@ namespace VpnGuard
         // все узлы — параллельно (хватит одного); запоминаем, какой ответил первым и сколько ответило
         static void InetCheck()
         {
+            PhysGwRepair();
             string why = null, via = PhysAlias(), gw = "", host = ""; long ms = -1; int okN = 0, total = 0;
             if (via.Length == 0) why = "нет подключения к сети (кабель, Wi-Fi или роутер)";
             else {
