@@ -57,7 +57,7 @@ namespace VpnGuard
         {
             try { var want = @"\\.\pipe\" + CfgStr("meduza.pipeName", "MeduzaVPN"); return Directory.GetFiles(@"\\.\pipe\").Any(f => string.Equals(f, want, StringComparison.OrdinalIgnoreCase)); } catch { return false; }
         }
-        static ExeResult MzCli(string args, int timeout) { if (!File.Exists(Cli())) return new ExeResult { Code = -2, Err = "CLI не найден" }; return Exe(Cli(), args, timeout); }
+        static ExeResult MzCli(string args, int timeout) { if (!File.Exists(Cli())) return new ExeResult { Code = -2, Err = "CLI не найден" }; return Exe(Cli(), args, timeout, new UTF8Encoding(false)); }
         static Process MzProc() { try { return Process.GetProcessesByName(CfgStr("meduza.processName", "medusa_vpn")).FirstOrDefault(); } catch { return null; } }
         static string MzProtocol() { return MzOverride.Length > 0 ? MzOverride : CfgStr("meduza.protocol", "ultra"); }
         static NetworkInterface MzAltUp() { try { return NetworkInterface.GetAllNetworkInterfaces().FirstOrDefault(n => n.Name.StartsWith("MeduzaVPN", StringComparison.OrdinalIgnoreCase) && n.OperationalStatus == OperationalStatus.Up); } catch { return null; } }

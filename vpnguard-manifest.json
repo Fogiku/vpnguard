@@ -1,8 +1,8 @@
 {
-    "version":  "3.51.3",
-    "build":  "20261108-2347",
-    "notes":  "Сеть: агент возвращает маршрут 0.0.0.0/0 у Ethernet/Wi-Fi (метрика 9999), если его удалил VPN-клиент (MeduzaVPN ULTRA) — zapret, раздача и переподключение VPN снова работают",
-    "date":  "2026-11-08T23:47:21.2583589+03:00",
+    "version":  "3.51.4",
+    "build":  "20261108-2356",
+    "notes":  "MeduzaVPN: сообщения meduzavpn (ошибки connect и др.) читаются в UTF-8 — без кракозябр в журнале и веб-интерфейсе",
+    "date":  "2026-11-08T23:56:54.2353979+03:00",
     "files":  [
                   {
                       "path":  "agent/Amnezia.cs",
@@ -36,8 +36,8 @@
                   },
                   {
                       "path":  "agent/Core.cs",
-                      "sha256":  "624bf9ff7de223aed976e9b8dead1314f9b3fd2b13cd28f26156a5f8ce029259",
-                      "size":  23382
+                      "sha256":  "4fcf27e3d9bccb23be1b24d7a45c1c99d4582df4227f8bdabc69aed9b768b6e0",
+                      "size":  23660
                   },
                   {
                       "path":  "agent/CzHosts.cs",
@@ -86,8 +86,8 @@
                   },
                   {
                       "path":  "agent/Meduza.cs",
-                      "sha256":  "ae052fbe566d38d15a506dfec8fbc996a010333ce971df937381dc56e4492069",
-                      "size":  27170
+                      "sha256":  "03deeef4b7372babca2ac565a6328c8f0e4bee1d6c3b37f23be5afd2725a62fd",
+                      "size":  27195
                   },
                   {
                       "path":  "agent/Mode.cs",
@@ -266,7 +266,7 @@
                   },
                   {
                       "path":  "VpnGuard.ps1",
-                      "sha256":  "b0b0e7edbf26ca0a71448603c018d551a21ba71fb8e8184c976d93cac2c0e3d6",
+                      "sha256":  "b5e309e9068aef200f0f14e2f3b6f99b88c328b414ce26a01b207ddafc229b0c",
                       "size":  31379
                   },
                   {

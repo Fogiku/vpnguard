@@ -229,11 +229,13 @@ namespace VpnGuard
 
         // ---------------------------------------------------------------- помощники: процессы, адаптеры, сеть
         class ExeResult { public int Code; public string Out = "", Err = ""; }
-        static ExeResult Exe(string file, string args, int timeoutSec)
+        // enc — кодировка вывода программы (null — как по умолчанию у Windows; meduzavpn пишет UTF-8)
+        static ExeResult Exe(string file, string args, int timeoutSec, Encoding enc = null)
         {
             var r = new ExeResult();
             try {
                 var psi = new ProcessStartInfo(file, args) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+                if (enc != null) { psi.StandardOutputEncoding = enc; psi.StandardErrorEncoding = enc; }
                 using (var p = Process.Start(psi)) {
                     var o = p.StandardOutput.ReadToEndAsync(); var e = p.StandardError.ReadToEndAsync();
                     if (!p.WaitForExit(timeoutSec * 1000)) { try { p.Kill(); } catch { } r.Code = -1; r.Err = "таймаут " + timeoutSec + " с"; return r; }
